@@ -322,6 +322,13 @@ def _intent_target(base: dict, intent: AcqIntent | None) -> tuple[str | None, st
 def result(conn: Connection, p: AcquisitionPayload, step: str, *, layers, as_of,
            exclude=(), full: bool = False) -> dict:
     """One flow step. Teasers (full=False) never include the paths themselves."""
+    if step == "teaser":
+        # Before login: proof that the answer exists (how many, how many directions), no answer.
+        if p.is_professional:
+            out, _ = professional_next_roles(conn, p, layers=layers, as_of=as_of, exclude=exclude)
+        else:
+            out, _ = student_first_roles(conn, p, layers=layers, as_of=as_of, exclude=exclude)
+        return {"step": step, "base": _summary(out), "n_directions": out["n_directions"]}
     if step == "first_roles":
         out, _ = student_first_roles(conn, p, layers=layers, as_of=as_of, exclude=exclude)
         return {"step": step, "result": out}
@@ -497,43 +504,67 @@ def write_acquisition_profile(conn: Connection, account_id: str, p: AcquisitionP
     if p.current_job:
         jobs.append((p.current_job, True))
     for j, current in jobs:
-        if j.role_node_id not in roles.nodes:
-            raise QueryInvalid(f"unknown role node {j.role_node_id}")
-        org = None
-        if j.organization_id:
-            org = conn.execute(text(
-                "SELECT organization_id::text AS id, name FROM organization "
-                "WHERE organization_id::text = :o"), {"o": j.organization_id}).first()
-        fields = ["event_type", "role", "start_date", "is_current"]
-        if org or j.organization_name:
-            fields.append("organization")
-        if j.end_year and not current:
-            fields.append("end_date")
-        weid = conn.execute(text(
-            """INSERT INTO work_event (person_id, event_type, organization_raw, organization_id,
-                   role_raw, role_taxonomy_node_id, start_date, start_date_precision, end_date,
-                   end_date_precision, is_current, data_layer, verification_level,
-                   normalization_status, last_verified_at)
-               VALUES (:p, 'EMPLOYMENT', :or, CAST(:oid AS uuid), :rr, CAST(:r AS uuid), :sd,
-                       'YEAR', :ed, :ep, :cur, 'VERIFIED', 'SELF_REPORTED', :ns, now())
-               RETURNING work_event_id::text"""),
-            {"p": person_id, "or": j.organization_name or (org and org.name),
-             "oid": org and org.id, "rr": j.role_raw or roles.nodes[j.role_node_id]["label"],
-             "r": j.role_node_id, "sd": date(j.start_year, 1, 1),
-             "ed": date(j.end_year, 1, 1) if (j.end_year and not current) else None,
-             "ep": "YEAR" if (j.end_year and not current) else None, "cur": current,
-             "ns": "MAPPED" if (org or not j.organization_name) else "PARTIAL"}).scalar_one()
-        conn.execute(text(
-            """INSERT INTO work_event_source (work_event_id, source_id, supported_fields,
-                   is_primary) VALUES (:w, :s, :f, true)"""),
-            {"w": weid, "s": source_id, "f": fields})
-        _log(conn, "WORK_EVENT", weid, account_id, source_id, fields)
+        weid = _write_job(conn, person_id, account_id, source_id, j, current, roles)
         out["work_event_ids"].append(weid)
         if current:
             out["current_work_event_ids"].append(weid)
 
     out["intent_event_ids"] = record_intents(conn, person_id, p, draft_id)
     return out
+
+
+def _write_job(conn: Connection, person_id: str, account_id: str, source_id: str, j: AcqJob,
+               current: bool, roles: Taxonomy) -> str:
+    if j.role_node_id not in roles.nodes:
+        raise QueryInvalid(f"unknown role node {j.role_node_id}")
+    org = None
+    if j.organization_id:
+        org = conn.execute(text(
+            "SELECT organization_id::text AS id, name FROM organization "
+            "WHERE organization_id::text = :o"), {"o": j.organization_id}).first()
+    fields = ["event_type", "role", "start_date", "is_current"]
+    if org or j.organization_name:
+        fields.append("organization")
+    if j.end_year and not current:
+        fields.append("end_date")
+    weid = conn.execute(text(
+        """INSERT INTO work_event (person_id, event_type, organization_raw, organization_id,
+               role_raw, role_taxonomy_node_id, start_date, start_date_precision, end_date,
+               end_date_precision, is_current, data_layer, verification_level,
+               normalization_status, last_verified_at)
+           VALUES (:p, 'EMPLOYMENT', :or, CAST(:oid AS uuid), :rr, CAST(:r AS uuid), :sd,
+                   'YEAR', :ed, :ep, :cur, 'VERIFIED', 'SELF_REPORTED', :ns, now())
+           RETURNING work_event_id::text"""),
+        {"p": person_id, "or": j.organization_name or (org and org.name),
+         "oid": org and org.id, "rr": j.role_raw or roles.nodes[j.role_node_id]["label"],
+         "r": j.role_node_id, "sd": date(j.start_year, 1, 1),
+         "ed": date(j.end_year, 1, 1) if (j.end_year and not current) else None,
+         "ep": "YEAR" if (j.end_year and not current) else None, "cur": current,
+         "ns": "MAPPED" if (org or not j.organization_name) else "PARTIAL"}).scalar_one()
+    conn.execute(text(
+        """INSERT INTO work_event_source (work_event_id, source_id, supported_fields,
+               is_primary) VALUES (:w, :s, :f, true)"""),
+        {"w": weid, "s": source_id, "f": fields})
+    _log(conn, "WORK_EVENT", weid, account_id, source_id, fields)
+    return weid
+
+
+def add_member_job(conn: Connection, account_id: str, person_id: str, j: AcqJob,
+                   idempotency_key: str) -> dict:
+    """A past job added after login (professional flow, P3). One source record per request,
+    so a replayed request writes nothing twice."""
+    source_key = f"member:{account_id}:{idempotency_key}"
+    source_id = conn.execute(text(
+        """INSERT INTO source_record (source_type, data_layer, source_system, source_key,
+               raw_payload, legal_basis)
+           VALUES ('MANUAL_INPUT', 'VERIFIED', 'HELLOMYME_APP', :k, CAST(:raw AS jsonb),
+                   'MEMBER_CONSENT')
+           ON CONFLICT (source_system, source_key) DO NOTHING RETURNING source_id::text"""),
+        {"k": source_key, "raw": j.model_dump_json()}).scalar()
+    if source_id is None:
+        return {"replayed": True, "work_event_id": None}
+    weid = _write_job(conn, person_id, account_id, source_id, j, False, load_taxonomy(conn, "ROLE"))
+    return {"replayed": False, "work_event_id": weid}
 
 
 def record_intents(conn: Connection, person_id: str, p: AcquisitionPayload,

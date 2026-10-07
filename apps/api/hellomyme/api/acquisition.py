@@ -13,7 +13,9 @@ from hellomyme.domain.career_query import QueryInvalid
 from hellomyme.domain.policies import PolicyMissing, active_unlock_policy
 
 router = APIRouter(prefix="/acq", tags=["acquisition"])
-Step = Literal["first_roles", "next_roles", "similar_paths", "intent_paths"]
+# Before login only the teaser is served; every distribution needs a member (login first).
+AnonStep = Literal["teaser"]
+MemberStep = Literal["first_roles", "next_roles", "similar_paths"]
 DEEP_DIVE = "PATH_DEEP_DIVE"
 
 
@@ -71,7 +73,7 @@ def save_draft(body: DraftRequest, conn: Conn, settings: AppSettings, anon: Anon
 
 
 class ResultRequest(BaseModel):
-    step: Step
+    step: AnonStep = "teaser"
 
 
 @router.post("/draft/{draft_id}/result")
@@ -86,7 +88,7 @@ def draft_result(draft_id: str, body: ResultRequest, conn: Conn, settings: AppSe
     payload = acq.AcquisitionPayload.model_validate(row.payload_json)
     out = _run(lambda: acq.result(conn, payload, body.step,
                                   layers=settings.career_map_data_layers, as_of=as_of))
-    return {**out, "data_basis": _basis(settings), "locked": body.step == "intent_paths"}
+    return {**out, "data_basis": _basis(settings), "locked": True}
 
 
 # --- after login ----------------------------------------------------------------------------
@@ -151,6 +153,31 @@ def unlock_deep_dive(conn: Conn, settings: AppSettings, account_id: Account,
         raise HTTPException(503, "unlock is not available right now") from exc
     return {"unlocked": True, **grant, "content": p["deep_dive"],
             "balance_tube": ledger.balance(conn, account_id), "data_basis": _basis(settings)}
+
+
+@router.get("/me/step/{step}")
+def my_step(step: MemberStep, conn: Conn, settings: AppSettings, account_id: Account, as_of: AsOf):
+    person_id, payload = _member(conn, account_id, as_of)
+    out = _run(lambda: acq.result(conn, payload, step, layers=settings.career_map_data_layers,
+                                  as_of=as_of, exclude=(person_id,)))
+    return {**out, "data_basis": _basis(settings)}
+
+
+class JobRequest(BaseModel):
+    job: acq.AcqJob
+
+
+@router.post("/me/jobs")
+def add_job(body: JobRequest, conn: Conn, account_id: Account, key: IdempotencyKey, as_of: AsOf):
+    """Professional flow P3: the first job, added after login (no re-entry of anything else)."""
+    person_id, _ = _member(conn, account_id, as_of)
+    written = _run(lambda: acq.add_member_job(conn, account_id, person_id, body.job, key))
+    reward = None
+    if written["work_event_id"]:
+        r = ledger.grant_reward(conn, account_id, "PREVIOUS_CAREER_ADDED", "WORK_EVENT",
+                                written["work_event_id"])
+        reward = r and {"ledger_id": r.ledger_id, "amount": r.amount}
+    return {**written, "reward": reward}
 
 
 class IntentRequest(BaseModel):

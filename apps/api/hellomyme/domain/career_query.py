@@ -441,5 +441,7 @@ def evaluate_with_filters(conn: Connection, q: CareerQuery, *,
         "min_cell_n": min_cell, "suppressed": suppressed,
         "cells": cells, "other": None if suppressed else other,
         "unknown_n": None if suppressed else unknown_n,
+        # How many distinct directions the cohort split into (a count of categories only).
+        "n_directions": None if suppressed else sum(1 for k in counts if k != STAYED),
         "data_layers": layers,
     }, effective
