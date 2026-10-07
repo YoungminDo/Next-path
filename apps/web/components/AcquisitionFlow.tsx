@@ -101,6 +101,10 @@ export default function AcquisitionFlow() {
       })
       .catch(() => setError("서비스를 준비하고 있어요. 잠시 후 새로고침해 주세요."));
     const params = new URLSearchParams(window.location.search);
+    // Landing CTAs link to /start?type=student|pro and skip the first question.
+    const type = params.get("type");
+    if (type === "student") setScreen("s_edu");
+    if (type === "pro") { setUserType("PROFESSIONAL"); setScreen("p_now"); }
     const loginError = params.get("login_error");
     const loggedIn = params.get("login") === "success";
     if (loginError || loggedIn) window.history.replaceState(null, "", window.location.pathname);
@@ -225,7 +229,7 @@ export default function AcquisitionFlow() {
       <header className="top">
         {back[screen] ? (
           <button className="link" onClick={() => setScreen(back[screen]!)} aria-label="뒤로">←</button>
-        ) : <span className="brand">nextpath</span>}
+        ) : <a className="brand" href="/">nextpath</a>}
         {simulation && <span className="badge sim">SIMULATION · 테스트 데이터</span>}
       </header>
       {error && <p className="error" role="alert">{error}</p>}

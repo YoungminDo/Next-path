@@ -16,7 +16,7 @@ import {
  * our own opaque session cookie. On failure HMM ID appends `?error=<reason>`.
  */
 export async function GET(req: NextRequest) {
-  const home = new URL("/", appOrigin(req.nextUrl.origin));
+  const home = new URL("/start", appOrigin(req.nextUrl.origin));
   const fail = (reason: string) => {
     home.searchParams.set("login_error", reason);
     const res = NextResponse.redirect(home);

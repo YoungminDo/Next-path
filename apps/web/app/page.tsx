@@ -1,5 +1,5 @@
-import AcquisitionFlow from "@/components/AcquisitionFlow";
+import Landing from "@/components/landing/Landing";
 
 export default function Home() {
-  return <AcquisitionFlow />;
+  return <Landing />;
 }
