@@ -87,7 +87,7 @@ export default function AcquisitionFlow() {
     setError(undefined);
     setBusy(true);
     fn()
-      .catch((e) => setError(e instanceof ApiError ? friendly(e) : String(e)))
+      .catch((e) => setError(e instanceof ApiError ? friendly(e) : "연결이 불안정해요. 잠시 후 다시 시도해 주세요."))
       .finally(() => setBusy(false));
   };
 
@@ -99,7 +99,7 @@ export default function AcquisitionFlow() {
         setRoles(r);
         setMiddleRoles(r2);
       })
-      .catch((e) => setError(String(e)));
+      .catch(() => setError("서비스를 준비하고 있어요. 잠시 후 새로고침해 주세요."));
     const params = new URLSearchParams(window.location.search);
     const loginError = params.get("login_error");
     const loggedIn = params.get("login") === "success";
