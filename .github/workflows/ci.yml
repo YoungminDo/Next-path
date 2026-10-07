@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "claude/**"]
+  pull_request:
+
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/api
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: hellomyme
+          POSTGRES_PASSWORD: hellomyme
+          POSTGRES_DB: hellomyme_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U hellomyme" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    env:
+      HELLOMYME_DATABASE_URL: postgresql+psycopg://hellomyme:hellomyme@localhost:5432/hellomyme_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --locked
+      - name: Lint
+        run: uv run ruff check .
+      - name: Migration round trip (up -> down -> up)
+        run: |
+          uv run alembic upgrade head
+          uv run alembic downgrade base
+          uv run alembic upgrade head
+      - name: Tests
+        run: uv run pytest
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
