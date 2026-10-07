@@ -35,11 +35,12 @@ def login(conn: Connection, identity: ProviderIdentity, ttl_hours: int) -> dict:
     else:
         account_id = row.account_id
     token = secrets.token_urlsafe(32)
-    conn.execute(text(
+    expires_at = conn.execute(text(
         "INSERT INTO auth_session (account_id, token_hash, expires_at) "
-        "VALUES (:a, :h, now() + :ttl)"),
-        {"a": account_id, "h": token_hash(token), "ttl": timedelta(hours=ttl_hours)})
-    return {"account_id": account_id, "session_token": token, "is_new_account": is_new}
+        "VALUES (:a, :h, now() + :ttl) RETURNING expires_at"),
+        {"a": account_id, "h": token_hash(token), "ttl": timedelta(hours=ttl_hours)}).scalar_one()
+    return {"account_id": account_id, "session_token": token, "is_new_account": is_new,
+            "expires_at": expires_at.isoformat()}
 
 
 def account_for_token(conn: Connection, token: str) -> str | None:

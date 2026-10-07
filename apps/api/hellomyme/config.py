@@ -17,12 +17,14 @@ class Settings(BaseSettings):
     career_map_data_layers: list[str] = ["PRE_SEED", "SEED", "VERIFIED"]
 
     # Login providers enabled for this environment. DEV is a test-only provider.
+    # Kakao login goes through HMM ID (the company IdP), never directly to Kakao.
     auth_providers: list[str] = ["DEV"]
-    kakao_user_info_url: str = "https://kapi.kakao.com/v2/user/me"
+    hmm_id_base_url: str = "https://id.da-sh.io"
+    hmm_id_timeout_seconds: float = 5.0
     google_tokeninfo_url: str = "https://oauth2.googleapis.com/tokeninfo"
     google_client_id: str | None = None
 
-    cors_origins: list[str] = ["http://localhost:3000"]
+    cors_origins: list[str] = ["http://localhost:3001"]
 
     session_ttl_hours: int = 24 * 30
     anonymous_draft_ttl_hours: int = 24 * 7
@@ -37,6 +39,8 @@ class Settings(BaseSettings):
                 raise ValueError("PRE_SEED must never feed production Career Map statistics")
             if "DEV" in self.auth_providers:
                 raise ValueError("DEV auth provider is not allowed in production")
+            if "HMM_ID" in self.auth_providers and not self.hmm_id_base_url.startswith("https://"):
+                raise ValueError("HMM ID must be reached over HTTPS in production")
         return self
 
     @property

@@ -67,7 +67,11 @@ def load_draft(conn: Connection, draft_id: str, anonymous_session: str | None = 
     return row
 
 
-def merge_draft(conn: Connection, account_id: str, draft_id: str, anonymous_session: str) -> dict:
+CAREER_CONSENTS = ("PRIVACY_PROCESSING", "CAREER_DATA_AGGREGATION")
+
+
+def merge_draft(conn: Connection, account_id: str, draft_id: str, anonymous_session: str,
+                consent_policy_version: str) -> dict:
     row = load_draft(conn, draft_id, anonymous_session, for_update=True)
     if row.claimed_account_id:
         if row.claimed_account_id != account_id:
@@ -77,6 +81,13 @@ def merge_draft(conn: Connection, account_id: str, draft_id: str, anonymous_sess
         raise DraftNotFound(draft_id)
     if member_person_id(conn, account_id):
         raise DraftConflict("account already has a career profile; edit it instead")
+
+    for consent_type in CAREER_CONSENTS:
+        conn.execute(text(
+            """INSERT INTO data_consent (account_id, consent_type, policy_version, status, scope)
+               VALUES (:a, :t, :v, 'GRANTED', CAST(:scope AS jsonb))"""),
+            {"a": account_id, "t": consent_type, "v": consent_policy_version,
+             "scope": json.dumps({"granted_at_step": "merge_draft", "draft_id": draft_id})})
 
     payload = CareerDraftPayload.model_validate(row.payload_json)
     norm = normalize(conn, payload)

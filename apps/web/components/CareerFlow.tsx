@@ -2,7 +2,15 @@
 
 import { useEffect, useState } from "react";
 
-import { api, type CareerMap, type Distribution, type Teaser, type TaxonomyItem } from "@/lib/api";
+import {
+  api,
+  ApiError,
+  pending,
+  type CareerMap,
+  type Distribution,
+  type Teaser,
+  type TaxonomyItem,
+} from "@/lib/api";
 
 type UserType = "STUDENT" | "JOB_SEEKER" | "PROFESSIONAL";
 type Step = "type" | "input" | "teaser" | "map";
@@ -13,7 +21,13 @@ const INSIGHT_LABELS: Record<string, string> = {
   REPRESENTATIVE_PATHS: "대표 경로 열어보기",
   TIMING_TENURE: "언제 움직였는지 열어보기",
 };
+const LOGIN_ERRORS: Record<string, string> = {
+  kakao_denied: "카카오 로그인이 취소됐어요.",
+  no_hmm_session: "로그인 정보를 받지 못했어요. 다시 시도해 주세요.",
+  hmm_token_rejected: "로그인이 만료됐어요. 다시 시도해 주세요.",
+};
 const DEV_LOGIN = process.env.NEXT_PUBLIC_ENABLE_DEV_LOGIN === "true";
+const CONSENT_VERSION = process.env.NEXT_PUBLIC_CONSENT_POLICY_VERSION ?? "career_terms_v1";
 
 export default function CareerFlow() {
   const [step, setStep] = useState<Step>("type");
@@ -24,11 +38,43 @@ export default function CareerFlow() {
   const [form, setForm] = useState({ institution: "", major: "", year: "", role: "", start: "" });
   const [draftId, setDraftId] = useState<string>();
   const [teaser, setTeaser] = useState<Teaser>();
-  const [token, setToken] = useState<string>();
+  const [consent, setConsent] = useState(false);
   const [map, setMap] = useState<CareerMap>();
   const [balance, setBalance] = useState<number>();
   const [insight, setInsight] = useState<Record<string, unknown>>();
   const [error, setError] = useState<string>();
+
+  const run = (fn: () => Promise<void>) => () => {
+    setError(undefined);
+    fn().catch((e) => setError(String(e)));
+  };
+
+  async function showMap() {
+    setMap(await api.careerMap());
+    setBalance((await api.credits()).balance_tube);
+    setStep("map");
+  }
+
+  /** After login (HMM ID redirect or dev login): merge the saved draft, then open the map. */
+  async function finishLogin() {
+    const savedDraft = pending.draftId();
+    const consentVersion = pending.consentVersion();
+    if (savedDraft && consentVersion) {
+      await api.mergeDraft(savedDraft, consentVersion);
+      pending.draftId(null);
+      pending.consentVersion(null);
+    }
+    try {
+      await showMap();
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 404) {
+        setError("아직 저장된 경력이 없어요. 먼저 입력해 주세요.");
+        setStep("type");
+      } else {
+        throw e;
+      }
+    }
+  }
 
   useEffect(() => {
     Promise.all([api.taxonomy("institutions"), api.taxonomy("majors"), api.taxonomy("roles")])
@@ -38,12 +84,15 @@ export default function CareerFlow() {
         setRoles(r);
       })
       .catch((e) => setError(String(e)));
-  }, []);
 
-  const run = (fn: () => Promise<void>) => () => {
-    setError(undefined);
-    fn().catch((e) => setError(String(e)));
-  };
+    const params = new URLSearchParams(window.location.search);
+    const loginError = params.get("login_error");
+    const loggedIn = params.get("login") === "success";
+    if (loginError || loggedIn) window.history.replaceState(null, "", window.location.pathname);
+    if (loginError) setError(LOGIN_ERRORS[loginError] ?? `로그인에 실패했어요 (${loginError}).`);
+    if (loggedIn) finishLogin().catch((e) => setError(String(e)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const submitDraft = run(async () => {
     const events =
@@ -65,23 +114,29 @@ export default function CareerFlow() {
     setStep("teaser");
   });
 
-  const devLogin = run(async () => {
+  /** Remember what to merge, because the HMM ID login leaves this page. */
+  function rememberDraft() {
     if (!draftId) return;
-    const session = await api.login("DEV", `dev:${crypto.randomUUID()}`);
-    await api.mergeDraft(session.session_token, draftId);
-    setToken(session.session_token);
-    setMap(await api.careerMap(session.session_token));
-    setBalance((await api.credits(session.session_token)).balance_tube);
-    setStep("map");
+    pending.draftId(draftId);
+    pending.consentVersion(CONSENT_VERSION);
+  }
+
+  const kakaoLogin = () => {
+    rememberDraft();
+    window.location.href = "/auth/hmm/start";
+  };
+
+  const devLogin = run(async () => {
+    rememberDraft();
+    await api.devLogin();
+    await finishLogin();
   });
 
   const unlock = (type: string) =>
     run(async () => {
-      if (!token) return;
-      const res = await api.unlock(token, type);
+      const res = await api.unlock(type);
       setInsight(res.insight);
-      setBalance((await api.credits(token)).balance_tube);
-      setMap(await api.careerMap(token));
+      await showMap();
     })();
 
   return (
@@ -148,10 +203,19 @@ export default function CareerFlow() {
             <p>아직 비교할 수 있는 사람이 충분하지 않아요.</p>
           )}
           <p className="muted">입력한 내용은 저장돼 있어요. 로그인하면 바로 이어서 볼 수 있어요.</p>
+          <label className="consent">
+            <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
+            입력한 학교·경력 정보를 HMM 계정과 연결해 Career Map 제공에 사용하는 것에 동의해요.
+          </label>
           <div className="row">
-            <button disabled title="Kakao 로그인 연동 예정">카카오로 계속하기</button>
-            <button disabled title="Google 로그인 연동 예정">Google로 계속하기</button>
-            {DEV_LOGIN && <button className="primary" onClick={devLogin}>개발용 로그인</button>}
+            <button className="kakao" disabled={!consent} onClick={kakaoLogin}>
+              카카오로 계속하기
+            </button>
+            {DEV_LOGIN && (
+              <button disabled={!consent} onClick={devLogin}>
+                개발용 로그인
+              </button>
+            )}
           </div>
         </section>
       )}

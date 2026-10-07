@@ -19,13 +19,18 @@ make migrate
 make import-preseed CSV_DIR=/path/to/HELLOMYME_PreSeed_CSV_v1.2 VERSION=v1.2 AS_OF=2026-10-07
 make api                    # http://localhost:8000/docs
 cd apps/web && cp .env.example .env.local && npm install && cd ../..
-make web                    # http://localhost:3000
+make web                    # http://localhost:3001 (hmm-id dev server uses :3000)
 make test
 ```
 
 The pre-seed package is not committed. It is generated data for development, UX and engine
 testing only: the app labels results built on it as `SIMULATION`, and refuses to start in
 `production` if `PRE_SEED` is configured as a Career Map data layer.
+
+## Login: Kakao through HMM ID
+
+Kakao login is delegated to HMM ID (`id.da-sh.io`, repo `hmm-id`), the company identity
+provider. See [docs/02_HMM_ID_INTEGRATION.md](docs/02_HMM_ID_INTEGRATION.md).
 
 ## Core rules enforced in code
 

@@ -1,7 +1,9 @@
-"""Login provider abstraction. Kakao + Google first; Apple can be added as another adapter.
+"""Login provider abstraction.
 
-Each adapter turns a client-obtained provider token into a stable provider subject. Provider
-tokens are verified server-side and never stored.
+Kakao login is delegated to HMM ID (id.da-sh.io), the company identity provider: HMM ID runs
+the Kakao OAuth flow and issues a `dash-access-token`; we verify that token server-side with
+`GET /api/v1/auth/me` (backend-only docking, see hmm-id docs/docking-protocol.md). Google and
+Apple can be added as further adapters. Provider tokens are verified and never stored.
 """
 from __future__ import annotations
 
@@ -14,7 +16,11 @@ from hellomyme.config import Settings
 
 
 class AuthError(Exception):
-    pass
+    """The token was rejected: the user must sign in again."""
+
+
+class AuthUnavailable(Exception):
+    """The identity provider could not answer: retry later, never treat as logged in."""
 
 
 @dataclass(frozen=True)
@@ -29,18 +35,29 @@ class AuthProvider(Protocol):
     def verify(self, token: str) -> ProviderIdentity: ...
 
 
-class KakaoProvider:
-    name = "KAKAO"
+class HmmIdProvider:
+    name = "HMM_ID"
 
     def __init__(self, settings: Settings, client: httpx.Client | None = None):
-        self.url = settings.kakao_user_info_url
-        self.client = client or httpx.Client(timeout=5)
+        self.url = settings.hmm_id_base_url.rstrip("/") + "/api/v1/auth/me"
+        self.client = client or httpx.Client(timeout=settings.hmm_id_timeout_seconds)
 
     def verify(self, token: str) -> ProviderIdentity:
-        resp = self.client.get(self.url, headers={"Authorization": f"Bearer {token}"})
-        if resp.status_code != 200 or "id" not in resp.json():
-            raise AuthError("kakao token rejected")
-        return ProviderIdentity(self.name, str(resp.json()["id"]))
+        try:
+            resp = self.client.get(self.url, headers={"Authorization": f"Bearer {token}",
+                                                      "Cache-Control": "no-store"})
+        except httpx.HTTPError as exc:
+            raise AuthUnavailable("HMM ID unreachable") from exc
+        if resp.status_code in (401, 403, 404):
+            raise AuthError("HMM ID token rejected")
+        if resp.status_code != 200:
+            raise AuthUnavailable(f"HMM ID returned {resp.status_code}")
+        subject = resp.json().get("id")
+        if not subject:
+            raise AuthUnavailable("HMM ID response without user id")
+        # dash_user_id (e.g. "kakao_12345") is the stable subject shared by every DA-SH SP.
+        # Email/name/phone are not copied: the career service does not need them.
+        return ProviderIdentity(self.name, str(subject))
 
 
 class GoogleProvider:
@@ -54,7 +71,10 @@ class GoogleProvider:
     def verify(self, token: str) -> ProviderIdentity:
         if not self.client_id:
             raise AuthError("google login is not configured")
-        resp = self.client.get(self.url, params={"id_token": token})
+        try:
+            resp = self.client.get(self.url, params={"id_token": token})
+        except httpx.HTTPError as exc:
+            raise AuthUnavailable("google unreachable") from exc
         data = resp.json() if resp.status_code == 200 else {}
         if data.get("aud") != self.client_id or not data.get("sub"):
             raise AuthError("google token rejected")
@@ -75,8 +95,8 @@ class DevProvider:
 def get_provider(name: str, settings: Settings) -> AuthProvider:
     if name not in settings.auth_providers:
         raise AuthError(f"provider {name} is not enabled")
-    factories = {"KAKAO": lambda: KakaoProvider(settings), "GOOGLE": lambda: GoogleProvider(settings),
-                 "DEV": DevProvider}
+    factories = {"HMM_ID": lambda: HmmIdProvider(settings),
+                 "GOOGLE": lambda: GoogleProvider(settings), "DEV": DevProvider}
     if name not in factories:
         raise AuthError(f"provider {name} is not supported yet")
     return factories[name]()

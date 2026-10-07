@@ -47,7 +47,9 @@ def onboard(client, subject: str):
     draft = client.post("/career/draft", headers=anon,
                         json={"payload": draft_payload(client)}).json()
     auth = login(client, subject)
-    merged = client.post("/auth/merge-draft", json={"draft_id": draft["draft_id"]},
+    merged = client.post("/auth/merge-draft",
+                         json={"draft_id": draft["draft_id"],
+                               "consent_policy_version": "career_terms_v1"},
                          headers={**auth, **anon, "Idempotency-Key": uuid.uuid4().hex})
     assert merged.status_code == 200, merged.text
     return auth, anon, draft["draft_id"], merged.json()
@@ -72,7 +74,8 @@ def test_login_wall_merge_is_idempotent_and_rewards_once(client, engine):
     auth, anon, draft_id, first = onboard(client, "merge-user")
     assert first["merged"] is True
     assert sum(r["amount"] for r in first["rewards"]) > 0
-    again = client.post("/auth/merge-draft", json={"draft_id": draft_id},
+    again = client.post("/auth/merge-draft",
+                        json={"draft_id": draft_id, "consent_policy_version": "career_terms_v1"},
                         headers={**auth, **anon, "Idempotency-Key": uuid.uuid4().hex}).json()
     assert again == {"person_id": first["person_id"], "merged": False, "rewards": []}
 
@@ -91,6 +94,12 @@ def test_login_wall_merge_is_idempotent_and_rewards_once(client, engine):
             "SELECT count(*) FROM credit_ledger l JOIN account_identity i USING (account_id) "
             "WHERE i.provider_subject = 'merge-user' AND l.reason_type = 'REWARD'")).scalar()
     assert person == "VERIFIED"
+    with engine.begin() as conn:
+        consents = conn.execute(text(
+            """SELECT consent_type FROM data_consent c JOIN account_identity i USING (account_id)
+               WHERE i.provider_subject = 'merge-user' ORDER BY 1""")).scalars().all()
+    # consent recorded once, at the merge that actually combined identity with career data
+    assert consents == ["CAREER_DATA_AGGREGATION", "PRIVACY_PROCESSING"]
     assert [e.verification_level for e in events] == ["SELF_REPORTED", "SELF_REPORTED"]
     # Unknown company kept as raw text, not invented or forced into the taxonomy.
     assert events[1].normalization_status == "PARTIAL"
