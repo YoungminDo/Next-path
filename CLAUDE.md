@@ -5,7 +5,8 @@ Career Decision Network: input school/major/career → "what did similar people 
 Will later merge into Hello My Me. Read `docs/` before large changes:
 `00_ARCHITECTURE_REVIEW.md` (original review), `01_PRESEED_V12_VALIDATION_AND_MIGRATIONS.md`
 (validation, migration list, decision log), `02_HMM_ID_INTEGRATION.md` (login),
-`03_DEPLOYMENT.md` (deploy status and steps).
+`03_DEPLOYMENT.md` (deploy status and steps), `07_SERVICE_DESIGN.html` (service design),
+`08_DATA_MOAT.md` (which source data is the moat; migration 0019).
 
 ## Layout & commands
 - `apps/api` — FastAPI + PostgreSQL 16, raw-SQL Alembic migrations (`migrations/versions`), pytest.
