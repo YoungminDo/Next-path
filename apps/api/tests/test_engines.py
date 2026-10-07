@@ -147,3 +147,11 @@ def test_production_refuses_preseed_and_dev_login():
     ok = Settings(env="production", career_map_data_layers=["SEED", "VERIFIED"],
                   auth_providers=["KAKAO", "GOOGLE"])
     assert not ok.is_simulation
+
+
+def test_database_url_accepts_provider_format():
+    plain = "postgresql://postgres.ref:pw@aws-0-ap-northeast-2.pooler.supabase.com:5432/postgres"
+    assert Settings(database_url=plain).database_url.startswith("postgresql+psycopg://postgres.ref:")
+    assert Settings(database_url="postgres://u:p@h/db\n").database_url == "postgresql+psycopg://u:p@h/db"
+    explicit = "postgresql+psycopg://u:p@h/db?sslmode=require"
+    assert Settings(database_url=explicit).database_url == explicit

@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DATA_LAYERS = ("PRE_SEED", "SEED", "VERIFIED")
@@ -28,6 +28,17 @@ class Settings(BaseSettings):
 
     session_ttl_hours: int = 24 * 30
     anonymous_draft_ttl_hours: int = 24 * 7
+
+    @field_validator("database_url")
+    @classmethod
+    def _psycopg_driver(cls, value: str) -> str:
+        """Accept URLs exactly as Supabase/Render/Heroku print them (postgres:// or
+        postgresql://) and select the psycopg 3 driver this app ships with."""
+        value = value.strip()
+        for prefix in ("postgresql://", "postgres://"):
+            if value.startswith(prefix):
+                return "postgresql+psycopg://" + value[len(prefix):]
+        return value
 
     @model_validator(mode="after")
     def _guard_production(self) -> "Settings":
