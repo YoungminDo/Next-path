@@ -255,9 +255,9 @@ first-employment derivation (count derived vs reported vs none; internships excl
 integrity (as v1.2) · 1/3/5/10Y query viability (cohort sizes per window) · acquisition
 middle-level ROLE cohort sizes per school+major (min/median, share ≥30).
 
-## 14. Open item before implementation
+## 14. Decision — Pre-seed v1.3 and taxonomy content
 
-The master prompt both forbids generating pre-seed data (v1.0–v1.3 text) and asks for Pre-seed
-to be "regenerated/extended to v1.3" (v1.4 §19, §25.3). Earlier packages were supplied by the
-product owner. Who produces v1.3 — and the ROLE/INDUSTRY/MAJOR taxonomy content it depends on — is
-a product decision; see the decision log in `01_PRESEED_V12_VALIDATION_AND_MIGRATIONS.md` once made.
+Resolved 2026-10-07: the product owner supplies both the Pre-seed v1.3 package and the
+ROLE / INDUSTRY / MAJOR taxonomy content. The exact file format is fixed in
+`05_PRESEED_V13_PACKAGE_SPEC.md`. Until it arrives, migrations 0012–0018 and the engine are built
+and tested against synthetic test fixtures only; gate step 4 (validation report) runs on delivery.

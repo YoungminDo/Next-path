@@ -68,3 +68,4 @@
 | 결정 | 내용 |
 |---|---|
 | 크레딧 단위명 | Master Prompt의 `MY` 대신 **튜브(Tube)** 를 사용. DB 컬럼(`reward_tube`, `cost_tube`, `price_tube`, `amount_tube`), API 필드(`balance_tube`, `cost_tube`, `price_tube`), 결제 수단 코드(`TUBE_CREDIT`), UI 문구("1 튜브")에 반영. 아직 배포 전이므로 기존 migration을 직접 수정함 |
+| Pre-seed v1.3 · 분류 체계 | 제품 오너가 직접 제공 (Claude는 생성하지 않음). 형식은 `05_PRESEED_V13_PACKAGE_SPEC.md` |
