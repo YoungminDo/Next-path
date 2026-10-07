@@ -3,8 +3,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "nextpath · 나와 비슷한 선배들의 실제 경로",
-  description: "학교·전공·연도만 넣으면, 비슷한 선배들이 실제로 고른 다음 선택을 숫자로 보여드려요.",
+  title: "nextpath · 나와 같은 자리에 있었던 사람들은 어디로 갔을까",
+  description: "학교·전공·학번만 고르면, 나와 같은 자리에 있었던 사람들이 실제로 간 길을 보여드려요.",
 };
 
 export const viewport = { width: "device-width", initialScale: 1, viewportFit: "cover", themeColor: "#21D7C8" };

@@ -73,7 +73,7 @@ export default function ConditionDemo() {
                  onChange={(e) => setYear(Number(e.target.value))} />
         </Group>
         <Group label="더 비슷하게">
-          <button className="chip" aria-pressed={women} onClick={() => setWomen(!women)}>여성 선배만</button>
+          <button className="chip" aria-pressed={women} onClick={() => setWomen(!women)}>여성만 보기</button>
         </Group>
       </div>
 
@@ -81,7 +81,7 @@ export default function ConditionDemo() {
         <span className="badge sim">예시 화면 · 실제 숫자 아님</span>
         <span className="badge">{d.reasons.join(" · ")}</span>
         <div><span className="big">{d.n}</span><b> 명</b></div>
-        <p className="sub">비슷한 선배들의 첫 직무</p>
+        <p className="sub">나와 같은 출발점의 사람들이 처음 간 길</p>
         <div className="bars flat">
           {d.rows.map(([label, share], i) => (
             <div key={label} className="bar">
@@ -95,8 +95,8 @@ export default function ConditionDemo() {
         </div>
         <p className="hint">
           {d.genderDropped
-            ? "여성 선배만으로는 50명이 안 돼서, 개인이 드러나지 않도록 성별 조건을 빼고 보여드려요."
-            : `딱 맞는 선배는 ${d.exact}명이라 졸업 ±2년까지 넓혔어요.`}
+            ? "여성만으로는 50명이 안 돼서, 개인이 드러나지 않도록 성별 조건을 빼고 보여드려요."
+            : `딱 같은 사람은 ${d.exact}명이라, 졸업 ±2년까지 넓혀서 봤어요.`}
         </p>
       </div>
     </div>

@@ -8,18 +8,19 @@ import {
   ApiError,
   pending,
   type Cell,
-  type IntentResult,
   type MyResult,
   type Node,
   type QueryResult,
   type StepResult,
+  type TeaserResult,
 } from "@/lib/api";
 
-/* Screens follow docs/07_SERVICE_DESIGN.html: S0-S4 (student), P1-P5 (professional), M1-M2. */
+/* Order (product decision): input -> teaser (how many people, how many directions) -> login ->
+   every distribution, intent and path. The server enforces the same gate: before login it only
+   answers the teaser. Tone: "people who stood where I stand", never "seniors". */
 type Screen =
-  | "start" | "s_edu" | "s_result" | "s_intent"
-  | "p_now" | "p_next" | "p_first" | "p_similar"
-  | "wall" | "me";
+  | "start" | "s_edu" | "p_now" | "gate"
+  | "s_result" | "s_intent" | "p_next" | "p_first" | "p_similar" | "me";
 type UserType = "STUDENT" | "PROFESSIONAL";
 
 const DEV_LOGIN = process.env.NEXT_PUBLIC_ENABLE_DEV_LOGIN === "true";
@@ -30,7 +31,7 @@ const YEARS = Array.from({ length: 30 }, (_, i) => THIS_YEAR + 4 - i);
 const REASONS: Record<string, string> = {
   WIDEN_GRADUATION_YEAR_2Y: "졸업 ±2년",
   WIDEN_ADMISSION_YEAR_2Y: "입학 ±2년",
-  BROADEN_MAJOR_1_LEVEL: "전공 계열까지",
+  BROADEN_MAJOR_1_LEVEL: "비슷한 전공 계열",
   DROP_GENDER: "성별 조건 제외",
   DROP_ADMISSION_YEAR: "입학연도 제외",
   DROP_GRADUATION_YEAR: "졸업연도 제외",
@@ -55,8 +56,33 @@ function cellLabel(c: Cell, professional: boolean) {
   return c.label ?? c.code;
 }
 
+/** Korean particle 으로/로 by the last syllable (ㄹ or no final consonant -> 로). */
+export function ro(word: string): string {
+  const c = word.charCodeAt(word.length - 1) - 0xac00;
+  if (c < 0 || c > 11171) return `${word}(으)로`;
+  const jong = c % 28;
+  return `${word}${jong === 0 || jong === 8 ? "로" : "으로"}`;
+}
+
 function reasonText(reasons: string[]) {
   return reasons.map((r) => REASONS[r] ?? r).join(" · ");
+}
+
+/** One sentence that says what the bars mean, leaning on how many paths there were. */
+function conclusion(r: QueryResult & { n_directions?: number | null }, professional: boolean): string | null {
+  if (r.suppressed) return null;
+  const moves = r.cells.filter((c) => c.code !== "STAYED");
+  const stayed = r.cells.find((c) => c.code === "STAYED");
+  const top = moves[0];
+  if (!top) return null;
+  const pct = (x: number) => Math.round(x * 100);
+  const dirs = r.n_directions ?? moves.length;
+  if (professional && stayed) {
+    return `${100 - pct(stayed.share)}%는 다른 길로 움직였고, 가장 많이 간 곳은 ${top.label}(${pct(top.share)}%)예요.`;
+  }
+  return dirs > 1
+    ? `가장 많이 간 길은 ${top.label}(${pct(top.share)}%)이지만, 나머지 ${100 - pct(top.share)}%는 다른 ${dirs - 1}가지 길을 골랐어요.`
+    : `모두 ${ro(top.label ?? "")} 갔어요.`;
 }
 
 export default function AcquisitionFlow() {
@@ -72,16 +98,16 @@ export default function AcquisitionFlow() {
   const [firstIsCurrent, setFirstIsCurrent] = useState(false);
   const [intent, setIntent] = useState<string>(""); // node id or "UNDECIDED"
   const [draftId, setDraftId] = useState<string>();
+  const [teaser, setTeaser] = useState<TeaserResult>();
   const [base, setBase] = useState<StepResult>();
   const [similar, setSimilar] = useState<StepResult>();
-  const [locked, setLocked] = useState<IntentResult>();
   const [consent, setConsent] = useState(false);
   const [me, setMe] = useState<MyResult>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
 
   const professional = userType === "PROFESSIONAL";
-  const simulation = (me?.data_basis ?? base?.data_basis) === "SIMULATION";
+  const simulation = (me?.data_basis ?? base?.data_basis ?? teaser?.data_basis) === "SIMULATION";
 
   const run = (fn: () => Promise<void>) => () => {
     setError(undefined);
@@ -101,77 +127,74 @@ export default function AcquisitionFlow() {
       })
       .catch(() => setError("서비스를 준비하고 있어요. 잠시 후 새로고침해 주세요."));
     const params = new URLSearchParams(window.location.search);
-    // Landing CTAs link to /start?type=student|pro and skip the first question.
-    const type = params.get("type");
-    if (type === "student") setScreen("s_edu");
-    if (type === "pro") { setUserType("PROFESSIONAL"); setScreen("p_now"); }
     const loginError = params.get("login_error");
     const loggedIn = params.get("login") === "success";
     if (loginError || loggedIn) window.history.replaceState(null, "", window.location.pathname);
     if (loginError) setError(LOGIN_ERRORS[loginError] ?? `로그인에 실패했어요 (${loginError}).`);
-    if (loggedIn) run(finishLogin)();
-    else acq.me().then((m) => { setMe(m); setScreen("me"); }).catch(() => undefined);
+    if (loggedIn) {
+      run(finishLogin)();
+      return;
+    }
+    const type = params.get("type");
+    if (type === "pro") { setUserType("PROFESSIONAL"); setScreen("p_now"); }
+    if (type === "student") {
+      setScreen("s_edu");
+      // The landing hero passes the four answers: go straight to the teaser.
+      const fromHero: Edu = {
+        institution_id: params.get("inst") ?? "", major_node_id: params.get("major") ?? "",
+        admission_year: params.get("adm") ?? "", graduation_year: params.get("grad") ?? "",
+      };
+      if (Object.values(fromHero).every(Boolean)) {
+        setEdu(fromHero);
+        run(() => toTeaser(fromHero, "STUDENT"))();
+        return;
+      }
+    }
+    // Already a member: continue where they are.
+    acq.me().then((m) => resumeMember(m)).catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function payload() {
+  function payload(e: Edu, type: UserType) {
     const job = (j: Job) => ({
       organization_name: j.organization_name || null,
       role_node_id: j.role_node_id,
       start_year: Number(j.start_year),
       end_year: j.end_year ? Number(j.end_year) : null,
     });
-    const intents = intent
-      ? [{
-          surface: professional ? "PROFESSIONAL_NEXT_ROLE" : "STUDENT_FIRST_ROLE",
-          target_kind: intent === "UNDECIDED" ? "UNDECIDED" : "ROLE",
-          target_node_id: intent === "UNDECIDED" ? null : intent,
-        }]
-      : [];
     return {
-      user_type: userType,
+      user_type: type,
       education: {
-        institution_id: edu.institution_id,
-        major_node_id: edu.major_node_id,
-        admission_year: Number(edu.admission_year),
-        graduation_year: Number(edu.graduation_year),
+        institution_id: e.institution_id,
+        major_node_id: e.major_node_id,
+        admission_year: Number(e.admission_year),
+        graduation_year: Number(e.graduation_year),
       },
-      current_job: professional && current.role_node_id ? job(current) : null,
-      first_job: professional && !firstIsCurrent && first.role_node_id ? job(first) : null,
-      first_job_is_current: professional && firstIsCurrent,
-      intents,
+      current_job: type === "PROFESSIONAL" && current.role_node_id ? job(current) : null,
+      first_job: null,
+      first_job_is_current: false,
+      intents: [],
     };
   }
 
-  async function save(): Promise<string> {
-    const d = await acq.saveDraft(payload(), draftId);
+  async function toTeaser(e: Edu, type: UserType) {
+    const d = await acq.saveDraft(payload(e, type), draftId);
     setDraftId(d.draft_id);
-    return d.draft_id;
+    setTeaser(await acq.teaser(d.draft_id));
+    setScreen("gate");
   }
 
-  const eduReady = edu.institution_id && edu.major_node_id && edu.admission_year && edu.graduation_year &&
-    Number(edu.admission_year) <= Number(edu.graduation_year);
-
-  const submitStudent = run(async () => {
-    const id = await save();
-    setBase(await acq.step<StepResult>(id, "first_roles"));
-    setScreen("s_result");
-  });
-  const submitNow = run(async () => {
-    const id = await save();
-    setBase(await acq.step<StepResult>(id, "next_roles"));
-    setScreen("p_next");
-  });
-  const submitFirst = run(async () => {
-    const id = await save();
-    setSimilar(firstIsCurrent ? undefined : await acq.step<StepResult>(id, "similar_paths"));
-    setScreen("p_similar");
-  });
-  const submitIntent = run(async () => {
-    const id = await save();
-    setLocked(await acq.step<IntentResult>(id, "intent_paths"));
-    setScreen("wall");
-  });
+  async function resumeMember(m: MyResult) {
+    setMe(m);
+    const pro = m.profile.user_type === "PROFESSIONAL";
+    setUserType(pro ? "PROFESSIONAL" : "STUDENT");
+    if (m.intent) {
+      setScreen("me");
+      return;
+    }
+    setBase(await acq.meStep(pro ? "next_roles" : "first_roles"));
+    setScreen(pro ? "p_next" : "s_result");
+  }
 
   /** HMM ID login leaves the page: remember which draft to merge on the way back. */
   function rememberDraft() {
@@ -187,15 +210,14 @@ export default function AcquisitionFlow() {
       try {
         await api.mergeDraft(saved, version);
       } catch (e) {
-        // 409: this account already has a profile; show its result instead of failing.
+        // 409: this account already has a profile; continue with it.
         if (!(e instanceof ApiError && e.status === 409)) throw e;
       }
       pending.draftId(null);
       pending.consentVersion(null);
     }
     try {
-      setMe(await acq.me());
-      setScreen("me");
+      await resumeMember(await acq.me());
     } catch (e) {
       if (e instanceof ApiError && e.status === 404) {
         setError("아직 저장된 정보가 없어요. 처음부터 입력해 주세요.");
@@ -204,6 +226,10 @@ export default function AcquisitionFlow() {
     }
   }
 
+  const eduReady = edu.institution_id && edu.major_node_id && edu.admission_year && edu.graduation_year &&
+    Number(edu.admission_year) <= Number(edu.graduation_year);
+
+  const submitInput = run(() => toTeaser(edu, userType));
   const kakao = () => {
     rememberDraft();
     window.location.href = "/auth/hmm/start";
@@ -213,16 +239,40 @@ export default function AcquisitionFlow() {
     await api.devLogin();
     await finishLogin();
   });
+  const submitFirst = run(async () => {
+    if (!firstIsCurrent) {
+      await acq.addJob({
+        organization_name: first.organization_name || null, role_node_id: first.role_node_id,
+        start_year: Number(first.start_year), end_year: first.end_year ? Number(first.end_year) : null,
+      });
+      setSimilar(await acq.meStep("similar_paths"));
+    } else setSimilar(undefined);
+    setScreen("p_similar");
+  });
+  const submitIntent = run(async () => {
+    await acq.setIntent({
+      surface: professional ? "PROFESSIONAL_NEXT_ROLE" : "STUDENT_FIRST_ROLE",
+      target_kind: intent === "UNDECIDED" ? "UNDECIDED" : "ROLE",
+      target_node_id: intent === "UNDECIDED" ? null : intent,
+    });
+    setMe(await acq.me());
+    setScreen("me");
+  });
+  const changeIntent = run(async () => {
+    if (!base) setBase(await acq.meStep(professional ? "next_roles" : "first_roles"));
+    setIntent("");
+    setScreen(professional ? "p_similar" : "s_intent");
+  });
   const unlock = run(async () => {
     await acq.unlock();
     setMe(await acq.me());
   });
 
   const back: Partial<Record<Screen, Screen>> = {
-    s_edu: "start", s_result: "s_edu", s_intent: "s_result",
-    p_now: "start", p_next: "p_now", p_first: "p_next", p_similar: "p_first",
-    wall: professional ? "p_similar" : "s_intent",
+    s_edu: "start", p_now: "start", gate: professional ? "p_now" : "s_edu",
+    s_intent: "s_result", p_first: "p_next", p_similar: "p_first",
   };
+  const n = teaser?.base.effective_n ?? 0;
 
   return (
     <main className="app">
@@ -236,8 +286,8 @@ export default function AcquisitionFlow() {
 
       {screen === "start" && (
         <section className="screen">
-          <h1>나와 비슷한 선배들은<br />실제로 어디로 갔을까</h1>
-          <p className="sub">지금 상황에 맞는 선배를 찾아드릴게요</p>
+          <h1>나와 같은 자리에 있었던 사람들은<br />어디로 갔을까</h1>
+          <p className="sub">지금 내 상황을 골라주세요</p>
           <div className="options">
             <button className="option" onClick={() => { setUserType("STUDENT"); setScreen("s_edu"); }}>
               학생 · 취업 준비 중
@@ -251,7 +301,7 @@ export default function AcquisitionFlow() {
 
       {(screen === "s_edu" || screen === "p_now") && (
         <section className="screen">
-          <Progress value={screen === "s_edu" ? 0.4 : 0.33} />
+          <Progress value={0.33} />
           <h2>{professional ? "학교와 지금 하는 일을 알려주세요" : "학교와 전공을 알려주세요"}</h2>
           <Field label="학교">
             <select value={edu.institution_id} onChange={(e) => setEdu({ ...edu, institution_id: e.target.value })}>
@@ -273,23 +323,63 @@ export default function AcquisitionFlow() {
           {professional && (
             <JobFields job={current} roles={roles} onChange={setCurrent} labels={{ role: "지금 직무", start: "입사" }} />
           )}
-          <p className="hint">연도와 회사는 비슷한 사람을 고르는 데만 써요. 다른 사람에게 보이지 않아요.</p>
+          <p className="hint">입력한 내용은 나와 비슷한 사람을 찾는 데만 써요. 다른 사람에게 보이지 않아요.</p>
           <button className="cta" disabled={busy || !eduReady || (professional && !(current.role_node_id && current.start_year))}
-                  onClick={professional ? submitNow : submitStudent}>
-            {professional ? "비슷한 사람의 다음 보기" : "선배 찾기"}
+                  onClick={submitInput}>
+            나와 비슷한 사람 찾기
           </button>
+        </section>
+      )}
+
+      {screen === "gate" && teaser && (
+        <section className="screen">
+          {teaser.base.suppressed ? (
+            <>
+              <h2>아직 나와 비슷한 사람이 적어요</h2>
+              <p className="sub">개인이 드러나지 않도록 {n}명 이하일 때는 결과를 만들지 않아요. 연도나 전공을 바꿔서 다시 찾아볼 수 있어요.</p>
+              <button className="cta ghost" onClick={() => setScreen(professional ? "p_now" : "s_edu")}>조건 바꾸기</button>
+            </>
+          ) : (
+            <>
+              <span className="badge">찾았어요</span>
+              <div className="lock">
+                <span className="small">{professional ? "나와 같은 자리에 있었던 사람" : "나와 같은 출발점에서 시작한 사람"}</span>
+                <span className="lockbig">{n.toLocaleString()}명</span>
+                {teaser.n_directions != null && (
+                  <span className="small">이 사람들은 <b>{teaser.n_directions}가지 길</b>로 나뉘었어요</span>
+                )}
+              </div>
+              {teaser.base.fallback_reason.length > 0 && (
+                <p className="hint">딱 같은 사람은 {teaser.base.exact_n}명이라, {reasonText(teaser.base.fallback_reason)}까지 넓혀서 찾았어요</p>
+              )}
+              <div className="blur" aria-hidden="true">
+                {[88, 64, 52, 40, 30].map((w, i) => (
+                  <div key={i} className="bar"><span>●●●●</span><span className="track"><i className={i ? "m" : ""} style={{ width: `${w}%` }} /></span><b>●●%</b></div>
+                ))}
+              </div>
+              <h2 className="gate-title">이 중에 내 길도 있을까요?</h2>
+              <p className="sub">어디로 갔는지는 로그인하면 바로 보여드려요. 입력한 내용은 그대로 이어져요.</p>
+              <label className="check">
+                <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
+                입력한 학교·경력 정보를 HMM 계정과 연결해 결과 제공과 익명 통계에 쓰는 것에 동의해요.
+              </label>
+              <button className="cta kakao" disabled={!consent || busy} onClick={kakao}>카카오로 3초 만에 보기</button>
+              {DEV_LOGIN && <button className="cta ghost" disabled={!consent || busy} onClick={devLogin}>개발용 로그인</button>}
+            </>
+          )}
         </section>
       )}
 
       {(screen === "s_result" || screen === "p_next") && base && (
         <section className="screen">
-          <ResultCount r={base.result} unit={professional ? "명" : "명"}
-                       caption={professional ? "비슷한 사람들이 고른 다음" : "비슷한 선배들의 첫 직무"} />
+          <ResultCount r={base.result}
+                       caption={professional ? "나와 같은 자리에 있었던 사람들이 고른 다음" : "나와 같은 출발점의 사람들이 처음 간 길"} />
           <Bars r={base.result} professional={professional} />
+          {conclusion(base.result, professional) && <p className="conclusion">{conclusion(base.result, professional)}</p>}
           <Share r={base.result} professional={professional} />
           <button className="cta" disabled={base.result.suppressed && !professional}
                   onClick={() => setScreen(professional ? "p_first" : "s_intent")}>
-            {professional ? "첫 직장도 넣고 더 정확히 보기" : "이 중에 궁금한 게 있어요"}
+            {professional ? "첫 직장도 넣고 더 비슷한 사람 보기" : "이 중에 끌리는 길이 있어요"}
           </button>
         </section>
       )}
@@ -313,52 +403,27 @@ export default function AcquisitionFlow() {
       {(screen === "s_intent" || screen === "p_similar") && (
         <section className="screen">
           {screen === "p_similar" && similar && (
-            <>
-              {similar.result.suppressed ? (
-                <p className="sub">같은 두 걸음을 걸은 사람은 아직 적어요. 지금 직무가 같은 사람 기준으로 보여드릴게요.</p>
-              ) : (
-                <ResultCount r={similar.result} unit="명" caption="나와 같은 두 걸음을 걸은 사람" />
-              )}
-            </>
+            similar.result.suppressed ? (
+              <p className="sub">나와 같은 두 걸음을 걸은 사람은 아직 적어요. 지금 직무가 같은 사람 기준으로 보여드릴게요.</p>
+            ) : (
+              <ResultCount r={similar.result} caption="나와 같은 두 걸음을 걸은 사람" />
+            )
           )}
-          <h2>{professional ? "어떤 다음이 궁금해요?" : "어떤 길이 제일 궁금해요?"}</h2>
-          <p className="sub">하나만 골라주세요. 고른 길의 경로를 준비할게요</p>
+          <h2>{professional ? "어떤 다음이 궁금해요?" : "이 중에 끌리는 길이 있나요?"}</h2>
+          <p className="sub">하나만 골라주세요. 그 길로 간 사람들이 걸어간 경로를 보여드릴게요</p>
           <IntentChips middleRoles={middleRoles} top={(similar && !similar.result.suppressed ? similar : base)?.result}
                        value={intent} onChange={setIntent} />
           <button className="option muted" aria-pressed={intent === "UNDECIDED"}
-                  onClick={() => setIntent("UNDECIDED")}>아직 모르겠어요</button>
+                  onClick={() => setIntent("UNDECIDED")}>아직 모르겠어요 (괜찮아요, 대학생 10명 중 7명이 그래요)</button>
           <button className="cta" disabled={busy || !intent} onClick={submitIntent}>
             {intent && intent !== "UNDECIDED"
-              ? `${middleRoles.find((r) => r.node_id === intent)?.label ?? ""} 경로 보기`
-              : "경로 보기"}
+              ? `${ro(middleRoles.find((r) => r.node_id === intent)?.label ?? "")} 간 길 보기`
+              : "가장 많이 간 길부터 보기"}
           </button>
         </section>
       )}
 
-      {screen === "wall" && locked && (
-        <section className="screen">
-          <span className="badge">결과 준비 완료</span>
-          <LockedCard r={locked} professional={professional} />
-          {(!locked.paths || locked.paths.suppressed) && (
-            <button className="cta ghost" onClick={() => setScreen(professional ? "p_similar" : "s_intent")}>
-              다른 길 고르기
-            </button>
-          )}
-          <div className="blur" aria-hidden="true">
-            <div className="path"><span>첫 직무</span>→<span>…</span>→<span className="hl">?</span></div>
-            <div className="path"><span>첫 직무</span>→<span className="hl">?</span></div>
-          </div>
-          <p className="sub">경로 상세는 로그인하면 바로 열려요. 지금까지 입력한 내용은 그대로 이어져요.</p>
-          <label className="check">
-            <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
-            입력한 학교·경력 정보를 HMM 계정과 연결해 결과 제공과 익명 통계에 쓰는 것에 동의해요.
-          </label>
-          <button className="cta kakao" disabled={!consent || busy} onClick={kakao}>카카오로 3초 만에 보기</button>
-          {DEV_LOGIN && <button className="cta ghost" disabled={!consent || busy} onClick={devLogin}>개발용 로그인</button>}
-        </section>
-      )}
-
-      {screen === "me" && me && <MyScreen me={me} busy={busy} onUnlock={unlock} />}
+      {screen === "me" && me && <MyScreen me={me} busy={busy} onUnlock={unlock} onChangeIntent={changeIntent} />}
     </main>
   );
 }
@@ -441,14 +506,14 @@ function JobFields(props: {
   );
 }
 
-function ResultCount({ r, unit, caption }: { r: QueryResult; unit: string; caption: string }) {
+function ResultCount({ r, caption }: { r: QueryResult; caption: string }) {
   return (
     <div className="count">
       {r.fallback_reason.length > 0 && <span className="badge">{reasonText(r.fallback_reason)}</span>}
-      <div><span className="big">{r.effective_n.toLocaleString()}</span><b> {unit}</b></div>
+      <div><span className="big">{r.effective_n.toLocaleString()}</span><b> 명</b></div>
       <p className="sub">{caption}</p>
       {r.fallback_reason.length > 0 && (
-        <p className="hint">딱 맞는 사람이 {r.exact_n}명이라 조건을 넓혔어요 ({reasonText(r.fallback_reason)})</p>
+        <p className="hint">딱 같은 사람은 {r.exact_n}명이라, {reasonText(r.fallback_reason)}까지 넓혀서 봤어요</p>
       )}
     </div>
   );
@@ -478,8 +543,8 @@ function Share({ r, professional }: { r: QueryResult; professional: boolean }) {
   const [copied, setCopied] = useState(false);
   if (r.suppressed || !r.cells[0]) return null;
   const top = r.cells[0];
-  const text = `나와 비슷한 ${professional ? "사람" : "선배"} ${r.effective_n}명 중 ${Math.round(top.share * 100)}%가 ` +
-    `${cellLabel(top, professional)}${professional ? "를 골랐대" : "로 갔대"}. 너는? `;
+  const text = `나와 같은 자리에 있었던 ${r.effective_n}명 중 ${Math.round(top.share * 100)}%는 ` +
+    `${professional ? `${cellLabel(top, professional)}를 골랐대` : `${ro(cellLabel(top, professional))} 갔대`}. 너랑 비슷한 사람들은? `;
   const share = async () => {
     const url = window.location.origin;
     try {
@@ -511,38 +576,15 @@ function IntentChips(props: { middleRoles: Node[]; top?: QueryResult; value: str
   );
 }
 
-function LockedCard({ r, professional }: { r: IntentResult; professional: boolean }) {
-  const p = r.paths;
-  if (!p || p.suppressed) {
-    return (
-      <div className="lock">
-        <span className="small">{p ? `${p.target.label}(으)로 간 사람` : "선택한 길"}</span>
-        <span className="lockbig">아직 적어요</span>
-        <span className="small">개인이 드러나지 않도록 {p?.min_cell_n ?? 5}명 미만은 보여드리지 않아요.</span>
-      </div>
-    );
-  }
-  const who = professional && p.from ? `${p.from.label}에서 ${p.target.label}(으)로 간 사람` : `${p.target.label}(으)로 간 선배`;
-  return (
-    <div className="lock">
-      {r.target_basis === "MOST_COMMON" && <span className="small">가장 많이 간 길부터 보여드릴게요</span>}
-      <span className="small">{who}</span>
-      <span className="lockbig">{p.n_people}명</span>
-      <span className="small">
-        이들이 거친 경로 <b>{p.n_paths}개</b>
-        {p.median_months != null && <> · {professional ? "전환까지" : "첫 직장부터"} 중간값 <b>{months(p.median_months)}</b></>}
-      </span>
-    </div>
-  );
-}
-
 function months(m: number) {
   if (m <= 0) return "바로";
   if (m < 12) return `${Math.round(m)}개월`;
   return `${(m / 12).toFixed(1)}년`;
 }
 
-function MyScreen({ me, busy, onUnlock }: { me: MyResult; busy: boolean; onUnlock: () => void }) {
+function MyScreen({ me, busy, onUnlock, onChangeIntent }: {
+  me: MyResult; busy: boolean; onUnlock: () => void; onChangeIntent: () => void;
+}) {
   const p = me.intent_paths.paths;
   const professional = me.profile.user_type === "PROFESSIONAL";
   return (
@@ -553,12 +595,19 @@ function MyScreen({ me, busy, onUnlock }: { me: MyResult; busy: boolean; onUnloc
       </div>
       {!p || p.suppressed ? (
         <>
-          <h2>선택한 길로 간 사람이 아직 적어요</h2>
+          <h2>이 길로 간 사람은 아직 적어요</h2>
           <p className="sub">개인이 드러나지 않도록 {p?.min_cell_n ?? 5}명 미만은 보여드리지 않아요.</p>
+          <button className="cta ghost" onClick={onChangeIntent}>다른 길 보기</button>
         </>
       ) : (
         <>
-          <h2>{p.target.label}(으)로 간 {professional ? "사람" : "선배"} {p.n_people}명의 경로</h2>
+          {me.intent_paths.target_basis === "MOST_COMMON" && <p className="hint">가장 많이 간 길부터 보여드릴게요</p>}
+          <h2>나와 같은 자리에서 {ro(p.target.label)} 간 {p.n_people}명이 걸어간 길</h2>
+          {p.median_months != null && (p.median_months <= 0 ? (
+            <p className="sub">절반 이상이 {professional && p.from ? "옮기자마자" : "첫 직장부터"} 바로 이 길로 갔어요</p>
+          ) : (
+            <p className="sub">{professional && p.from ? `${p.from.label}에서 옮기기까지` : "첫 직장부터 이 길까지"} 중간값 <b>{months(p.median_months)}</b> 걸렸어요</p>
+          ))}
           {(p.paths ?? []).map((x, i) => (
             <div key={i} className="pathcard">
               <div className="path">
@@ -588,9 +637,11 @@ function MyScreen({ me, busy, onUnlock }: { me: MyResult; busy: boolean; onUnloc
               <p className="sub">이 결과는 깊은 분석을 하기엔 인원이 적어요.</p>
             )}
           </div>
+          <p className="conclusion">이 사람들도 처음엔 나와 같은 자리였어요.</p>
+          <button className="cta ghost" onClick={onChangeIntent}>다른 길도 보기</button>
         </>
       )}
-      <p className="hint">선배는 실제 가입·인증한 사람만 연결돼요. 테스트 데이터는 사람으로 표시되지 않아요.</p>
+      <p className="hint">한 걸음 먼저 간 사람과의 연결은 실제 가입·인증한 사람만으로 준비 중이에요. 테스트 데이터는 사람으로 표시되지 않아요.</p>
     </section>
   );
 }

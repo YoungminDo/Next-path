@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { acq, type Node } from "@/lib/api";
 
 /* HeyDealer pattern: the answer starts inside the hero. Four picks, one button, and the flow
-   opens directly on the result. If the API is unreachable the button still opens the flow. */
+   opens directly on the teaser and the free login. If the API is unreachable the button still opens the flow. */
 
 const THIS_YEAR = new Date().getFullYear();
 const YEARS = Array.from({ length: 22 }, (_, i) => THIS_YEAR + 4 - i);
@@ -32,7 +32,8 @@ export default function HeroForm() {
     : "/start?type=student";
 
   return (
-    <form className="heroform" onSubmit={(e) => { e.preventDefault(); window.location.href = href; }}>
+    <form id="hero-form" className="heroform" onSubmit={(e) => { e.preventDefault(); window.location.href = href; }}>
+      <p className="heroform-title">무료로 내 진로 지도 받기</p>
       <select id="hero-inst" aria-label="학교" value={f.inst} onChange={(e) => setF({ ...f, inst: e.target.value })}>
         <option value="">학교 선택</option>
         {institutions.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
@@ -55,7 +56,8 @@ export default function HeroForm() {
           {YEARS.map((y) => <option key={y} value={y}>{y}</option>)}
         </select>
       </div>
-      <button className="cta" type="submit">{ready ? "내 선배 찾기" : "선배 찾기 시작"}</button>
+      <button className="cta" type="submit">나와 같은 자리였던 사람들 보기</button>
+      <p className="heroform-note">카카오로 3초 · 무료 · 광고 연락 없음</p>
       <a className="heroform-alt" href="/start?type=pro">지금 일하고 있어요 →</a>
     </form>
   );

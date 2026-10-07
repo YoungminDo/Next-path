@@ -99,7 +99,13 @@ export type MyResult = {
     content: { company_size: DeepDiveItem[]; industry: DeepDiveItem[] } | null };
   balance_tube: number; data_basis: "SIMULATION" | "OBSERVED";
 };
-export type AcqStep = "first_roles" | "next_roles" | "similar_paths" | "intent_paths";
+export type AcqStep = "first_roles" | "next_roles" | "similar_paths";
+export type TeaserResult = {
+  step: "teaser"; n_directions: number | null; data_basis: "SIMULATION" | "OBSERVED";
+  base: { effective_n: number; exact_n: number; fallback_reason: string[]; suppressed: boolean };
+};
+export type Intent = { surface: "STUDENT_FIRST_ROLE" | "PROFESSIONAL_NEXT_ROLE";
+  target_kind: "ROLE" | "UNDECIDED"; target_node_id: string | null };
 
 export const acq = {
   institutions: () => call<{ id: string; name: string; region: string | null }[]>("/acq/options/institutions"),
@@ -112,9 +118,19 @@ export const acq = {
       method: "POST",
       body: JSON.stringify({ draft_id: draftId ?? null, payload }),
     }),
-  step: <T,>(draftId: string, step: AcqStep) =>
-    call<T>(`/acq/draft/${draftId}/result`, { method: "POST", body: JSON.stringify({ step }) }),
+  /** Before login only the teaser exists: how many people, how many directions. */
+  teaser: (draftId: string) =>
+    call<TeaserResult>(`/acq/draft/${draftId}/result`, { method: "POST", body: JSON.stringify({ step: "teaser" }) }),
   me: () => call<MyResult>("/acq/me"),
+  meStep: (step: AcqStep) => call<StepResult>(`/acq/me/step/${step}`),
+  addJob: (job: unknown) =>
+    call<{ work_event_id: string | null; replayed: boolean }>("/acq/me/jobs", {
+      method: "POST",
+      headers: { "Idempotency-Key": crypto.randomUUID() },
+      body: JSON.stringify({ job }),
+    }),
+  setIntent: (intent: Intent) =>
+    call<{ intent_event_ids: string[] }>("/acq/me/intent", { method: "POST", body: JSON.stringify({ intent }) }),
   unlock: () =>
     call<{ unlocked: boolean; charged?: boolean; balance_tube?: number;
       content?: MyResult["deep_dive"]["content"] }>("/acq/me/unlock", {
