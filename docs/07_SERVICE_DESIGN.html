@@ -1,0 +1,508 @@
+<title>Nextpath 서비스 디자인 기획</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;600;700;800;900&display=swap">
+<style>
+/* Layout: FACE 리포트식 대칭 단일 컬럼(최대 960px) + 플로우 구간만 가로 스크롤 폰 스트립 */
+:root{
+  --mint:#21D7C8;          /* 브랜드 프라이머리: 면·바·큰 숫자 */
+  --mint-ink:#0B7A72;      /* 흰 바탕 위 민트 텍스트용(대비 5.2:1) */
+  --mint-soft:#E3F8F6;
+  --mint-muted:#B6E8E4;
+  --ink:#141517; --sub:#727883; --muted:#B2B8C0; --line:#ECEEF1;
+  --bg:#F8F9FA; --card:#FFFFFF; --dark:#141517; --on-dark:#FFFFFF;
+  --orange:#FFAC62; --green:#A2D791; --blue:#6EB1FF; --red:#EF5050;
+  --sans:"Pretendard Variable",Pretendard,"Noto Sans KR",system-ui,-apple-system,sans-serif;
+  --phone-bg:#FFFFFF; --phone-frame:#141517;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --mint-ink:#5FE6DA; --mint-soft:#10302E; --mint-muted:#1E5652;
+  --ink:#EEF0F2; --sub:#A3A9B2; --muted:#6B717A; --line:#2A2D31;
+  --bg:#101113; --card:#1A1C1F; --dark:#000000; --phone-bg:#FFFFFF; --phone-frame:#3A3D42; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --mint-ink:#5FE6DA; --mint-soft:#10302E; --mint-muted:#1E5652;
+  --ink:#EEF0F2; --sub:#A3A9B2; --muted:#6B717A; --line:#2A2D31;
+  --bg:#101113; --card:#1A1C1F; --dark:#000000; --phone-bg:#FFFFFF; --phone-frame:#3A3D42; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.65;padding-inline:16px;padding-block:0 80px}
+.wrap{max-width:960px;margin:0 auto;display:flex;flex-direction:column;gap:56px}
+h1,h2,h3{text-wrap:balance;letter-spacing:-0.01em;margin:0}
+h2{font-size:25px;font-weight:800;line-height:1.3}
+h3{font-size:18px;font-weight:700;line-height:1.35}
+p{margin:0;max-width:68ch}
+section{display:flex;flex-direction:column;gap:18px}
+.eyebrow{font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mint-ink)}
+.lead{color:var(--sub);font-size:16px}
+.small{font-size:13px;color:var(--sub)}
+a{color:var(--mint-ink)}
+:focus-visible{outline:2px solid var(--mint);outline-offset:2px}
+
+/* hero */
+.hero{background:var(--mint);color:#08201E;margin-inline:-16px;padding:56px 16px 44px}
+.hero-in{max-width:960px;margin:0 auto;display:grid;grid-template-columns:1fr 1fr;gap:32px;align-items:center}
+.hero h1{font-size:clamp(30px,5.4vw,46px);font-weight:900;line-height:1.18}
+.hero p{font-size:16px;margin-top:14px;color:#0B3B37}
+.hero .tag{display:inline-block;font-size:12px;font-weight:800;background:#08201E;color:var(--mint);padding:4px 10px;border-radius:999px;margin-bottom:14px}
+.hero-stat{background:#FFFFFF;border-radius:16px;padding:22px;color:#141517;display:flex;flex-direction:column;gap:6px}
+.hero-stat .n{font-size:56px;font-weight:900;color:#0B7A72;line-height:1;font-variant-numeric:tabular-nums}
+.hero-stat .bar{height:10px;background:#F3F4F6;border-radius:5px;overflow:hidden}
+.hero-stat .bar i{display:block;height:100%;background:#21D7C8;border-radius:5px}
+.hero-stat .row{display:grid;grid-template-columns:72px 1fr 34px;gap:8px;align-items:center;font-size:13px}
+.hero-stat .row b{font-variant-numeric:tabular-nums;text-align:right}
+@media (max-width:720px){.hero-in{grid-template-columns:1fr}}
+
+/* generic */
+.card{background:var(--card);border-radius:12px;padding:20px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}
+@media (max-width:720px){.grid2,.grid3{grid-template-columns:1fr}}
+.grid2>*,.grid3>*{min-width:0}
+.chip{display:inline-block;font-size:12px;font-weight:700;padding:3px 10px;border-radius:999px;background:var(--mint-soft);color:var(--mint-ink)}
+.chip.dark{background:var(--ink);color:var(--bg)}
+.chip.warn{background:#FFF1E3;color:#9A4F0A}
+ul.clean{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px}
+.tbl{overflow-x:auto;background:var(--card);border-radius:12px}
+table{border-collapse:collapse;width:100%;min-width:640px;font-size:14px}
+th,td{text-align:left;padding:11px 14px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:12px;color:var(--sub);font-weight:700;letter-spacing:.04em}
+tr:last-child td{border-bottom:0}
+code{font-size:13px;background:var(--mint-soft);color:var(--mint-ink);padding:1px 6px;border-radius:4px}
+
+/* journey */
+.journey{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.step{background:var(--card);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:6px;border-top:4px solid var(--c)}
+.step.on{background:var(--dark);color:var(--on-dark)}
+.step.on .small{color:#C9CDD2}
+.step b{font-size:12px;letter-spacing:.06em}
+@media (max-width:720px){.journey{grid-template-columns:1fr 1fr}}
+
+/* swatches */
+.sw{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.sw div{border-radius:12px;overflow:hidden;background:var(--card);font-size:12px}
+.sw i{display:block;height:56px}
+.sw span{display:block;padding:8px 10px}
+@media (max-width:720px){.sw{grid-template-columns:1fr 1fr}}
+
+/* phone strip */
+.strip{overflow-x:auto;padding-bottom:10px;margin-inline:-16px;padding-inline:16px}
+.strip-in{display:flex;gap:18px;width:max-content}
+.ph{width:236px;flex:none;display:flex;flex-direction:column;gap:8px}
+.ph-cap{font-size:12px;color:var(--sub);line-height:1.5}
+.ph-cap b{color:var(--ink);font-size:13px}
+.scr{background:var(--phone-bg);color:#141517;border:6px solid var(--phone-frame);border-radius:30px;height:470px;padding:22px 14px 14px;display:flex;flex-direction:column;gap:10px;font-size:12px;line-height:1.45;position:relative;overflow:hidden}
+.scr .top{display:flex;justify-content:space-between;font-size:10px;color:#B2B8C0}
+.scr .q{font-size:17px;font-weight:800;line-height:1.3;color:#141517}
+.scr .sub{font-size:11px;color:#727883}
+.scr .fld{border:1px solid #E5E7EB;border-radius:10px;padding:9px 10px;color:#141517;display:flex;justify-content:space-between}
+.scr .fld em{font-style:normal;color:#B2B8C0}
+.scr .opt{border:1.5px solid #E5E7EB;border-radius:12px;padding:12px;font-weight:700}
+.scr .opt.sel{border-color:#21D7C8;background:#E3F8F6}
+.scr .big{font-size:40px;font-weight:900;color:#0B7A72;line-height:1;font-variant-numeric:tabular-nums}
+.scr .r{display:grid;grid-template-columns:58px 1fr 24px;gap:6px;align-items:center;font-size:11px}
+.scr .r b{text-align:right;font-variant-numeric:tabular-nums}
+.scr .t{height:8px;background:#F3F4F6;border-radius:4px;overflow:hidden}
+.scr .t i{display:block;height:100%;background:#21D7C8}
+.scr .t i.m{background:#B6E8E4}
+.scr .cta{margin-top:auto;background:#21D7C8;color:#08201E;font-weight:800;text-align:center;border-radius:12px;padding:12px;font-size:13px}
+.scr .cta.kakao{background:#FEE500;color:#191600}
+.scr .ghost{text-align:center;font-size:11px;color:#727883}
+.scr .lock{background:#141517;color:#fff;border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:6px}
+.scr .lock .big{color:#21D7C8;font-size:30px}
+.scr .blur{filter:blur(3px);opacity:.7}
+.scr .badge{align-self:flex-start;font-size:10px;font-weight:700;background:#E3F8F6;color:#0B7A72;padding:2px 8px;border-radius:999px}
+.scr .badge.sim{background:#FFF1E3;color:#9A4F0A}
+.scr .prog{height:4px;background:#F3F4F6;border-radius:2px}
+.scr .prog i{display:block;height:100%;background:#21D7C8;border-radius:2px}
+.scr .chips{display:flex;flex-wrap:wrap;gap:5px}
+.scr .chips span{border:1px solid #E5E7EB;border-radius:999px;padding:4px 9px;font-size:11px}
+.scr .chips span.sel{background:#21D7C8;border-color:#21D7C8;color:#08201E;font-weight:700}
+.scr .path{display:flex;align-items:center;gap:4px;font-size:10.5px;flex-wrap:wrap}
+.scr .path span{background:#F3F4F6;border-radius:6px;padding:3px 6px}
+.scr .path span.hl{background:#21D7C8;color:#08201E;font-weight:700}
+.scr .card2{border:1px solid #F0F1F3;border-radius:12px;padding:10px;display:flex;flex-direction:column;gap:6px}
+.scr .tube{display:inline-flex;align-items:center;gap:4px;font-weight:800}
+.scr .tube::before{content:"";width:10px;height:10px;border-radius:50%;border:3px solid #21D7C8}
+.arrow{align-self:center;color:var(--muted);font-size:22px}
+
+/* dark block */
+.darkblock{background:var(--dark);color:var(--on-dark);border-radius:16px;padding:28px;display:flex;flex-direction:column;gap:14px}
+.darkblock .small{color:#C9CDD2}
+.darkblock .k{font-size:44px;font-weight:900;color:var(--mint);line-height:1}
+
+.swot{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.swot .card h3{display:flex;gap:8px;align-items:center}
+.swot .card h3 i{width:10px;height:10px;border-radius:50%;background:var(--c);display:inline-block}
+@media (max-width:720px){.swot{grid-template-columns:1fr}}
+.refs{font-size:13px;color:var(--sub);display:flex;flex-direction:column;gap:6px;padding-left:18px;margin:0}
+.refs a{word-break:break-all}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+
+<header class="hero">
+  <div class="hero-in">
+    <div>
+      <span class="tag">Nextpath · Hello My Me EXPLORE 레이어</span>
+      <h1>나와 비슷한 선배들은<br>실제로 어디로 갔을까</h1>
+      <p>입력은 짧게, 결과는 숫자로 먼저 보여주고, 더 깊은 경로는 로그인과 튜브로 엽니다. 이 문서는 소개서, FACE 디자인 시스템, Hello My Me 앱스토어 이미지에서 출발한 Nextpath 서비스 디자인 기획입니다.</p>
+    </div>
+    <div class="hero-stat" aria-label="획득 화면 결과 예시">
+      <span class="small" style="color:#727883">예시 · 고려대 경영학과 2020 입학 / 2024 졸업</span>
+      <span class="n">418명</span>
+      <span style="font-weight:700">비슷한 선배의 첫 직무 Top 5</span>
+      <div class="row"><span>마케팅</span><span class="bar"><i style="width:92%"></i></span><b>24%</b></div>
+      <div class="row"><span>전략·기획</span><span class="bar"><i style="width:70%"></i></span><b>18%</b></div>
+      <div class="row"><span>재무·금융</span><span class="bar"><i style="width:58%;background:#B6E8E4"></i></span><b>15%</b></div>
+      <div class="row"><span>프로덕트</span><span class="bar"><i style="width:58%;background:#B6E8E4"></i></span><b>15%</b></div>
+      <div class="row"><span>영업·사업개발</span><span class="bar"><i style="width:46%;background:#B6E8E4"></i></span><b>12%</b></div>
+      <span class="small" style="color:#9A4F0A;font-weight:700">SIMULATION · 테스트 데이터</span>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+<section>
+  <span class="eyebrow">1. 포지셔닝</span>
+  <h2>Hello My Me 여정에서 Nextpath가 맡는 자리</h2>
+  <p>소개서의 여정은 KNOW → EXPLORE → EXPERIENCE → GROW입니다. FACE는 "나는 어떤 사람인가"(KNOW)에 답하고, Nextpath는 "나 같은 사람은 실제로 어디로 갔나"(EXPLORE)에 답합니다. FACE 결과가 있으면 Nextpath의 직무 결과 옆에 "내 유형과 맞는 정도"를 붙일 수 있어서, 두 서비스는 서로를 쓸모 있게 만드는 관계가 됩니다.</p>
+  <div class="journey">
+    <div class="step" style="--c:#B3DF80"><b>KNOW</b><strong>FACE 진단</strong><span class="small">나의 유형 · 가치관</span></div>
+    <div class="step on" style="--c:#21D7C8"><b>EXPLORE</b><strong>Nextpath</strong><span class="small">비슷한 선배의 실제 경로 · 다음 선택</span></div>
+    <div class="step" style="--c:#5BA2F9"><b>EXPERIENCE</b><strong>프로그램 · 기회</strong><span class="small">관심 직무로 바로 연결</span></div>
+    <div class="step" style="--c:#F8583F"><b>GROW</b><strong>선배 · 코치</strong><span class="small">경로를 걸은 사람과 대화</span></div>
+  </div>
+  <div class="grid3">
+    <div class="card"><h3>한 줄 정의</h3><p class="small">학교·전공·연도만 넣으면, 비슷한 선배들이 실제로 고른 다음 선택을 숫자로 보여주는 커리어 결정 지도.</p></div>
+    <div class="card"><h3>핵심 사용자</h3><p class="small">① 직무 미확정 대학생(소개서: 대학생 70%가 직무 미확정) ② 2~7년 차 이직 고민 직장인.</p></div>
+    <div class="card"><h3>쌓이는 자산</h3><p class="small">Intent(궁금한 다음) → Decision(실제 선택) → Outcome(결과). 이 연결 데이터는 공개 데이터로 대체할 수 없습니다.</p></div>
+  </div>
+</section>
+
+<section>
+  <span class="eyebrow">2. 디자인 원칙</span>
+  <h2>FACE 원칙을 물려받고, Nextpath만의 원칙 세 가지를 더합니다</h2>
+  <div class="grid2">
+    <div class="card"><h3>물려받는 것 (FACE DESIGN-SYSTEM.md)</h3>
+      <ul class="clean small">
+        <li>대칭 레이아웃. 벤토 그리드 금지, <code>1fr 1fr</code> 균등 분할만</li>
+        <li>한 화면, 한 목적. 질문 하나 또는 결과 하나</li>
+        <li>데이터 미니멀리즘. 장식 도형·3D·과한 그림자 금지</li>
+        <li>큰 숫자는 40~64px, weight 900, 민트</li>
+        <li>바 차트: 1순위 민트, 그다음 연민트, 하위 회색</li>
+      </ul></div>
+    <div class="card"><h3>Nextpath 고유 원칙</h3>
+      <ul class="clean small">
+        <li><b>숫자는 사람이다.</b> 비율보다 "선배 418명"처럼 사람 수를 먼저 쓴다</li>
+        <li><b>근거가 먼저다.</b> 모든 결과 아래에 "누구를 기준으로 셌는지"(cohort 범위·넓힌 조건)를 적는다</li>
+        <li><b>결과는 이미 뒤에 있다.</b> 로그인 벽은 "계산이 끝났다"는 증거(인원·경로 수·흐린 미리보기)를 보여준 다음에만 세운다</li>
+        <li><b>모르면 비워둔다.</b> 표본이 작으면 숫자를 숨기고 이유를 쓴다. 추정치로 채우지 않는다</li>
+      </ul></div>
+  </div>
+</section>
+
+<section>
+  <span class="eyebrow">3. 브랜드 시스템</span>
+  <h2>Hello My Me 토큰을 그대로 쓰고, 대비 문제 하나만 고칩니다</h2>
+  <div class="sw">
+    <div><i style="background:#21D7C8"></i><span><b>Mint</b> #21D7C8<br>CTA 면 · 바 · 다크 위 숫자</span></div>
+    <div><i style="background:#0B7A72"></i><span><b>Mint Ink</b> #0B7A72<br>흰 바탕 위 민트 글자 (신규)</span></div>
+    <div><i style="background:#141517"></i><span><b>Ink</b> #141517<br>본문 · 로그인 벽 다크 카드</span></div>
+    <div><i style="background:#F8F9FA;border-bottom:1px solid #ECEEF1"></i><span><b>Page</b> #F8F9FA<br>페이지 배경</span></div>
+    <div><i style="background:#B6E8E4"></i><span><b>Mint Muted</b> #B6E8E4<br>2순위 이하 바</span></div>
+    <div><i style="background:#727883"></i><span><b>Sub</b> #727883<br>보조 텍스트</span></div>
+    <div><i style="background:#FFAC62"></i><span><b>Caution</b> #FFAC62<br>SIMULATION · 범위 넓힘</span></div>
+    <div><i style="background:#FEE500"></i><span><b>Kakao</b> #FEE500<br>카카오 로그인 버튼 전용</span></div>
+  </div>
+  <div class="grid2">
+    <div class="card"><h3>타이포</h3>
+      <p class="small">Pretendard Variable 400/600/700/800/900. 질문 타이틀 22~27px/800, 본문 15px/400, 큰 숫자 40~64px/900, 캡션 12~13px. 숫자에는 <code>tabular-nums</code>를 켭니다.</p></div>
+    <div class="card"><h3>고쳐야 할 대비 문제</h3>
+      <p class="small">흰 글자 on #21D7C8은 대비 약 1.8:1로 WCAG AA 기준(4.5:1)에 못 미칩니다. 그래서 민트 버튼의 글자는 짙은 색(#08201E, 약 10:1)으로 쓰고, 흰 바탕 위 민트 글자·큰 숫자는 #0B7A72(약 5.2:1)를 씁니다. 다크 카드 위에서는 원래 민트를 그대로 씁니다.</p></div>
+  </div>
+</section>
+
+<section>
+  <span class="eyebrow">4. 정보 구조</span>
+  <h2>로그인 전 3화면 묶음, 로그인 후 4탭</h2>
+  <div class="tbl"><table>
+    <thead><tr><th>영역</th><th>화면</th><th>목적</th><th>저장되는 데이터</th></tr></thead>
+    <tbody>
+      <tr><td>로그인 전</td><td>시작 · 학생 플로우 · 직장인 플로우</td><td>3분 안에 "나 같은 사람" 숫자를 보여줌</td><td>ANONYMOUS_DRAFT (Cohort · Career · Intent)</td></tr>
+      <tr><td>로그인 벽</td><td>"결과가 준비됐어요"</td><td>계산이 끝났다는 증거 + 동의 + 카카오(HMM ID)</td><td>consent_record, account</td></tr>
+      <tr><td>로그인 후 · 지도</td><td>Career Map</td><td>기다리던 결과를 재입력 없이 바로 보여줌</td><td>PERSON · EDUCATION · WORK_EVENT · INTENT_EVENT</td></tr>
+      <tr><td>로그인 후 · 경로</td><td>경로 상세 · 언락</td><td>튜브로 깊은 경로(2차·3차 이동, 기간)를 엶</td><td>credit_ledger, unlock</td></tr>
+      <tr><td>로그인 후 · 선배</td><td>선배 목록 · 요청</td><td>그 길을 걸은 실제 선배와 연결 (SEED/VERIFIED만)</td><td>mentor_request</td></tr>
+      <tr><td>로그인 후 · 마이</td><td>내 프로필 · 튜브 · 더 비슷하게</td><td>성별·복수전공·휴학·인턴 등 점진 입력</td><td>progressive profile, reward</td></tr>
+    </tbody></table></div>
+</section>
+
+<section>
+  <span class="eyebrow">5-A. 학생 플로우</span>
+  <h2>필수 4개 입력 → Top 5 → 궁금한 직무 → 잠긴 경로</h2>
+  <p class="small">옆으로 넘겨 보세요. 화면 속 숫자는 예시이며, 테스트 배포에서는 모든 결과에 SIMULATION 라벨이 붙습니다.</p>
+  <div class="strip"><div class="strip-in">
+    <div class="ph"><div class="scr">
+      <div class="top"><span>nextpath</span><span>1/5</span></div>
+      <div class="q">지금 어떤 상황이에요?</div>
+      <div class="sub">상황에 맞는 선배를 찾아드릴게요</div>
+      <div class="opt sel">🎓 학생 · 취업 준비 중</div>
+      <div class="opt">💼 지금 일하고 있어요</div>
+      <div class="cta">다음</div>
+    </div><div class="ph-cap"><b>S0 시작</b><br>첫 질문 하나로 두 플로우를 나눕니다.</div></div>
+
+    <div class="ph"><div class="scr">
+      <div class="top"><span>←</span><span>2/5</span></div>
+      <div class="prog"><i style="width:40%"></i></div>
+      <div class="q">학교와 전공을 알려주세요</div>
+      <div class="fld">고려대학교 <em>✓</em></div>
+      <div class="fld">경영학과 <em>✓</em></div>
+      <div class="grid2" style="gap:6px"><div class="fld">2020 <em>입학</em></div><div class="fld">2024 <em>졸업</em></div></div>
+      <div class="sub">졸업 예정이어도 괜찮아요. 연도는 비슷한 선배를 고르는 데만 써요.</div>
+      <div class="cta">선배 찾기</div>
+    </div><div class="ph-cap"><b>S1 필수 입력</b><br>학교·전공은 자동완성(alias 매칭). 입학·졸업 연도 필수. 성별은 여기서 묻지 않습니다.</div></div>
+
+    <div class="ph"><div class="scr">
+      <div class="top"><span>←</span><span>3/5</span></div>
+      <span class="badge">고려대 경영 · 졸업 ±2년</span>
+      <div><span class="big">418</span><b style="font-size:15px"> 명</b></div>
+      <div class="sub">비슷한 선배들의 첫 직무</div>
+      <div class="r"><span>마케팅</span><span class="t"><i style="width:92%"></i></span><b>24%</b></div>
+      <div class="r"><span>전략·기획</span><span class="t"><i style="width:70%"></i></span><b>18%</b></div>
+      <div class="r"><span>재무·금융</span><span class="t"><i class="m" style="width:58%"></i></span><b>15%</b></div>
+      <div class="r"><span>프로덕트</span><span class="t"><i class="m" style="width:58%"></i></span><b>15%</b></div>
+      <div class="r"><span>영업·BD</span><span class="t"><i class="m" style="width:46%"></i></span><b>12%</b></div>
+      <div class="sub">입학·졸업이 딱 맞는 선배는 적어서 졸업 ±2년으로 넓혔어요</div>
+      <div class="cta">이 중에 궁금한 게 있어요</div>
+    </div><div class="ph-cap"><b>S2 첫 결과</b><br>로그인 없이 보여주는 무료 결과. 넓힌 조건을 배지와 문장으로 함께 표시합니다(fallback_reason).</div></div>
+
+    <div class="ph"><div class="scr">
+      <div class="top"><span>←</span><span>4/5</span></div>
+      <div class="q">어떤 길이 제일 궁금해요?</div>
+      <div class="sub">하나만 골라주세요. 고른 길의 선배 경로를 준비할게요</div>
+      <div class="chips"><span>마케팅</span><span>전략·기획</span><span>재무·금융</span><span class="sel">프로덕트</span><span>영업·BD</span><span>데이터·AI</span><span>디자인</span></div>
+      <div class="opt" style="font-weight:600;color:#727883">아직 모르겠어요</div>
+      <div class="cta">프로덕트 선배 경로 보기</div>
+    </div><div class="ph-cap"><b>S3 의도 질문</b><br>INTENT_EVENT를 남기는 순간. "모르겠어요"도 정상 응답으로 기록합니다.</div></div>
+
+    <div class="ph"><div class="scr">
+      <div class="top"><span>←</span><span>5/5</span></div>
+      <span class="badge">결과 준비 완료</span>
+      <div class="lock">
+        <span style="font-size:11px;color:#C9CDD2">프로덕트로 간 선배</span>
+        <span class="big">63명</span>
+        <span style="font-size:11px">이들이 거친 경로 <b>11개</b> · 평균 첫 취업 <b>7개월</b></span>
+      </div>
+      <div class="card2 blur"><div class="path"><span>경영</span>→<span>사업개발</span>→<span class="hl">PM</span></div><div class="path"><span>경영</span>→<span>마케팅</span>→<span class="hl">PO</span></div></div>
+      <div class="sub">🔒 경로 상세는 로그인하면 바로 열려요. 지금까지 입력한 내용은 그대로 이어져요.</div>
+      <div class="cta kakao">카카오로 3초 만에 보기</div>
+      <div class="ghost">처음으로 돌아가기</div>
+    </div><div class="ph-cap"><b>S4 로그인 벽</b><br>숫자·경로 수·흐린 미리보기로 "결과가 이미 뒤에 있다"를 증명한 다음 로그인을 요청합니다.</div></div>
+  </div></div>
+</section>
+
+<section>
+  <span class="eyebrow">5-B. 직장인 플로우</span>
+  <h2>지금 → 비슷한 127명의 다음 → 첫 직장 → 유사 경로 → 궁금한 다음</h2>
+  <div class="strip"><div class="strip-in">
+    <div class="ph"><div class="scr">
+      <div class="top"><span>←</span><span>2/6</span></div>
+      <div class="prog"><i style="width:33%"></i></div>
+      <div class="q">지금 어디서 일해요?</div>
+      <div class="fld">고려대 · 경영 · 2019 졸업</div>
+      <div class="fld">○○커머스 <em>회사</em></div>
+      <div class="fld">마케팅 <em>직무</em></div>
+      <div class="fld">2022 <em>입사</em></div>
+      <div class="sub">회사명은 업종을 찾는 데만 써요. 다른 사람에게 보이지 않아요.</div>
+      <div class="cta">다음</div>
+    </div><div class="ph-cap"><b>P1 현재</b><br>학력 + 현재 회사·직무·입사 연도.</div></div>
+
+    <div class="ph"><div class="scr">
+      <div class="top"><span>←</span><span>3/6</span></div>
+      <span class="badge">마케팅 · 커머스 · 3~5년 차</span>
+      <div><span class="big">127</span><b style="font-size:15px"> 명</b></div>
+      <div class="sub">비슷한 사람들이 고른 다음</div>
+      <div class="r"><span>그대로</span><span class="t"><i style="width:80%"></i></span><b>38%</b></div>
+      <div class="r"><span>프로덕트</span><span class="t"><i style="width:48%"></i></span><b>22%</b></div>
+      <div class="r"><span>데이터·AI</span><span class="t"><i class="m" style="width:30%"></i></span><b>14%</b></div>
+      <div class="r"><span>창업</span><span class="t"><i class="m" style="width:20%"></i></span><b>9%</b></div>
+      <div class="r"><span>기타</span><span class="t"><i class="m" style="width:36%;background:#B2B8C0"></i></span><b>17%</b></div>
+      <div class="cta">첫 직장도 넣고 더 정확히 보기</div>
+    </div><div class="ph-cap"><b>P2 티저</b><br>무료 결과를 먼저 줘서 다음 입력의 이유를 만듭니다.</div></div>
+
+    <div class="ph"><div class="scr">
+      <div class="top"><span>←</span><span>4/6</span></div>
+      <div class="q">첫 직장은 어디였어요?</div>
+      <div class="fld">△△그룹 <em>회사</em></div>
+      <div class="fld">영업 <em>직무</em></div>
+      <div class="fld">2019 <em>입사</em></div>
+      <div class="opt" style="font-weight:600;color:#727883">지금 직장이 첫 직장이에요</div>
+      <div class="cta">경로 맞춰보기</div>
+    </div><div class="ph-cap"><b>P3 첫 직장</b><br>첫 직장 = 현재 직장인 경우를 한 번에 처리합니다.</div></div>
+
+    <div class="ph"><div class="scr">
+      <div class="top"><span>←</span><span>5/6</span></div>
+      <span class="badge">영업 → 마케팅으로 온 사람</span>
+      <div><span class="big">84</span><b style="font-size:15px"> 개 경로</b></div>
+      <div class="card2"><div class="path"><span>영업</span>→<span>마케팅</span>→<span class="hl">?</span></div><span class="sub">당신과 같은 두 걸음을 걸은 사람들의 세 번째 걸음</span></div>
+      <div class="q" style="font-size:15px">어떤 다음이 궁금해요?</div>
+      <div class="chips"><span class="sel">프로덕트</span><span>데이터·AI</span><span>창업</span><span>같은 직무 더 큰 회사</span><span>아직 모르겠어요</span></div>
+      <div class="cta">이 경로 보기</div>
+    </div><div class="ph-cap"><b>P4 유사 경로 + 의도</b><br>경로 수(84)로 근거를 보여주고 같은 화면에서 Intent를 받습니다.</div></div>
+
+    <div class="ph"><div class="scr">
+      <div class="top"><span>←</span><span>6/6</span></div>
+      <span class="badge">결과 준비 완료</span>
+      <div class="lock">
+        <span style="font-size:11px;color:#C9CDD2">마케팅에서 프로덕트로 간 사람</span>
+        <span class="big">28명</span>
+        <span style="font-size:11px">전환까지 평균 <b>2.4년</b> · 거친 회사 유형 <b>5가지</b></span>
+      </div>
+      <div class="card2 blur"><div class="path"><span>영업</span>→<span>마케팅</span>→<span class="hl">PM</span></div><div class="path"><span>마케팅</span>→<span>그로스</span>→<span class="hl">PO</span></div></div>
+      <div class="cta kakao">카카오로 바로 보기</div>
+    </div><div class="ph-cap"><b>P5 로그인 벽</b><br>학생과 같은 컴포넌트, 다른 숫자.</div></div>
+  </div></div>
+</section>
+
+<section>
+  <span class="eyebrow">6. 로그인 이후</span>
+  <h2>재입력 없이 결과로 바로 착지하고, 튜브로 깊이를 엽니다</h2>
+  <div class="strip"><div class="strip-in">
+    <div class="ph"><div class="scr">
+      <div class="top"><span>nextpath</span><span class="tube">20</span></div>
+      <span class="badge">입력하신 내용을 이어왔어요</span>
+      <div class="q">프로덕트로 간 선배 63명의 경로</div>
+      <div class="card2"><div class="path"><span>경영</span>→<span>사업개발</span>→<span class="hl">PM</span></div><span class="sub">21명 · 첫 이동까지 평균 2.1년</span></div>
+      <div class="card2"><div class="path"><span>경영</span>→<span>마케팅</span>→<span class="hl">PO</span></div><span class="sub">14명 · 평균 2.8년</span></div>
+      <div class="card2"><div class="path"><span>경영</span>→<span class="hl">PM (첫 직무)</span></div><span class="sub">11명</span></div>
+      <div class="sub">나머지 8개 경로는 표본이 작아 묶어서 보여드려요 (5명 미만 숨김)</div>
+    </div><div class="ph-cap"><b>M1 Career Map 착지</b><br>로그인 직후 대기 결과를 바로 엽니다. 가입 보상 튜브를 상단에 표시.</div></div>
+
+    <div class="ph"><div class="scr">
+      <div class="top"><span>←</span><span class="tube">20</span></div>
+      <div class="q">경영 → 사업개발 → PM</div>
+      <div class="r"><span>1~2년</span><span class="t"><i style="width:40%"></i></span><b>8</b></div>
+      <div class="r"><span>3~4년</span><span class="t"><i style="width:70%"></i></span><b>10</b></div>
+      <div class="r"><span>5년+</span><span class="t"><i class="m" style="width:16%"></i></span><b>3</b></div>
+      <div class="card2 blur"><span>어떤 회사에서 시작했나 · 다음 이동 · 연차별 비율</span></div>
+      <div class="lock" style="gap:4px"><span style="font-size:12px;font-weight:800">깊은 분석 열기</span><span style="font-size:11px;color:#C9CDD2">회사 유형 · 3번째 이동 · 걸린 시간</span></div>
+      <div class="cta"><span class="tube">5</span> 튜브로 열기</div>
+      <div class="ghost">튜브는 프로필을 채우면 받을 수 있어요</div>
+    </div><div class="ph-cap"><b>M2 경로 상세 · 언락</b><br>가격은 pricing 정책 테이블에서 읽습니다. 같은 항목은 한 번만 차감(멱등).</div></div>
+
+    <div class="ph"><div class="scr">
+      <div class="top"><span>←</span><span class="tube">15</span></div>
+      <div class="q">이 길을 걸은 선배</div>
+      <div class="card2"><b>선배 A · PM 4년 차</b><span class="sub">경영 → 사업개발 → PM · 인증됨</span><span class="chips"><span>커피챗 30분</span></span></div>
+      <div class="card2"><b>선배 B · PO 6년 차</b><span class="sub">경영 → 마케팅 → PO · 인증됨</span></div>
+      <div class="sub">선배는 실제 가입·인증한 사람만 보여요. 테스트 데이터는 선배로 표시되지 않아요.</div>
+      <div class="cta">대화 요청하기</div>
+    </div><div class="ph-cap"><b>M3 선배 연결</b><br>SEED/VERIFIED만 노출. PRE_SEED는 절대 사람·멘토로 보이지 않습니다.</div></div>
+
+    <div class="ph"><div class="scr">
+      <div class="top"><span>마이</span><span class="tube">15</span></div>
+      <div class="q">더 비슷한 선배만 보기</div>
+      <div class="sub">채울수록 결과가 정확해지고 튜브를 받아요</div>
+      <div class="card2"><b>복수전공 · 부전공</b><span class="sub">+3 튜브</span></div>
+      <div class="card2"><b>인턴 경험</b><span class="sub">+3 튜브</span></div>
+      <div class="card2"><b>휴학 · 교환학생</b><span class="sub">+2 튜브</span></div>
+      <div class="card2"><b>성별 (선택)</b><span class="sub">50명 미만이면 성별 조건 없이 보여드려요</span></div>
+    </div><div class="ph-cap"><b>M4 점진 프로필</b><br>보상 수치는 reward 정책 테이블 값. 성별은 공개 기준(50명) 미달 시 자동으로 빠집니다.</div></div>
+  </div></div>
+</section>
+
+<section>
+  <span class="eyebrow">7. 데이터 표시 규칙</span>
+  <h2>신뢰는 숫자를 숨기는 규칙에서 나옵니다</h2>
+  <div class="tbl"><table>
+    <thead><tr><th>상황</th><th>화면 표현</th><th>근거</th></tr></thead>
+    <tbody>
+      <tr><td>정확 cohort가 작아 넓힘</td><td>배지 "졸업 ±2년" + 한 줄 설명</td><td>학생 4개 필수 입력의 정확 cohort 중앙값 2명 (06 검증 F2)</td></tr>
+      <tr><td>칸 인원이 작음</td><td>숫자 대신 "5명 미만" 또는 "기타"로 묶음</td><td>small-cell suppression (CLAUDE.md 비협상 원칙)</td></tr>
+      <tr><td>성별 등 인구통계 필터</td><td>50명 미만이면 조건을 빼고, 뺐다고 표시</td><td>학교+전공+여성 중앙값 18명 (F3)</td></tr>
+      <tr><td>기간 필터</td><td>기본 "전체 기간", 최근 N년은 사용자가 좁힘</td><td>최근 5년 창 중앙값 21명 (F1)</td></tr>
+      <tr><td>테스트 배포</td><td>모든 결과에 주황 SIMULATION 라벨</td><td>PRE_SEED는 개발·시뮬레이션 전용</td></tr>
+      <tr><td>값을 모름</td><td>"정보 없음"으로 비움, 추정 금지</td><td>unknown = NULL</td></tr>
+    </tbody></table></div>
+</section>
+
+<section>
+  <span class="eyebrow">8. 카피 톤</span>
+  <h2>선배가 후배에게 말하듯, 짧고 구체적으로</h2>
+  <div class="grid2">
+    <div class="card"><h3>이렇게</h3><ul class="clean small">
+      <li>"비슷한 선배 418명 중 24%가 마케팅으로 갔어요"</li>
+      <li>"딱 맞는 선배가 적어서 졸업 ±2년으로 넓혔어요"</li>
+      <li>"입력한 내용은 그대로 이어져요"</li>
+      <li>"5튜브로 열기"</li></ul></div>
+    <div class="card"><h3>이렇게 말하지 않기</h3><ul class="clean small">
+      <li>"당신에게 맞는 직무는 마케팅입니다" (추천처럼 단정)</li>
+      <li>"Cohort fallback level 1 적용" (시스템 용어)</li>
+      <li>"지금 가입하면 혜택!" (증거 없는 로그인 유도)</li>
+      <li>"상위 1% 선배" (근거 없는 수식어)</li></ul></div>
+  </div>
+</section>
+
+<section>
+  <span class="eyebrow">9. 컴포넌트</span>
+  <h2>열 개로 두 플로우와 로그인 이후를 모두 만듭니다</h2>
+  <div class="tbl"><table>
+    <thead><tr><th>컴포넌트</th><th>쓰는 곳</th><th>메모</th></tr></thead>
+    <tbody>
+      <tr><td>QuestionScreen</td><td>S0~S3, P1~P4</td><td>질문 1개 + 진행 바 + 하단 고정 CTA</td></tr>
+      <tr><td>Autocomplete (학교·전공·회사·직무)</td><td>S1, P1, P3</td><td>taxonomy_alias 정규화 매칭, 미매칭은 원문 저장</td></tr>
+      <tr><td>YearPair</td><td>S1</td><td>입학 ≤ 졸업 검증</td></tr>
+      <tr><td>CohortCount</td><td>S2, P2, P4</td><td>큰 숫자 + 단위(명/개 경로)</td></tr>
+      <tr><td>DistributionBar</td><td>S2, P2, M2</td><td>1순위 민트 · 2~ 연민트 · 기타 회색, 작은 칸 숨김</td></tr>
+      <tr><td>BasisBadge</td><td>모든 결과</td><td>cohort 범위와 넓힌 조건, SIMULATION 라벨</td></tr>
+      <tr><td>IntentPicker</td><td>S3, P4</td><td>단일 선택 + "아직 모르겠어요"</td></tr>
+      <tr><td>LockedResult</td><td>S4, P5, M2</td><td>다크 카드 + 숫자 + 흐린 미리보기</td></tr>
+      <tr><td>PathCard</td><td>M1, M3</td><td>A → B → C, 인원·기간</td></tr>
+      <tr><td>TubeBalance · UnlockButton</td><td>헤더, M2</td><td>잔액, 가격, 멱등 차감</td></tr>
+    </tbody></table></div>
+</section>
+
+<section>
+  <span class="eyebrow">10. 판단 근거</span>
+  <h2>장단점 · 강점과 약점 · 기회와 위기</h2>
+  <div class="swot">
+    <div class="card" style="--c:#21D7C8"><h3><i></i>강점</h3><ul class="clean small">
+      <li>Hello My Me 토큰·Pretendard·FACE 원칙을 그대로 써서 합칠 때 디자인 부채가 거의 없음</li>
+      <li>로그인 전에 숫자를 먼저 줘서 "왜 가입해야 하지?"에 답함. 로그인 벽이 가입 흐름을 막는다는 연구(NN/g)와 반대 방향의 설계</li>
+      <li>입력할수록 결과가 좁아지는 구조라 이미 들인 노력이 다음 입력을 부름(진행 효과, Nunes &amp; Drèze 2006)</li></ul></div>
+    <div class="card" style="--c:#FFAC62"><h3><i></i>약점</h3><ul class="clean small">
+      <li>PRE_SEED 단계에서는 모든 숫자가 SIMULATION이라 실제 가치 검증은 SEED가 쌓인 뒤에야 가능</li>
+      <li>민트 흰 글씨 조합이 접근성 기준 미달. 기존 앱 화면과 버튼 글자색이 달라짐</li>
+      <li>작은 cohort 숨김 때문에 지방·소규모 학과 사용자는 "기타"를 많이 보게 됨</li></ul></div>
+    <div class="card" style="--c:#6EB1FF"><h3><i></i>기회</h3><ul class="clean small">
+      <li>FACE 유형과 직무 분포를 결합한 "내 유형 선배의 길"은 다른 서비스에 없는 조합</li>
+      <li>Intent → Decision → Outcome 데이터가 쌓이면 학교 B2B 리포트(진로센터)로 확장 가능</li>
+      <li>소개서의 50+ 파트너 멘토를 M3 선배 연결의 초기 공급으로 바로 쓸 수 있음</li></ul></div>
+    <div class="card" style="--c:#EF5050"><h3><i></i>위기</h3><ul class="clean small">
+      <li>학교+전공+연도 조합은 재식별 위험이 있음. 작은 칸 숨김 기준이 느슨하면 개인이 드러남(k-익명성 문제, Sweeney 2002)</li>
+      <li>링크드인 등 공개 프로필 서비스가 비슷한 "동문 경로" 기능을 이미 제공. 차별점은 한국 학교·전공 분류와 의도 데이터에 있어야 함</li>
+      <li>개인정보보호법상 경력 데이터와 계정 결합 전 동의가 필요. 로그인 벽에서 동의 화면이 길어지면 전환이 떨어짐</li></ul></div>
+  </div>
+  <div class="darkblock">
+    <span class="eyebrow" style="color:var(--mint)">권장 결정</span>
+    <h3>로그인 벽 앞 화면(S2·P2)을 무료로 열어 두는 안을 기본으로 갑니다</h3>
+    <p class="small">대안은 첫 화면부터 로그인을 요구하는 안입니다. 그 안은 의도 데이터를 더 빨리 계정에 묶지만, 첫 방문자가 결과를 보기 전에 떠날 위험이 큽니다. Baymard 조사에서 온라인 구매자의 약 4명 중 1명이 "계정 생성 강요"를 이탈 이유로 꼽았습니다. 쇼핑 결제와 진로 탐색은 다르지만, 가치를 보기 전 가입을 요구하면 이탈한다는 방향은 같습니다. 측정 지표: S1 시작 → S2 도달률, S4 로그인 전환율, 로그인 후 M1 착지까지 재입력 0건.</p>
+  </div>
+</section>
+
+<section>
+  <span class="eyebrow">출처</span>
+  <ol class="refs">
+    <li>FACE 디자인 시스템 — face-career 저장소 <code>DESIGN-SYSTEM.md</code> (face.da-sh.io는 이 환경에서 접속이 막혀 저장소 문서로 대신 확인)</li>
+    <li>Hello My Me 디자인 토큰·화면 구조 — hello-my-me 저장소 <code>CLAUDE.md</code>, <code>src/lib/design-tokens.ts</code>, <code>public/앱&amp;플레이 스토어 이미지</code></li>
+    <li>헬로마이미 소개서 PDF — 여정(KNOW→EXPLORE→EXPERIENCE→GROW), 대학생 70% 직무 미확정, 50+ 파트너 멘토</li>
+    <li>Pre-seed v1.3 검증 — Next-path <code>docs/06_PRESEED_V13_VALIDATION.md</code> (F1~F3 수치)</li>
+    <li>WCAG 2.1 대비 기준 1.4.3 — <a href="https://www.w3.org/TR/WCAG21/#contrast-minimum">https://www.w3.org/TR/WCAG21/#contrast-minimum</a></li>
+    <li>NN/g, Login Walls — <a href="https://www.nngroup.com/articles/login-walls/">https://www.nngroup.com/articles/login-walls/</a></li>
+    <li>NN/g, Progressive Disclosure — <a href="https://www.nngroup.com/articles/progressive-disclosure/">https://www.nngroup.com/articles/progressive-disclosure/</a></li>
+    <li>Baymard Institute, Cart Abandonment Rate — <a href="https://baymard.com/lists/cart-abandonment-rate">https://baymard.com/lists/cart-abandonment-rate</a></li>
+    <li>Nunes &amp; Drèze (2006), The Endowed Progress Effect, Journal of Consumer Research — <a href="https://doi.org/10.1086/500480">https://doi.org/10.1086/500480</a></li>
+    <li>Sweeney (2002), k-Anonymity — <a href="https://dataprivacylab.org/dataprivacy/projects/kanonymity/kanonymity.pdf">https://dataprivacylab.org/dataprivacy/projects/kanonymity/kanonymity.pdf</a></li>
+    <li>Pretendard — <a href="https://github.com/orioncactus/pretendard">https://github.com/orioncactus/pretendard</a></li>
+  </ol>
+</section>
+
+</main>
