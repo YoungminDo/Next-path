@@ -1,4 +1,4 @@
-"""PRE_SEED CSV package import.
+"""PRE_SEED package import (CSV package up to v1.2, workbook from v1.3: see workbook.py).
 
 schema mapping -> validation -> normalization -> deduplication -> import -> integrity check
 -> report. The importer never generates or repairs data: rows that break a rule are rejected
@@ -45,8 +45,12 @@ WORK_FIELD_MAP = {
 CRITICAL_RULES = {
     "DUPLICATE_ID", "ORPHAN_PERSON", "ORPHAN_INSTITUTION", "ORPHAN_MAJOR",
     "ORPHAN_ORGANIZATION", "ORPHAN_ROLE", "ORPHAN_WORK_EVENT", "DATA_LAYER_MISMATCH",
-    "SOURCE_TYPE_MISMATCH", "TAXONOMY_INVALID",
+    "SOURCE_TYPE_MISMATCH", "TAXONOMY_INVALID", "TAXONOMY_NODE_INVALID", "ORPHAN_TAXONOMY_NODE",
+    "TAXONOMY_NODE_TYPE_MISMATCH", "RAW_NAME_NODE_CONFLICT",
 }
+TAXONOMY_TYPES = {"ROLE", "MAJOR", "INDUSTRY"}
+GENDER_CODES = {"MALE", "FEMALE", "OTHER", "UNDISCLOSED", "UNKNOWN"}
+PRECISIONS = {"DAY", "MONTH", "YEAR"}
 # Organizations that stand for a category rather than a real employer.
 PLACEHOLDER_ORG = re.compile(r"^(.+ [A-Z]|창업/자영업)$")
 FOUNDER_ROLE_NAMES = {"창업자"}
@@ -126,6 +130,10 @@ class Validated:
     sources: list[dict]
     issues: list[Issue]
     staged_counts: dict[str, int]
+    # v1.3+ workbook only: taxonomy_id -> row, node code -> row, org industry rows.
+    taxonomies: dict[str, dict] = field(default_factory=dict)
+    nodes: dict[str, dict] = field(default_factory=dict)
+    org_industries: list[dict] = field(default_factory=list)
 
     def rejects(self) -> list[Issue]:
         return [i for i in self.issues if i.severity == "REJECT"]
@@ -187,6 +195,39 @@ def validate(pkg: Package, as_of: date, data_layer: str = "PRE_SEED",
             ok = False
         return ok
 
+    taxonomies, nodes, node_type = _validate_taxonomy_nodes(pkg, issue)
+
+    def check_node(entity, key, n, row, col, expected_type) -> bool:
+        code = row.get(col, "")
+        if not code:
+            return True
+        if code not in nodes:
+            issue("REJECT", entity, key, n, "ORPHAN_TAXONOMY_NODE", row, column=col, node=code)
+            return False
+        if node_type[code] != expected_type:
+            issue("REJECT", entity, key, n, "TAXONOMY_NODE_TYPE_MISMATCH", row, column=col,
+                  node=code, expected=expected_type, actual=node_type[code])
+            return False
+        return True
+
+    def check_precision(entity, key, n, row, *cols) -> bool:
+        bad = [c for c in cols if row.get(c, "") not in PRECISIONS | {""}]
+        if bad:
+            issue("REJECT", entity, key, n, "PRECISION_INVALID", row, columns=bad)
+        return not bad
+
+    # The same raw text must not point at two different nodes (the dictionary is keyed by it).
+    for entity, raw_col, node_col in (("educations", "raw_major_name", "major_taxonomy_node_id"),
+                                      ("work_events", "raw_role_title", "role_taxonomy_node_id")):
+        seen_nodes: dict[str, set[str]] = defaultdict(set)
+        for row in pkg.rows[entity]:
+            if row.get(raw_col) and row.get(node_col):
+                seen_nodes[row[raw_col]].add(row[node_col])
+        for raw_name, codes in seen_nodes.items():
+            if len(codes) > 1:
+                issue("REJECT", entity, raw_name, None, "RAW_NAME_NODE_CONFLICT",
+                      nodes=sorted(codes))
+
     all_person_ids = {r.get("person_id") for r in pkg.rows["persons"]}
     persons: dict[str, dict] = {}
     for key, (n, row) in unique_rows("persons", "person_id").items():
@@ -194,6 +235,9 @@ def validate(pkg: Package, as_of: date, data_layer: str = "PRE_SEED",
             continue
         if row.get("user_stage") and row["user_stage"] not in STAGES:
             issue("REJECT", "persons", key, n, "STAGE_INVALID", row)
+            continue
+        if row.get("gender_code", "") not in GENDER_CODES | {""}:
+            issue("REJECT", "persons", key, n, "GENDER_INVALID", row)
             continue
         persons[key] = row
 
@@ -215,6 +259,18 @@ def validate(pkg: Package, as_of: date, data_layer: str = "PRE_SEED",
         if gy and not (gy.isdigit() and 1950 <= int(gy) <= 2100):
             issue("REJECT", "educations", key, n, "GRADUATION_YEAR_INVALID", row)
             continue
+        ay = row.get("admission_year", "")
+        if ay and not (ay.isdigit() and 1950 <= int(ay) <= 2100):
+            issue("REJECT", "educations", key, n, "ADMISSION_YEAR_INVALID", row)
+            continue
+        if ay and gy and int(ay) > int(gy):
+            issue("REJECT", "educations", key, n, "ADMISSION_AFTER_GRADUATION", row)
+            continue
+        if not check_node("educations", key, n, row, "major_taxonomy_node_id", "MAJOR"):
+            continue
+        if not check_precision("educations", key, n, row, "admission_precision",
+                               "graduation_precision"):
+            continue
         educations.append({**row, "_row": n})
 
     roles = taxonomy["roles"]
@@ -235,6 +291,10 @@ def validate(pkg: Package, as_of: date, data_layer: str = "PRE_SEED",
             continue
         if row.get("event_type") not in EVENT_TYPES:
             issue("REJECT", "work_events", key, n, "EVENT_TYPE_INVALID", row)
+            continue
+        if not check_node("work_events", key, n, row, "role_taxonomy_node_id", "ROLE"):
+            continue
+        if not check_precision("work_events", key, n, row, "start_precision", "end_precision"):
             continue
         try:
             start, end = _parse_date(row["start_date"]), _parse_date(row["end_date"])
@@ -313,6 +373,27 @@ def validate(pkg: Package, as_of: date, data_layer: str = "PRE_SEED",
         if sourced_events[eid] == 0:
             issue("WARNING", "work_events", eid, ev["_row"], "NO_EVIDENCE_SOURCE")
 
+    org_industries = []
+    primary_orgs: Counter = Counter()
+    for n, row in enumerate(pkg.rows.get("org_industries", []), start=2):
+        key = row.get("organization_industry_id") or None
+        if row.get("organization_id") not in taxonomy["organizations"]:
+            issue("REJECT", "org_industries", key, n, "ORPHAN_ORGANIZATION", row)
+            continue
+        if not check_node("org_industries", key, n, row, "industry_taxonomy_node_id", "INDUSTRY"):
+            continue
+        try:
+            primary = bool(_parse_bool(row.get("is_primary", "")))
+        except ValueError as exc:
+            issue("REJECT", "org_industries", key, n, "VALUE_INVALID", row, error=str(exc))
+            continue
+        if primary:
+            primary_orgs[row["organization_id"]] += 1
+            if primary_orgs[row["organization_id"]] > 1:
+                issue("REJECT", "org_industries", key, n, "MULTIPLE_PRIMARY_INDUSTRY", row)
+                continue
+        org_industries.append({**row, "_primary": primary})
+
     return Validated(
         taxonomy=taxonomy,
         persons=[{**r, "_key": k} for k, r in persons.items()],
@@ -320,8 +401,49 @@ def validate(pkg: Package, as_of: date, data_layer: str = "PRE_SEED",
         work_events=work_events,
         sources=sources,
         issues=issues,
-        staged_counts={name: len(pkg.rows[name]) for name in FILES},
+        staged_counts={name: len(rows) for name, rows in pkg.rows.items()},
+        taxonomies=taxonomies,
+        nodes=nodes,
+        org_industries=org_industries,
     )
+
+
+def _validate_taxonomy_nodes(pkg: Package, issue) -> tuple[dict, dict, dict]:
+    """Taxonomy sheets are all-or-nothing: any broken node aborts the import (critical)."""
+    taxonomies: dict[str, dict] = {}
+    for n, row in enumerate(pkg.rows.get("taxonomies", []), start=2):
+        if row.get("taxonomy_type") not in TAXONOMY_TYPES or not row.get("version"):
+            issue("REJECT", "taxonomies", row.get("taxonomy_id"), n, "TAXONOMY_INVALID", row)
+            continue
+        taxonomies[row["taxonomy_id"]] = row
+    # Node rows name their taxonomy either by sheet id (TAX_ROLE) or by type (ROLE).
+    by_type = {t["taxonomy_type"]: t for t in taxonomies.values()}
+    nodes: dict[str, dict] = {}
+    node_type: dict[str, str] = {}
+    for n, row in enumerate(pkg.rows.get("taxonomy_nodes", []), start=2):
+        code = row.get("taxonomy_node_id", "")
+        tax = taxonomies.get(row.get("taxonomy_id", "")) or by_type.get(row.get("taxonomy_id", ""))
+        if not code or code in nodes or tax is None or not row.get("canonical_name"):
+            issue("REJECT", "taxonomy_nodes", code or None, n, "TAXONOMY_NODE_INVALID", row)
+            continue
+        if row.get("status", "ACTIVE") not in {"DRAFT", "ACTIVE", "RETIRED"}:
+            issue("REJECT", "taxonomy_nodes", code, n, "TAXONOMY_NODE_INVALID", row)
+            continue
+        nodes[code] = {**row, "_row": n, "_taxonomy_key": tax["taxonomy_id"]}
+        node_type[code] = tax["taxonomy_type"]
+    for code, row in nodes.items():
+        parent = row.get("parent_node_id", "")
+        expected_depth = 1
+        if parent:
+            if parent not in nodes or node_type[parent] != node_type[code]:
+                issue("REJECT", "taxonomy_nodes", code, row["_row"], "TAXONOMY_NODE_INVALID", row,
+                      parent=parent)
+                continue
+            expected_depth = int(nodes[parent].get("depth") or 0) + 1
+        if row.get("depth") and int(row["depth"]) != expected_depth:
+            issue("REJECT", "taxonomy_nodes", code, row["_row"], "TAXONOMY_NODE_INVALID", row,
+                  depth=row["depth"], expected_depth=expected_depth)
+    return taxonomies, nodes, node_type
 
 
 def _report(v: Validated, imported: dict[str, int] | None, checks: dict | None) -> dict:
@@ -334,6 +456,7 @@ def _report(v: Validated, imported: dict[str, int] | None, checks: dict | None) 
             "work_events": len(v.work_events), "work_event_sources": len(v.sources),
             "institutions": len(v.taxonomy["institutions"]), "majors": len(v.taxonomy["majors"]),
             "organizations": len(v.taxonomy["organizations"]), "roles": len(v.taxonomy["roles"]),
+            "taxonomy_nodes": len(v.nodes), "organization_industries": len(v.org_industries),
         },
         "imported": imported,
         "rejected_records": dict(rejected),
@@ -348,9 +471,16 @@ def _report(v: Validated, imported: dict[str, int] | None, checks: dict | None) 
     }
 
 
-def run_import(engine: Engine, csv_dir: str | Path, *, as_of: date, dataset_version: str,
+def load_any_package(path: str | Path) -> Package:
+    if str(path).lower().endswith(".xlsx"):
+        from hellomyme.importer.workbook import load_workbook_package
+        return load_workbook_package(path)
+    return load_package(path)
+
+
+def run_import(engine: Engine, path: str | Path, *, as_of: date, dataset_version: str,
                date_precision: str = "MONTH") -> dict:
-    pkg = load_package(csv_dir)
+    pkg = load_any_package(path)
     with engine.begin() as conn:
         done = conn.execute(
             text("SELECT import_batch_id, report FROM import_batch "
@@ -468,6 +598,8 @@ def _write(conn: Connection, v: Validated, batch_id, dataset_version: str,
         tax_ids[name] = {k: found[r[name_col]] for k, r in rows}
         _map_keys(conn, system, table.upper(), list(tax_ids[name].items()), batch_id)
 
+    node_ids = _write_taxonomy_nodes(conn, v)
+
     edu_by_person = defaultdict(list)
     for e in v.educations:
         edu_by_person[e["person_id"]].append(e)
@@ -507,10 +639,12 @@ def _write(conn: Connection, v: Validated, batch_id, dataset_version: str,
                      ON CONFLICT (source_system, source_key) DO NOTHING""", source_rows)
 
     person_rows = [{"id": key_id("person", p["_key"]), "stage": p.get("user_stage") or None,
-                    "src": source_ids[p.get("source_ref") or p["_key"]]} for p in v.persons]
+                    "src": source_ids[p.get("source_ref") or p["_key"]],
+                    "g": p.get("gender_code") or "UNKNOWN"} for p in v.persons]
     n_persons = _insert(conn, """INSERT INTO person (person_id, origin_layer, declared_stage,
-                                    primary_source_id)
-                                 VALUES (:id, 'PRE_SEED', :stage, :src)
+                                    primary_source_id, gender_code, gender_source_id)
+                                 VALUES (:id, 'PRE_SEED', :stage, :src, :g,
+                                         CASE WHEN :g = 'UNKNOWN' THEN NULL ELSE :src END)
                                  ON CONFLICT (person_id) DO NOTHING""", person_rows)
     _map_keys(conn, system, "PERSON", [(p["_key"], key_id("person", p["_key"])) for p in v.persons],
               batch_id)
@@ -525,13 +659,18 @@ def _write(conn: Connection, v: Validated, batch_id, dataset_version: str,
         "mraw": major_names.get(e["major_id"]), "mid": tax_ids["majors"].get(e["major_id"]),
         "deg": e.get("degree_type") or None,
         "gy": int(e["graduation_year"]) if e.get("graduation_year") else None,
+        "ay": int(e["admission_year"]) if e.get("admission_year") else None,
+        "ap": e.get("admission_precision") or None, "gp": e.get("graduation_precision") or None,
+        "mnode": node_ids.get(e.get("major_taxonomy_node_id", "")),
     } for e in v.educations]
     n_edu = _insert(conn, """INSERT INTO education (education_id, person_id, institution_raw,
                                 institution_id, major_raw, major_id, degree_type, graduation_year,
+                                admission_year, admission_date_precision,
+                                graduation_date_precision, major_taxonomy_node_id,
                                 data_layer, verification_level, normalization_status,
                                 normalization_confidence)
-                             VALUES (:id, :pid, :iraw, :iid, :mraw, :mid, :deg, :gy, 'PRE_SEED',
-                                     'UNVERIFIED', 'MAPPED', 1.0)
+                             VALUES (:id, :pid, :iraw, :iid, :mraw, :mid, :deg, :gy, :ay, :ap, :gp,
+                                     :mnode, 'PRE_SEED', 'UNVERIFIED', 'MAPPED', 1.0)
                              ON CONFLICT (education_id) DO NOTHING""", edu_rows)
     _insert(conn, """INSERT INTO education_source (education_source_id, education_id, source_id,
                         supported_fields, is_primary)
@@ -542,6 +681,7 @@ def _write(conn: Connection, v: Validated, batch_id, dataset_version: str,
         "sid": source_ids[e.get("source_ref") or e["person_id"]],
         "fields": [f for f, col in (("institution", "institution_id"), ("major", "major_id"),
                                     ("degree_type", "degree_type"),
+                                    ("admission_year", "admission_year"),
                                     ("graduation_year", "graduation_year")) if e.get(col)],
     } for e in v.educations])
     _map_keys(conn, system, "EDUCATION", [(e["education_id"], key_id("education", e["education_id"]))
@@ -556,17 +696,21 @@ def _write(conn: Connection, v: Validated, batch_id, dataset_version: str,
         "oraw": org_names.get(e["organization_id"]),
         "oid": tax_ids["organizations"].get(e["organization_id"]),
         "rraw": role_names.get(e["role_id"]), "rid": tax_ids["roles"].get(e["role_id"]),
-        "sd": e["_start"], "sp": date_precision if e["_start"] else None,
-        "ed": e["_end"], "ep": date_precision if e["_end"] else None,
+        "sd": e["_start"],
+        "sp": (e.get("start_precision") or date_precision) if e["_start"] else None,
+        "ed": e["_end"],
+        "ep": (e.get("end_precision") or date_precision) if e["_end"] else None,
         "cur": e["_is_current"],
+        "rnode": node_ids.get(e.get("role_taxonomy_node_id", "")),
     } for e in v.work_events]
+    # employment_type stays NULL: the package does not say whether a job was an internship.
     n_we = _insert(conn, """INSERT INTO work_event (work_event_id, person_id, event_type,
                                organization_raw, organization_id, role_raw, role_id, start_date,
                                start_date_precision, end_date, end_date_precision, is_current,
-                               data_layer, verification_level, normalization_status,
-                               normalization_confidence)
+                               role_taxonomy_node_id, data_layer, verification_level,
+                               normalization_status, normalization_confidence)
                             VALUES (:id, :pid, :type, :oraw, :oid, :rraw, :rid, :sd, :sp, :ed,
-                                    :ep, :cur, 'PRE_SEED', 'UNVERIFIED', 'MAPPED', 1.0)
+                                    :ep, :cur, :rnode, 'PRE_SEED', 'UNVERIFIED', 'MAPPED', 1.0)
                             ON CONFLICT (work_event_id) DO NOTHING""", we_rows)
     _map_keys(conn, system, "WORK_EVENT", [(e["work_event_id"], key_id("work_event", e["work_event_id"]))
                                    for e in v.work_events], batch_id)
@@ -585,6 +729,20 @@ def _write(conn: Connection, v: Validated, batch_id, dataset_version: str,
               [(s["work_event_source_id"], key_id("work_event_source", s["work_event_source_id"]))
                for s in v.sources], batch_id)
 
+    oi_rows = [{
+        "oid": tax_ids["organizations"][r["organization_id"]],
+        "node": node_ids[r["industry_taxonomy_node_id"]], "prim": r["_primary"],
+    } for r in v.org_industries]
+    # The workbook gives no per-organization source record, so source_id stays NULL.
+    n_oi = _insert(conn, """INSERT INTO organization_industry (organization_id, taxonomy_node_id,
+                               is_primary)
+                            SELECT :oid, :node, :prim
+                            WHERE NOT EXISTS (SELECT 1 FROM organization_industry
+                                              WHERE organization_id = :oid
+                                                AND taxonomy_node_id = :node
+                                                AND valid_from IS NULL)
+                            ON CONFLICT DO NOTHING""", oi_rows)
+
     issue_rows = [{
         "b": batch_id, "sev": i.severity, "ent": i.entity_type, "key": i.source_key,
         "n": i.row_number, "rule": i.rule_code, "detail": json.dumps(i.detail, default=str),
@@ -596,7 +754,58 @@ def _write(conn: Connection, v: Validated, batch_id, dataset_version: str,
                              CAST(:raw AS jsonb))""", issue_rows)
 
     return {"persons": n_persons, "education_records": n_edu, "work_events": n_we,
-            "work_event_sources": n_wes, "source_records": len(source_rows)}
+            "work_event_sources": n_wes, "source_records": len(source_rows),
+            "taxonomy_nodes": len(node_ids), "organization_industries": n_oi}
+
+
+def _write_taxonomy_nodes(conn: Connection, v: Validated) -> dict[str, uuid.UUID]:
+    """Create taxonomy versions and nodes (parents first) plus raw-text aliases.
+
+    Existing nodes are reused, never modified: a changed structure needs a new taxonomy version.
+    """
+    if not v.nodes:
+        return {}
+    tax_uuid: dict[str, uuid.UUID] = {}
+    for key, t in v.taxonomies.items():
+        conn.execute(
+            text("""INSERT INTO taxonomy (taxonomy_type, name, version, status)
+                    SELECT :t, :n, :v, CASE WHEN EXISTS (SELECT 1 FROM taxonomy
+                        WHERE taxonomy_type = :t AND status = 'ACTIVE') THEN 'DRAFT'
+                        ELSE 'ACTIVE' END
+                    ON CONFLICT (taxonomy_type, version) DO NOTHING"""),
+            {"t": t["taxonomy_type"], "n": t.get("name") or t["taxonomy_id"], "v": t["version"]},
+        )
+        tax_uuid[key] = conn.execute(
+            text("SELECT taxonomy_id FROM taxonomy WHERE taxonomy_type = :t AND version = :v"),
+            {"t": t["taxonomy_type"], "v": t["version"]},
+        ).scalar_one()
+
+    node_ids: dict[str, uuid.UUID] = {}
+    for code, row in sorted(v.nodes.items(), key=lambda kv: int(kv[1].get("depth") or 1)):
+        tid = tax_uuid[row["_taxonomy_key"]]
+        conn.execute(
+            text("""INSERT INTO taxonomy_node (taxonomy_id, parent_node_id, code, canonical_name,
+                        display_name, depth, sort_order, status)
+                    VALUES (:tid, :parent, :code, :cn, :dn, 1, :so, :st)
+                    ON CONFLICT (taxonomy_id, code) DO NOTHING"""),
+            {"tid": tid, "parent": node_ids.get(row.get("parent_node_id", "")), "code": code,
+             "cn": row["canonical_name"], "dn": row.get("display_name") or row["canonical_name"],
+             "so": row["_row"], "st": row.get("status") or "ACTIVE"},
+        )
+        node_ids[code] = conn.execute(
+            text("SELECT taxonomy_node_id FROM taxonomy_node WHERE taxonomy_id = :tid AND code = :c"),
+            {"tid": tid, "c": code},
+        ).scalar_one()
+
+    aliases = {(node_ids[e["major_taxonomy_node_id"]], e["raw_major_name"])
+               for e in v.educations if e.get("major_taxonomy_node_id") and e.get("raw_major_name")}
+    aliases |= {(node_ids[w["role_taxonomy_node_id"]], w["raw_role_title"])
+                for w in v.work_events if w.get("role_taxonomy_node_id") and w.get("raw_role_title")}
+    _insert(conn, """INSERT INTO taxonomy_alias (taxonomy_node_id, alias_text, source_type)
+                     VALUES (:node, :alias, 'PRE_SEED_FILE')
+                     ON CONFLICT (taxonomy_node_id, alias_text, locale) DO NOTHING""",
+            [{"node": node, "alias": alias} for node, alias in sorted(aliases)])
+    return node_ids
 
 
 def _insert(conn: Connection, sql: str, rows: list[dict], chunk: int = 5000) -> int:
@@ -636,6 +845,14 @@ def _integrity_checks(conn: Connection, v: Validated, batch_id, system: str) -> 
         0)
     check("work_events_end_before_start", scalar(
         "SELECT count(*) FROM work_event WHERE end_date < start_date"), 0)
+    check("educations_missing_major_node", scalar(
+        """SELECT count(*) FROM education WHERE person_id = ANY(:ids)
+           AND major_taxonomy_node_id IS NULL""", ids=person_ids),
+        sum(1 for e in v.educations if not e.get("major_taxonomy_node_id")))
+    check("work_events_missing_role_node", scalar(
+        """SELECT count(*) FROM work_event WHERE person_id = ANY(:ids)
+           AND role_taxonomy_node_id IS NULL""", ids=person_ids),
+        sum(1 for e in v.work_events if not e.get("role_taxonomy_node_id")))
     check("non_preseed_rows_in_batch", scalar(
         """SELECT count(*) FROM source_record WHERE import_batch_id = :b
            AND data_layer <> 'PRE_SEED'""", b=batch_id), 0)

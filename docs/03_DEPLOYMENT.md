@@ -47,14 +47,17 @@ Railway·Fly.io·Cloud Run·App Runner 도 같은 Dockerfile 로 배포할 수 �
 
 ## 3. PRE_SEED import (1회)
 
-CSV 패키지는 저장소에 없습니다. 로컬에서 운영 DB 를 가리켜 실행:
+공식 PRE_SEED는 `HELLOMYME_PreSeed_Career_Data_v1.3.xlsx` 입니다(저장소에 없음). 이전 v1.2는 import 후 삭제합니다.
+Windows: PowerShell 에서 `irm https://raw.githubusercontent.com/YoungminDo/Next-path/main/scripts/import-preseed.ps1 | iex`
+(다운로드 폴더의 엑셀 파일을 찾아 import 하고 v1.2 를 정리). 직접 실행:
 
 ```bash
 cd apps/api
-HELLOMYME_DATABASE_URL='<위 URL>' uv run hellomyme-import-preseed /path/to/HELLOMYME_PreSeed_CSV_v1.2 \
-  --dataset-version v1.2 --as-of 2026-10-07
+HELLOMYME_DATABASE_URL='<위 URL>' uv run hellomyme-import-preseed /path/to/HELLOMYME_PreSeed_Career_Data_v1.3.xlsx \
+  --retire v1.2
 ```
-재실행해도 `ALREADY_IMPORTED` 로 끝납니다. 약 30초 (20,000명).
+데이터셋 버전과 기준일은 엑셀의 `00_README` 에서 읽습니다. 재실행해도 `ALREADY_IMPORTED` 로 끝납니다.
+약 45초 (20,000명). DB 스키마가 0020 이상이어야 하므로 API 배포(마이그레이션) 후에 실행합니다.
 
 ## 4. 웹 (Vercel)
 

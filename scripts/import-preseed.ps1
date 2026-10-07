@@ -3,14 +3,15 @@
 # One line in PowerShell:
 #   irm https://raw.githubusercontent.com/YoungminDo/Next-path/main/scripts/import-preseed.ps1 | iex
 #
-# What it does: installs uv if missing, downloads the API code, finds the pre-seed package in
-# Downloads/Desktop/Documents (zip or already extracted, including the nested project package),
-# extracts it, asks for the database connection string (hidden input), and runs the idempotent
-# importer. Re-running it is safe: an already imported package is reported as ALREADY_IMPORTED.
+# What it does: installs uv if missing, downloads the API code, finds the official pre-seed
+# workbook (HELLOMYME_PreSeed_Career_Data_v1.3.xlsx) in Downloads/Desktop/Documents, asks for the
+# database connection string (hidden input), runs the idempotent importer and erases the
+# superseded v1.2 pre-seed. Re-running it is safe: the same workbook reports ALREADY_IMPORTED.
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
-$DatasetVersion = "v1.2"
+$DatasetVersion = "v1.3"
+$RetireVersions = @("v1.2")   # superseded PRE_SEED versions to erase after a successful import
 $AsOf = "2026-10-07"
 $Work = Join-Path $HOME "nextpath-import"
 New-Item -ItemType Directory -Force -Path $Work | Out-Null
@@ -49,66 +50,31 @@ if ($env:NEXTPATH_CODE_DIR) {
 }
 if (-not (Test-Path (Join-Path $ApiDir "pyproject.toml"))) { throw "API 코드를 찾지 못했습니다: $ApiDir" }
 
-# 3. Pre-seed package -----------------------------------------------------------------------
+# 3. Pre-seed workbook ----------------------------------------------------------------------
 Step "Pre-seed 데이터 찾기"
-$Required = @("institutions.csv", "majors.csv", "roles.csv", "organizations.csv", "persons.csv",
-              "educations.csv", "work_events.csv", "work_event_sources.csv")
-function Test-CsvDir($dir) {
-    foreach ($f in $Required) { if (-not (Test-Path (Join-Path $dir $f))) { return $false } }
-    return $true
-}
-
 $Roots = @()
 if ($env:PRESEED_PATH) { $Roots += $env:PRESEED_PATH }
 $Roots += @((Join-Path $HOME "Downloads"), (Join-Path $HOME "Desktop"), (Join-Path $HOME "Documents"),
             [Environment]::GetFolderPath("Desktop"), [Environment]::GetFolderPath("MyDocuments"))
 $Roots = $Roots | Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique
 
-$CsvDir = $null
-$Extract = Join-Path $Work "preseed"
-
-# a) already extracted folder
+$Pattern = "HELLOMYME_PreSeed_Career_Data_$DatasetVersion*.xlsx"
+$Workbook = $null
 foreach ($root in $Roots) {
-    if ((Test-Path $root -PathType Container) -and (Test-CsvDir $root)) { $CsvDir = $root; break }
-    $hit = Get-ChildItem $root -Recurse -Depth 3 -Filter "work_event_sources.csv" -ErrorAction SilentlyContinue |
-           Where-Object { $_.DirectoryName -notlike "$Work*" -and (Test-CsvDir $_.DirectoryName) } |
-           Select-Object -First 1
-    if ($hit) { $CsvDir = $hit.DirectoryName; break }
+    if ((Test-Path $root -PathType Leaf) -and $root -like "*.xlsx") { $Workbook = Get-Item $root; break }
+    $hit = Get-ChildItem $root -Recurse -Depth 3 -Filter $Pattern -ErrorAction SilentlyContinue |
+           Where-Object { $_.Name -notlike '~$*' } |
+           Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if ($hit) { $Workbook = $hit; break }
 }
-
-# b) zip: HELLOMYME_PreSeed_CSV_v1.2*.zip, or the project package that contains it
-if (-not $CsvDir) {
-    $zips = foreach ($root in $Roots) {
-        if (Test-Path $root -PathType Leaf) { Get-Item $root }
-        else { Get-ChildItem $root -Recurse -Depth 2 -Filter "*.zip" -ErrorAction SilentlyContinue }
-    }
-    $csvZip = $zips | Where-Object { $_.Name -like "*PreSeed_CSV_$DatasetVersion*" } |
-              Sort-Object LastWriteTime -Descending | Select-Object -First 1
-    if (-not $csvZip) {
-        $pkg = $zips | Where-Object { $_.Name -like "*HELLOMYME_Project_Package*" } |
-               Sort-Object LastWriteTime -Descending | Select-Object -First 1
-        if ($pkg) {
-            Write-Host "프로젝트 패키지 압축 해제: $($pkg.Name)"
-            $pkgDir = Join-Path $Work "package"
-            if (Test-Path $pkgDir) { Remove-Item -Recurse -Force $pkgDir }
-            Expand-Archive $pkg.FullName -DestinationPath $pkgDir
-            $csvZip = Get-ChildItem $pkgDir -Recurse -Filter "*PreSeed_CSV_$DatasetVersion*.zip" | Select-Object -First 1
-        }
-    }
-    if ($csvZip) {
-        Write-Host "CSV 압축 해제: $($csvZip.Name)"
-        if (Test-Path $Extract) { Remove-Item -Recurse -Force $Extract }
-        Expand-Archive $csvZip.FullName -DestinationPath $Extract
-        $hit = Get-ChildItem $Extract -Recurse -Filter "work_event_sources.csv" | Select-Object -First 1
-        if ($hit -and (Test-CsvDir $hit.DirectoryName)) { $CsvDir = $hit.DirectoryName }
-    }
+if (-not $Workbook) {
+    throw ("Pre-seed 파일을 찾지 못했습니다. $Pattern 을 다운로드 폴더에 두고 다시 실행하세요. " +
+           "다른 위치라면: `$env:PRESEED_PATH='C:\경로\파일.xlsx'")
 }
-if (-not $CsvDir) {
-    throw ("Pre-seed 파일을 찾지 못했습니다. HELLOMYME_PreSeed_CSV_$DatasetVersion.zip 또는 " +
-           "HELLOMYME_Project_Package 압축 파일을 다운로드 폴더에 두고 다시 실행하세요. " +
-           "다른 위치라면: `$env:PRESEED_PATH='C:\경로'")
-}
-Write-Host "사용할 폴더: $CsvDir"
+# Excel keeps the file locked while it is open; work on a copy.
+$WorkbookCopy = Join-Path $Work "preseed.xlsx"
+Copy-Item $Workbook.FullName $WorkbookCopy -Force
+Write-Host "사용할 파일: $($Workbook.FullName)"
 
 # 4. Database connection string -------------------------------------------------------------
 Step "데이터베이스 연결"
@@ -124,7 +90,7 @@ if ($env:HELLOMYME_DATABASE_URL -match "\[YOUR-PASSWORD\]") {
 }
 
 # 5. Import ---------------------------------------------------------------------------------
-Step "설치 및 import (1~3분)"
+Step "설치 및 import (2~5분)"
 $env:PYTHONUTF8 = "1"
 $env:PYTHONIOENCODING = "utf-8"
 Push-Location $ApiDir
@@ -132,7 +98,8 @@ try {
     uv sync --no-dev
     if ($LASTEXITCODE -ne 0) { throw "uv sync 실패" }
     $report = Join-Path $Work "import-report.json"
-    uv run --no-dev hellomyme-import-preseed $CsvDir --dataset-version $DatasetVersion --as-of $AsOf |
+    $retireArgs = @(); foreach ($v in $RetireVersions) { $retireArgs += @("--retire", $v) }
+    uv run --no-dev hellomyme-import-preseed $WorkbookCopy --dataset-version $DatasetVersion --as-of $AsOf @retireArgs |
         Out-File -Encoding utf8 $report
     $code = $LASTEXITCODE
 } finally {
@@ -147,6 +114,7 @@ if ($r.imported) {
     Write-Host ("인원 {0} · 학력 {1} · 경력 이벤트 {2} · 거부 {3}" -f $r.imported.persons,
                 $r.imported.education_records, $r.imported.work_events, $r.rejected_total)
 }
+foreach ($x in @($r.retired)) { if ($x) { Write-Host ("이전 버전 정리: {0} {1} (삭제 {2}명)" -f $x.source_system, $x.status, $x.deleted_persons) } }
 if ($r.aggregation) { Write-Host ("경력 이동 집계: " + $r.aggregation.transitions) }
 Write-Host "전체 리포트: $report"
 if ($code -ne 0) { throw "import 실패 (exit $code). 위 리포트를 확인하세요." }
