@@ -213,9 +213,9 @@ erDiagram
 | 0015 | `work_event_v14` | `work_event.role_taxonomy_node_id`, `employment_type`; `career_transition` dated columns; indexes (§11) | drop |
 | 0016 | `first_employment_metrics_query` | `first_employment_rule`, `metric_definition`, `career_query`; SQL function `first_employment()`; seed rows `fe_v1` + 12 metrics | drop |
 | 0017 | `cohort_policy_v2` | `cohort_policy.fallback_steps`, `demographic_min_n`, `demographic_min_cell_n`; new active row `cohort_v2` (v1 retired, kept) | reactivate v1 |
-| 0018 | `legacy_taxonomy_bridge` | `role.taxonomy_node_id`, `major.taxonomy_node_id`; backfill from existing rows into taxonomy version `legacy_v1` (job_family → role, major_family → major); `career_person_snapshot` marked deprecated (dropped in a later contract migration once no reader remains) | clear bridge |
+| 0018 | `intent_event_v14` | `intent_event` gains `target_kind`, `target_taxonomy_node_id`, `target_organization_id`, `target_event_type`, `source_surface`, `anonymous_draft_id` (unique per draft step, so merge replays never duplicate); `career_person_snapshot` marked deprecated. The legacy-taxonomy bridge was dropped from the plan: Pre-seed v1.3 ships its own taxonomy and earlier pre-seed versions are retired | drop columns |
 
-Expand → backfill → contract: nothing is dropped in this delta; reads switch to taxonomy nodes
+0014/0015 rebuild the `canonical_education` / `canonical_work_event` views because `SELECT *` views freeze their column list. Expand → backfill → contract: nothing is dropped in this delta; reads switch to taxonomy nodes
 first, legacy columns are removed in a later, separate release.
 
 ## 11. Indexes (spec §21)
