@@ -48,7 +48,7 @@ def upgrade() -> None:
         title             text NOT NULL,
         description       text,
         duration_minutes  integer CHECK (duration_minutes > 0),
-        price_my          integer CHECK (price_my >= 0),
+        price_tube          integer CHECK (price_tube >= 0),
         price_krw         integer CHECK (price_krw >= 0),
         status            text NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','PAUSED','CLOSED')),
         created_at        timestamptz NOT NULL DEFAULT now()
@@ -62,7 +62,7 @@ def upgrade() -> None:
         status           text NOT NULL CHECK (status IN
                              ('CREATED','PAID','ACCEPTED','COMPLETED','CANCELLED','REFUNDED')),
         question_text    text,
-        price_my         integer,
+        price_tube         integer,
         price_krw        integer,
         idempotency_key  text NOT NULL UNIQUE,
         created_at       timestamptz NOT NULL DEFAULT now(),
@@ -76,10 +76,10 @@ def upgrade() -> None:
         transaction_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
         order_id       uuid NOT NULL REFERENCES orders,
         kind           text NOT NULL CHECK (kind IN ('CHARGE','REFUND')),
-        method         text NOT NULL CHECK (method IN ('MY_CREDIT','PG')),
+        method         text NOT NULL CHECK (method IN ('TUBE_CREDIT','PG')),
         provider       text,
         provider_ref   text,
-        amount_my      integer,
+        amount_tube      integer,
         amount_krw     integer,
         ledger_id      uuid REFERENCES credit_ledger,
         status         text NOT NULL CHECK (status IN ('PENDING','SUCCEEDED','FAILED')),
@@ -90,7 +90,7 @@ def upgrade() -> None:
         platform_fee_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
         transaction_id  uuid NOT NULL UNIQUE REFERENCES transaction,
         fee_rate        numeric(5,4) NOT NULL CHECK (fee_rate BETWEEN 0 AND 1),
-        amount_my       integer,
+        amount_tube       integer,
         amount_krw      integer,
         created_at      timestamptz NOT NULL DEFAULT now()
     );

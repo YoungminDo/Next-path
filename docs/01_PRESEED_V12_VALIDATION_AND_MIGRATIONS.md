@@ -44,7 +44,7 @@
 | 9 | `0009_mentor_marketplace` | mentor_profile(opt-in), mentor_offer(12 types, MVP API는 QNA·15_MIN_CHAT만), orders, transaction, platform_fee, payout |
 | 10 | `0010_analytics_privacy` | `analytics` schema(event 15종, filter_event) — canonical과 분리, deletion_request, audit_log |
 
-정책 기본값(cohort 30·±2년·K=100·cell 5, 보상/unlock MY)은 migration의 **데이터 행**으로 들어가며, 애플리케이션 코드에는 상수로 존재하지 않습니다.
+정책 기본값(cohort 30·±2년·K=100·cell 5, 보상/unlock 튜브)은 migration의 **데이터 행**으로 들어가며, 애플리케이션 코드에는 상수로 존재하지 않습니다.
 
 ## 3. Blocking 이슈: **없음**
 
@@ -59,6 +59,12 @@
 |---|---|
 | Cohort threshold는 **실제 분석 대상(다음 이동을 한 사람)** 기준으로 적용 | 학교+학과 42명 cohort라도 "현재 직무에서 이동한 사람"은 23명 → membership 기준이면 근거 부족한 수치가 노출됨 |
 | Pre-seed source system에 데이터셋 버전 포함(`PRESEED_v1.2`) | v1.1과 v1.2가 같은 `PSP00001`을 다른 인물에 사용 → 버전 없이 결정적 UUID를 만들면 v1.2 인물이 조용히 누락됨 (테스트로 재현·수정) |
-| Suppressed insight는 unlock해도 **과금하지 않음** | 표본이 없는 결과에 MY를 받으면 신뢰 훼손 |
+| Suppressed insight는 unlock해도 **과금하지 않음** | 표본이 없는 결과에 튜브를 받으면 신뢰 훼손 |
 | reward idempotency key는 policy version을 **제외**, ledger 행에 version 기록 | 정책 변경 시 같은 기여에 재지급되는 farming 차단 |
 | 운영 환경에서 `PRE_SEED` 레이어 또는 `DEV` 로그인 설정 시 **앱 기동 거부** | 결정 Q2, Q6 |
+
+## 5. 결정 로그 추가
+
+| 결정 | 내용 |
+|---|---|
+| 크레딧 단위명 | Master Prompt의 `MY` 대신 **튜브(Tube)** 를 사용. DB 컬럼(`reward_tube`, `cost_tube`, `price_tube`, `amount_tube`), API 필드(`balance_tube`, `cost_tube`, `price_tube`), 결제 수단 코드(`TUBE_CREDIT`), UI 문구("1 튜브")에 반영. 아직 배포 전이므로 기존 migration을 직접 수정함 |

@@ -110,7 +110,7 @@ def test_login_wall_merge_is_idempotent_and_rewards_once(client, engine):
 
 def test_career_map_unlock_flow(client, engine):
     auth, *_ = onboard(client, "map-user")
-    balance = client.get("/credits", headers=auth).json()["balance_my"]
+    balance = client.get("/credits", headers=auth).json()["balance_tube"]
     assert balance > 0
 
     career = client.get("/career/map", headers=auth).json()
@@ -133,7 +133,7 @@ def test_career_map_unlock_flow(client, engine):
     r3 = client.post("/career/unlock", headers={**auth, "Idempotency-Key": uuid.uuid4().hex},
                      json={"insight_type": "TIMING_TENURE"}).json()
     assert r2["charged"] is False and r3["charged"] is False
-    assert client.get("/credits", headers=auth).json()["balance_my"] == balance - r1["cost_my"]
+    assert client.get("/credits", headers=auth).json()["balance_tube"] == balance - r1["cost_tube"]
 
     reused = client.post("/career/unlock", headers={**auth, "Idempotency-Key": key},
                          json={"insight_type": "PATH_DEEP_DIVE"})
@@ -206,7 +206,7 @@ def test_mentor_opt_in_matching_and_order(client, engine):
         "headline": "마케터에서 데이터 애널리스트로", "consent_policy_version": "mentor_terms_v1",
     }).status_code == 200
     offer = client.post("/mentors/offers", headers=mentor_auth, json={
-        "offer_type": "QNA", "title": "직무 전환 Q&A", "price_my": 1}).json()
+        "offer_type": "QNA", "title": "직무 전환 Q&A", "price_tube": 1}).json()
     bad = client.post("/mentors/offers", headers=mentor_auth, json={
         "offer_type": "LECTURE", "title": "강의"})
     assert bad.status_code == 422  # outside MVP scope
@@ -251,13 +251,13 @@ def test_analytics_events_are_separate_from_career_data(client, engine):
 
 def test_suppressed_insight_is_never_charged(client):
     auth, *_ = onboard(client, "target-user")
-    before = client.get("/credits", headers=auth).json()["balance_my"]
+    before = client.get("/credits", headers=auth).json()["balance_tube"]
     r = client.post("/career/unlock", headers={**auth, "Idempotency-Key": uuid.uuid4().hex},
                     json={"insight_type": "PATH_DEEP_DIVE", "target_job_family": "NO_SUCH_FAMILY"})
     assert r.json() == {"unlocked": False, "charged": False,
                         "insight": {"suppressed": True, "reason": "LOW_SAMPLE_FOR_TARGET",
                                     "basis_n": 0}}
-    assert client.get("/credits", headers=auth).json()["balance_my"] == before
+    assert client.get("/credits", headers=auth).json()["balance_tube"] == before
 
 
 def test_endpoints_require_login_and_idempotency_key(client):

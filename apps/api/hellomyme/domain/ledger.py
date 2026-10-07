@@ -1,7 +1,7 @@
-"""MY credit ledger. credit_ledger is append-only; balance = SUM(entries).
+"""튜브 (Tube) credit ledger. credit_ledger is append-only; balance = SUM(entries).
 
 Concurrency: every balance-dependent write locks the account row first, so two concurrent
-unlocks cannot both spend the same MY.
+unlocks cannot both spend the same 튜브.
 Idempotency: every entry carries a unique idempotency_key; replaying a request returns the
 entry that already exists instead of writing a second one.
 """
@@ -98,7 +98,7 @@ def grant_reward(conn: Connection, account_id: str, action_type: str, reference_
                                "cd": timedelta(seconds=policy.cooldown_seconds)}).scalar()
         if within:
             return None
-    return _insert(conn, account_id=account_id, amount=policy.reward_my, direction="CREDIT",
+    return _insert(conn, account_id=account_id, amount=policy.reward_tube, direction="CREDIT",
                    reason_type="REWARD", reference_type=reference_type, reference_id=reference_id,
                    key=key, policy_type="REWARD_POLICY", policy_id=policy.reward_policy_id,
                    policy_version=policy.version)
@@ -136,7 +136,7 @@ def reverse(conn: Connection, ledger_id: str, *, reason: str) -> LedgerEntry:
 
 def unlock(conn: Connection, account_id: str, insight_type: str, insight_key: str,
            params: dict, idempotency_key: str) -> dict:
-    """Spend MY for an insight and grant the entitlement. Already-entitled => no charge."""
+    """Spend 튜브 for an insight and grant the entitlement. Already-entitled => no charge."""
     lock_account(conn, account_id)
     key = f"unlock:{account_id}:{idempotency_key}"
     prior = conn.execute(text(
@@ -155,17 +155,17 @@ def unlock(conn: Connection, account_id: str, insight_type: str, insight_key: st
     policy = active_unlock_policy(conn, insight_type)
     if policy is None:
         raise PolicyUnavailable(insight_type)
-    entry = spend(conn, account_id, policy.cost_my, reason_type="UNLOCK",
+    entry = spend(conn, account_id, policy.cost_tube, reason_type="UNLOCK",
                   reference_type="INSIGHT", reference_id=f"{insight_type}:{insight_key}", key=key,
                   policy_type="UNLOCK_POLICY", policy_id=policy.unlock_policy_id,
                   policy_version=policy.version)
     unlock_id = conn.execute(text(
         """INSERT INTO unlock_event (account_id, unlock_policy_id, insight_type, insight_key,
-               insight_params, cost_my, ledger_id, idempotency_key)
+               insight_params, cost_tube, ledger_id, idempotency_key)
            VALUES (:a, :p, :t, :k, CAST(:params AS jsonb), :c, :l, :key)
            ON CONFLICT (idempotency_key) DO NOTHING RETURNING unlock_id::text"""),
         {"a": account_id, "p": policy.unlock_policy_id, "t": insight_type, "k": insight_key,
-         "params": json.dumps(params), "c": policy.cost_my, "l": entry.ledger_id,
+         "params": json.dumps(params), "c": policy.cost_tube, "l": entry.ledger_id,
          "key": key}).scalar()
     if unlock_id is None:
         unlock_id = conn.execute(text(
@@ -183,7 +183,7 @@ def unlock(conn: Connection, account_id: str, insight_type: str, insight_key: st
         {"a": account_id, "t": insight_type, "k": insight_key, "u": unlock_id,
          "days": policy.entitlement_days}).scalar_one()
     return {"entitlement_id": entitlement_id, "unlock_id": unlock_id, "charged": entry.created,
-            "cost_my": policy.cost_my, "policy_version": policy.version}
+            "cost_tube": policy.cost_tube, "policy_version": policy.version}
 
 
 def has_entitlement(conn: Connection, account_id: str, insight_type: str, insight_key: str) -> bool:

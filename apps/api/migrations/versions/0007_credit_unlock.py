@@ -1,4 +1,4 @@
-"""MY credit: immutable ledger, REWARD/UNLOCK/PRICING policies, unlock events, entitlements.
+"""튜브 (Tube) credit: immutable ledger, REWARD/UNLOCK/PRICING policies, unlock events, entitlements.
 
 Revision ID: 0007
 Revises: 0006
@@ -27,7 +27,7 @@ def upgrade() -> None:
                              ('SIGNUP','EDUCATION_ADDED','CURRENT_ROLE_ADDED',
                               'PREVIOUS_CAREER_ADDED','DECISION_RECORDED','CAREER_RECONFIRMED',
                               'OUTCOME_REPORTED')),
-        reward_my        integer NOT NULL CHECK (reward_my > 0),
+        reward_tube        integer NOT NULL CHECK (reward_tube > 0),
         max_occurrences  integer CHECK (max_occurrences > 0),
         cooldown_seconds integer CHECK (cooldown_seconds >= 0),
         {POLICY_COLS},
@@ -41,7 +41,7 @@ def upgrade() -> None:
         insight_type     text NOT NULL CHECK (insight_type IN
                              ('PATH_DEEP_DIVE','COMPANY_BREAKDOWN','REPRESENTATIVE_PATHS',
                               'TIMING_TENURE')),
-        cost_my          integer NOT NULL CHECK (cost_my > 0),
+        cost_tube          integer NOT NULL CHECK (cost_tube > 0),
         entitlement_days integer CHECK (entitlement_days > 0),
         {POLICY_COLS},
         UNIQUE (insight_type, version)
@@ -49,7 +49,7 @@ def upgrade() -> None:
     CREATE UNIQUE INDEX unlock_policy_one_active_uq ON unlock_policy (insight_type)
         WHERE status = 'ACTIVE';
 
-    -- Future paid MY packages. Phase 1: schema only, rows stay inactive (decision Q3).
+    -- Future paid 튜브 packages. Phase 1: schema only, rows stay inactive (decision Q3).
     CREATE TABLE pricing_policy (
         pricing_policy_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
         sku               text NOT NULL,
@@ -59,7 +59,7 @@ def upgrade() -> None:
         UNIQUE (sku, version)
     );
 
-    INSERT INTO reward_policy (action_type, reward_my, max_occurrences, cooldown_seconds,
+    INSERT INTO reward_policy (action_type, reward_tube, max_occurrences, cooldown_seconds,
                                version, status) VALUES
         ('SIGNUP',                3, 1,    NULL,     'reward_v1', 'ACTIVE'),
         ('EDUCATION_ADDED',       1, 1,    NULL,     'reward_v1', 'ACTIVE'),
@@ -69,13 +69,13 @@ def upgrade() -> None:
         ('CAREER_RECONFIRMED',    1, NULL, 7776000,  'reward_v1', 'ACTIVE'),
         ('OUTCOME_REPORTED',      2, NULL, 86400,    'reward_v1', 'ACTIVE');
 
-    INSERT INTO unlock_policy (insight_type, cost_my, entitlement_days, version, status) VALUES
+    INSERT INTO unlock_policy (insight_type, cost_tube, entitlement_days, version, status) VALUES
         ('PATH_DEEP_DIVE',       1, NULL, 'unlock_v1', 'ACTIVE'),
         ('COMPANY_BREAKDOWN',    1, NULL, 'unlock_v1', 'ACTIVE'),
         ('REPRESENTATIVE_PATHS', 1, NULL, 'unlock_v1', 'ACTIVE'),
         ('TIMING_TENURE',        1, NULL, 'unlock_v1', 'ACTIVE');
 
-    -- Source of truth for MY. INSERT only; corrections are reversal entries.
+    -- Source of truth for 튜브 balances. INSERT only; corrections are reversal entries.
     CREATE TABLE credit_ledger (
         ledger_id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
         account_id         uuid NOT NULL REFERENCES account,
@@ -117,7 +117,7 @@ def upgrade() -> None:
         insight_type     text NOT NULL,
         insight_key      text NOT NULL,
         insight_params   jsonb NOT NULL,
-        cost_my          integer NOT NULL,
+        cost_tube          integer NOT NULL,
         ledger_id        uuid NOT NULL UNIQUE REFERENCES credit_ledger,
         idempotency_key  text NOT NULL UNIQUE,
         created_at       timestamptz NOT NULL DEFAULT now()

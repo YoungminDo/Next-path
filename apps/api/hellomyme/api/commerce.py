@@ -19,7 +19,7 @@ router = APIRouter(tags=["credit", "mentor", "order"])
 
 @router.get("/credits")
 def credits(conn: Conn, account_id: Account):
-    return {"account_id": account_id, "balance_my": ledger.balance(conn, account_id)}
+    return {"account_id": account_id, "balance_tube": ledger.balance(conn, account_id)}
 
 
 @router.get("/credits/ledger")
@@ -66,7 +66,7 @@ class OfferRequest(BaseModel):
     title: str = Field(max_length=120)
     description: str | None = Field(default=None, max_length=2000)
     duration_minutes: int | None = Field(default=None, gt=0, le=60)
-    price_my: int = Field(default=0, ge=0)
+    price_tube: int = Field(default=0, ge=0)
 
 
 @router.post("/mentors/offers")
@@ -78,10 +78,10 @@ def create_offer(body: OfferRequest, conn: Conn, account_id: Account):
         raise HTTPException(404, "opt in as a mentor first")
     oid = conn.execute(text(
         """INSERT INTO mentor_offer (mentor_profile_id, offer_type, title, description,
-               duration_minutes, price_my)
+               duration_minutes, price_tube)
            VALUES (:m, :t, :ti, :d, :dur, :p) RETURNING offer_id::text"""),
         {"m": mid, "t": body.offer_type, "ti": body.title, "d": body.description,
-         "dur": body.duration_minutes, "p": body.price_my}).scalar_one()
+         "dur": body.duration_minutes, "p": body.price_tube}).scalar_one()
     return {"offer_id": oid}
 
 
@@ -106,7 +106,7 @@ def mentor_detail(mentor_profile_id: str, conn: Conn):
     if row is None:
         raise HTTPException(404, "mentor not found")
     offers = conn.execute(text(
-        """SELECT offer_id::text, offer_type, title, description, duration_minutes, price_my
+        """SELECT offer_id::text, offer_type, title, description, duration_minutes, price_tube
            FROM mentor_offer WHERE mentor_profile_id = :m AND status = 'ACTIVE'"""),
         {"m": mentor_profile_id})
     return {**row._mapping, "offers": [dict(o._mapping) for o in offers]}
@@ -130,7 +130,7 @@ def create_order(body: OrderRequest, conn: Conn, account_id: Account, key: Idemp
             raise HTTPException(422, "Idempotency-Key reused for a different order")
         return {"order_id": existing.order_id, "status": existing.status, "replayed": True}
     offer = conn.execute(text(
-        """SELECT o.offer_id::text, o.price_my, o.price_krw, m.account_id::text AS mentor_account
+        """SELECT o.offer_id::text, o.price_tube, o.price_krw, m.account_id::text AS mentor_account
            FROM mentor_offer o JOIN mentor_profile m USING (mentor_profile_id)
            WHERE o.offer_id::text = :o AND o.status = 'ACTIVE' AND m.status = 'ACTIVE'
              AND m.is_accepting"""), {"o": body.offer_id}).first()
@@ -140,10 +140,10 @@ def create_order(body: OrderRequest, conn: Conn, account_id: Account, key: Idemp
         raise HTTPException(422, "cannot order your own offer")
     if offer.price_krw:
         raise HTTPException(422, "paid (KRW) offers are not available in Phase 1")
-    price = offer.price_my or 0
+    price = offer.price_tube or 0
     status = "PAID" if price > 0 else "CREATED"
     order_id = conn.execute(text(
-        """INSERT INTO orders (buyer_account_id, offer_id, status, question_text, price_my,
+        """INSERT INTO orders (buyer_account_id, offer_id, status, question_text, price_tube,
                idempotency_key)
            VALUES (:a, :o, :s, :q, :p, :k) RETURNING order_id::text"""),
         {"a": account_id, "o": body.offer_id, "s": status, "q": body.question_text, "p": price,
@@ -154,13 +154,13 @@ def create_order(body: OrderRequest, conn: Conn, account_id: Account, key: Idemp
                                  reference_type="ORDER", reference_id=order_id,
                                  key=f"order-charge:{order_id}")
         except ledger.InsufficientCredit as exc:
-            raise HTTPException(402, {"message": "not enough MY", "balance": exc.balance,
+            raise HTTPException(402, {"message": "not enough 튜브", "balance": exc.balance,
                                       "required": exc.required}) from exc
         conn.execute(text(
-            """INSERT INTO transaction (order_id, kind, method, amount_my, ledger_id, status)
-               VALUES (:o, 'CHARGE', 'MY_CREDIT', :p, :l, 'SUCCEEDED')"""),
+            """INSERT INTO transaction (order_id, kind, method, amount_tube, ledger_id, status)
+               VALUES (:o, 'CHARGE', 'TUBE_CREDIT', :p, :l, 'SUCCEEDED')"""),
             {"o": order_id, "p": price, "l": entry.ledger_id})
-    return {"order_id": order_id, "status": status, "price_my": price}
+    return {"order_id": order_id, "status": status, "price_tube": price}
 
 
 # --- analytics ------------------------------------------------------------------------------

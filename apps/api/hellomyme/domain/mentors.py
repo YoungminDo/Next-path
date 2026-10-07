@@ -61,7 +61,7 @@ def match(conn: Connection, requester: Profile, target_job_family: str, policy: 
         total_w = sum(float(w.get(k, 0)) for k in features)
         rank = sum(v * float(w.get(k, 0)) for k, v in features.items()) / total_w
         offers = conn.execute(text(
-            """SELECT offer_id::text, offer_type, title, duration_minutes, price_my
+            """SELECT offer_id::text, offer_type, title, duration_minutes, price_tube
                FROM mentor_offer WHERE mentor_profile_id = :m AND status = 'ACTIVE'
                  AND offer_type = ANY(:types)"""),
             {"m": m.mentor_profile_id, "types": list(MVP_OFFER_TYPES)}).all()

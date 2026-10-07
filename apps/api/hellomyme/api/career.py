@@ -127,7 +127,7 @@ def _map(conn, settings, account_id, query: Profile) -> dict:
         ikey = career_map.insight_key(t, query, None)
         out["unlocks"].append({
             "insight_type": t, "insight_key": ikey,
-            "available": policy is not None, "cost_my": policy and policy.cost_my,
+            "available": policy is not None, "cost_tube": policy and policy.cost_tube,
             "unlocked": ledger.has_entitlement(conn, account_id, t, ikey)})
     return out
 
@@ -154,7 +154,7 @@ def unlock(body: UnlockRequest, conn: Conn, settings: AppSettings, account_id: A
                               {"target_job_family": body.target_job_family,
                                "cohort": resolved.cohort.audit()}, key)
     except ledger.InsufficientCredit as exc:
-        raise HTTPException(402, {"message": "not enough MY", "balance": exc.balance,
+        raise HTTPException(402, {"message": "not enough 튜브", "balance": exc.balance,
                                   "required": exc.required}) from exc
     except ledger.IdempotencyConflict as exc:
         raise HTTPException(422, "Idempotency-Key reused for a different unlock") from exc

@@ -71,7 +71,7 @@ export default function CareerFlow() {
     await api.mergeDraft(session.session_token, draftId);
     setToken(session.session_token);
     setMap(await api.careerMap(session.session_token));
-    setBalance((await api.credits(session.session_token)).balance_my);
+    setBalance((await api.credits(session.session_token)).balance_tube);
     setStep("map");
   });
 
@@ -80,7 +80,7 @@ export default function CareerFlow() {
       if (!token) return;
       const res = await api.unlock(token, type);
       setInsight(res.insight);
-      setBalance((await api.credits(token)).balance_my);
+      setBalance((await api.credits(token)).balance_tube);
       setMap(await api.careerMap(token));
     })();
 
@@ -160,7 +160,7 @@ export default function CareerFlow() {
         <section className="card">
           <Notice text={map.notice} />
           <p className="muted">
-            비교 그룹: {map.cohort.label} · {map.cohort.effective_n}명 · 보유 {balance ?? 0} MY
+            비교 그룹: {map.cohort.label} · {map.cohort.effective_n}명 · 보유 {balance ?? 0} 튜브
           </p>
           {map.suppressed ? (
             <p>{map.message ?? "아직 비교할 수 있는 사람이 충분하지 않아요."}</p>
@@ -172,7 +172,7 @@ export default function CareerFlow() {
               <div className="row">
                 {map.unlocks?.filter((u) => u.available).map((u) => (
                   <button key={u.insight_type} onClick={() => unlock(u.insight_type)}>
-                    {INSIGHT_LABELS[u.insight_type]} {u.unlocked ? "✓" : `· ${u.cost_my} MY`}
+                    {INSIGHT_LABELS[u.insight_type]} {u.unlocked ? "✓" : `· ${u.cost_tube} 튜브`}
                   </button>
                 ))}
               </div>

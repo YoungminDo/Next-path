@@ -33,7 +33,7 @@ testing only: the app labels results built on it as `SIMULATION`, and refuses to
 |---|---|
 | raw never overwritten | `source_record`, `verification_log`, `qa_review`, `audit_log` are append-only (DB trigger) |
 | one WORK_EVENT ← N sources, field-level evidence | `work_event_source.supported_fields` |
-| immutable MY ledger, corrections by reversal | `credit_ledger` trigger + `domain/ledger.py` |
+| immutable 튜브 credit ledger, corrections by reversal | `credit_ledger` trigger + `domain/ledger.py` |
 | idempotent imports / rewards / unlocks / orders / merges | manifest hash, `entity_key_map`, `idempotency_key` uniques |
 | configurable thresholds, rewards, costs | `cohort_policy`, `scoring_policy`, `reward_policy`, `unlock_policy`, `pricing_policy` |
 | small-cohort suppression | `domain/cohort.py` (cohort) + `domain/career_map.py` (cell level) |

@@ -59,7 +59,7 @@ def active_scoring_policy(conn: Connection, policy_type: str) -> ScoringPolicy:
 
 def active_reward_policy(conn: Connection, action_type: str):
     return conn.execute(text(
-        """SELECT reward_policy_id, action_type, reward_my, max_occurrences, cooldown_seconds,
+        """SELECT reward_policy_id, action_type, reward_tube, max_occurrences, cooldown_seconds,
                   version
            FROM reward_policy WHERE status = 'ACTIVE' AND action_type = :a
              AND effective_from <= now() AND (effective_to IS NULL OR effective_to > now())"""
@@ -68,7 +68,7 @@ def active_reward_policy(conn: Connection, action_type: str):
 
 def active_unlock_policy(conn: Connection, insight_type: str):
     return conn.execute(text(
-        """SELECT unlock_policy_id, insight_type, cost_my, entitlement_days, version
+        """SELECT unlock_policy_id, insight_type, cost_tube, entitlement_days, version
            FROM unlock_policy WHERE status = 'ACTIVE' AND insight_type = :t
              AND effective_from <= now() AND (effective_to IS NULL OR effective_to > now())"""
     ), {"t": insight_type}).first()

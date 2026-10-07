@@ -21,7 +21,7 @@ export type CareerMap = {
   next_job_family?: Distribution;
   next_industry?: Distribution;
   next_company_size?: Distribution;
-  unlocks?: { insight_type: string; unlocked: boolean; available: boolean; cost_my: number | null }[];
+  unlocks?: { insight_type: string; unlocked: boolean; available: boolean; cost_tube: number | null }[];
 };
 
 export type TaxonomyItem = { id: string; name: string };
@@ -71,7 +71,7 @@ export const api = {
       body: JSON.stringify({ draft_id: draftId }),
     }),
   careerMap: (token: string) => call<CareerMap>("/career/map", { token }),
-  credits: (token: string) => call<{ balance_my: number }>("/credits", { token }),
+  credits: (token: string) => call<{ balance_tube: number }>("/credits", { token }),
   unlock: (token: string, insightType: string) =>
     call<{ unlocked: boolean; insight: Record<string, unknown> }>("/career/unlock", {
       method: "POST",
