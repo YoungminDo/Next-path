@@ -13,7 +13,11 @@ Will later merge into Hello My Me. Read `docs/` before large changes:
   `uv run ruff check . && uv run pytest` (needs `hellomyme_test` DB, see docker-compose).
 - `apps/web` — Next.js App Router on :3001 (hmm-id dev server uses :3000). `npm run typecheck && npm run build`.
 - `make db | migrate | import-preseed | api | web | test` from the repo root.
-- Pre-seed CSV package is NOT in the repo (generated data, kept outside git).
+- Pre-seed data is NOT in the repo. Official PRE_SEED = `HELLOMYME_PreSeed_Career_Data_v1.3.xlsx`:
+  `uv run hellomyme-import-preseed <file.xlsx> --retire v1.2` (version/as-of read from 00_README).
+- v1.4 code paths: `domain/career_query.py` (CareerQuery engine, cohort v2), `domain/acquisition.py`
+  + `api/acquisition.py` (`/acq/*` student/professional flows, login merge, `/acq/me`),
+  web `components/AcquisitionFlow.tsx`. Legacy `/career/*` + snapshot engine remain for old drafts.
 
 ## Approved decisions (do not re-ask)
 - Positioning: Nextpath is Hello My Me's first **acquisition / traffic-generator** product (like Toss

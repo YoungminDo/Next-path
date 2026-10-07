@@ -285,6 +285,15 @@ def paths_to_target(conn: Connection, f: Filters, target_node: str, *, layers, a
             out.append({"key": "OTHER", "label": None, "n": rest})
         return out
 
+    deep = None
+    if not suppressed:
+        deep = {"company_size": folded(sizes, lambda k: k),
+                "industry": folded(inds, lambda k: industries.nodes[k]["label"]
+                                   if k in industries.nodes else k)}
+        # Only sell a breakdown that shows at least one real category, not just "other".
+        if not any(i["key"] != "OTHER" for part in deep.values() for i in part):
+            deep = None
+
     return {
         "target": {"node_id": target, "label": label(target)},
         "from": from_node and {"node_id": from_node, "label": label(from_node)},
@@ -295,10 +304,7 @@ def paths_to_target(conn: Connection, f: Filters, target_node: str, *, layers, a
         "median_months": None if suppressed or not months else statistics.median(months),
         "paths": [] if suppressed else shown,
         "other_n": None if suppressed else (other if other >= min_cell else None),
-        "deep_dive": None if suppressed else {
-            "company_size": folded(sizes, lambda k: k),
-            "industry": folded(inds, lambda k: industries.nodes[k]["label"]
-                               if k in industries.nodes else k)},
+        "deep_dive": deep,
         "cohort_policy_version": policy.version, "taxonomy_version": roles.version,
     }
 

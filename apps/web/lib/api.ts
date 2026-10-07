@@ -67,6 +67,62 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+// --- acquisition (v1.4) -------------------------------------------------------------------
+
+export type Node = { node_id: string; code: string; label: string; depth: number;
+  parent_label: string | null; matched_alias: string | null };
+export type Cell = { key: string; code: string; label: string | null; depth: number | null;
+  n: number; share: number };
+export type QueryResult = {
+  exact_n: number; effective_n: number; fallback_reason: string[]; suppressed: boolean;
+  cells: Cell[]; other: { n: number | null; share: number | null; suppressed?: boolean } | null;
+  threshold: number; time_window: { start: string | null; end: string };
+};
+export type PathSummary = {
+  target: { node_id: string; label: string }; from: { node_id: string; label: string } | null;
+  suppressed: boolean; min_cell_n: number; n_people: number | null; n_paths: number | null;
+  n_paths_shown: number | null; median_months: number | null;
+  paths?: { path: { node_id: string; label: string }[]; n: number; share: number }[];
+  other_n?: number | null;
+};
+export type IntentResult = {
+  step: "intent_paths"; cohort_basis: string; target_basis: "INTENT" | "MOST_COMMON" | "NONE";
+  base: { effective_n: number; fallback_reason: string[]; suppressed: boolean };
+  paths: PathSummary | null; data_basis: "SIMULATION" | "OBSERVED";
+};
+export type StepResult = { step: string; result: QueryResult; data_basis: "SIMULATION" | "OBSERVED" };
+export type DeepDiveItem = { key: string; label: string | null; n: number };
+export type MyResult = {
+  profile: Record<string, unknown>; intent: { target_kind: string; target_node_id: string | null } | null;
+  base: QueryResult; intent_paths: IntentResult;
+  deep_dive: { unlocked: boolean; available: boolean; cost_tube: number | null;
+    content: { company_size: DeepDiveItem[]; industry: DeepDiveItem[] } | null };
+  balance_tube: number; data_basis: "SIMULATION" | "OBSERVED";
+};
+export type AcqStep = "first_roles" | "next_roles" | "similar_paths" | "intent_paths";
+
+export const acq = {
+  institutions: () => call<{ id: string; name: string; region: string | null }[]>("/acq/options/institutions"),
+  majors: (depth?: number) => call<Node[]>(`/acq/options/majors${depth ? `?depth=${depth}` : ""}`),
+  roles: (depth?: number) => call<Node[]>(`/acq/options/roles${depth ? `?depth=${depth}` : ""}`),
+  organizations: (q: string) =>
+    call<{ id: string; name: string }[]>(`/acq/options/organizations?q=${encodeURIComponent(q)}`),
+  saveDraft: (payload: unknown, draftId?: string) =>
+    call<{ draft_id: string }>("/acq/draft", {
+      method: "POST",
+      body: JSON.stringify({ draft_id: draftId ?? null, payload }),
+    }),
+  step: <T,>(draftId: string, step: AcqStep) =>
+    call<T>(`/acq/draft/${draftId}/result`, { method: "POST", body: JSON.stringify({ step }) }),
+  me: () => call<MyResult>("/acq/me"),
+  unlock: () =>
+    call<{ unlocked: boolean; charged?: boolean; balance_tube?: number;
+      content?: MyResult["deep_dive"]["content"] }>("/acq/me/unlock", {
+      method: "POST",
+      headers: { "Idempotency-Key": crypto.randomUUID() },
+    }),
+};
+
 export const api = {
   taxonomy: (kind: "institutions" | "majors" | "roles") => call<TaxonomyItem[]>(`/taxonomy/${kind}`),
   saveDraft: (payload: unknown, draftId?: string) =>

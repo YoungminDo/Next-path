@@ -1,5 +1,5 @@
-import CareerFlow from "@/components/CareerFlow";
+import AcquisitionFlow from "@/components/AcquisitionFlow";
 
 export default function Home() {
-  return <CareerFlow />;
+  return <AcquisitionFlow />;
 }
