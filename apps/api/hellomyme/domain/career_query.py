@@ -55,6 +55,8 @@ class CareerQuery:
     from_role_node_ids: tuple[str, ...] = ()
     surface_code: str = "ACQUISITION"
     requested_depth: int | None = None
+    # A member never counts in their own cohort.
+    exclude_person_ids: tuple[str, ...] = ()
 
     def normalized(self) -> dict:
         d = asdict(self)
@@ -169,6 +171,7 @@ class Filters:
     gender_codes: list[str] = field(default_factory=list)
     current_role_node_ids: list[str] = field(default_factory=list)
     first_role_node_ids: list[str] = field(default_factory=list)
+    exclude_person_ids: list[str] = field(default_factory=list)
 
     def public(self, majors: Taxonomy, roles: Taxonomy) -> dict:
         def codes(tax, ids):
@@ -233,9 +236,13 @@ def _apply_step(f: Filters, step: dict, majors: Taxonomy) -> tuple[Filters, str]
     return None
 
 
-def _cohort_sql(f: Filters, majors: Taxonomy, roles: Taxonomy) -> tuple[str, dict]:
+def cohort_sql(f: Filters, majors: Taxonomy, roles: Taxonomy) -> tuple[str, dict]:
+    """SELECT person_id of the cohort. Callers bind :layers, :as_of and :fe_rule."""
     where = ["p.deleted_at IS NULL", "p.origin_layer = ANY(:layers)"]
     params: dict = {}
+    if f.exclude_person_ids:
+        where.append("p.person_id <> ALL(CAST(:excl AS uuid[]))")
+        params["excl"] = f.exclude_person_ids
     edu = []
     if f.institution_ids:
         edu.append("e.institution_id = ANY(CAST(:inst AS uuid[]))")
@@ -330,7 +337,7 @@ METRIC_SQL = {
 
 def _basis(conn: Connection, q: CareerQuery, f: Filters, majors: Taxonomy, roles: Taxonomy,
            layers: list[str], win_start: date | None) -> list[tuple[str, str | None]]:
-    cohort_sql, params = _cohort_sql(f, majors, roles)
+    cohort, params = cohort_sql(f, majors, roles)
     sql = METRIC_SQL[q.target_metric].format(
         window_fe=_window_clause("fe.start_date", win_start),
         window_next=_window_clause("next_start", win_start))
@@ -339,11 +346,17 @@ def _basis(conn: Connection, q: CareerQuery, f: Filters, majors: Taxonomy, roles
     if q.target_metric == "NEXT_ROLE_DISTRIBUTION":
         params["from_roles"] = roles.subtree(q.from_role_node_ids)
     # Metric SQL either starts with SELECT or continues the CTE list with ", name AS (...)".
-    rows = conn.execute(text(f"WITH cohort AS ({cohort_sql}) {sql}"), params).all()
+    rows = conn.execute(text(f"WITH cohort AS ({cohort}) {sql}"), params).all()
     return [(str(r.person_id), r.node) for r in rows]
 
 
 def evaluate(conn: Connection, q: CareerQuery, *, layers: list[str]) -> dict:
+    return evaluate_with_filters(conn, q, layers=layers)[0]
+
+
+def evaluate_with_filters(conn: Connection, q: CareerQuery, *,
+                          layers: list[str]) -> tuple[dict, Filters]:
+    """Like evaluate, plus the effective cohort filters for follow-up queries on the same cohort."""
     if q.target_metric not in SUPPORTED_METRICS:
         raise QueryInvalid(f"target_metric must be one of {sorted(SUPPORTED_METRICS)}")
     if q.target_metric == "NEXT_ROLE_DISTRIBUTION" and not q.from_role_node_ids:
@@ -365,7 +378,8 @@ def evaluate(conn: Connection, q: CareerQuery, *, layers: list[str]) -> dict:
         admission=(q.admission_year_from, q.admission_year_to),
         graduation=(q.graduation_year_from, q.graduation_year_to),
         gender_codes=list(q.gender_codes), current_role_node_ids=list(q.current_role_node_ids),
-        first_role_node_ids=list(q.first_role_node_ids))
+        first_role_node_ids=list(q.first_role_node_ids),
+        exclude_person_ids=list(q.exclude_person_ids))
 
     def threshold(f: Filters) -> int:
         return policy.demographic_min_n if f.demographic else policy.min_exact_n
@@ -428,4 +442,4 @@ def evaluate(conn: Connection, q: CareerQuery, *, layers: list[str]) -> dict:
         "cells": cells, "other": None if suppressed else other,
         "unknown_n": None if suppressed else unknown_n,
         "data_layers": layers,
-    }
+    }, effective

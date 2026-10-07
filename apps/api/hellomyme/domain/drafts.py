@@ -6,9 +6,15 @@ import hashlib
 import json
 from datetime import timedelta
 
+from pydantic import BaseModel
 from sqlalchemy import Connection, text
 
 from hellomyme.domain import ledger
+from hellomyme.domain.acquisition import (
+    AcquisitionPayload,
+    is_acquisition_payload,
+    write_acquisition_profile,
+)
 from hellomyme.domain.career_input import (
     CareerDraftPayload,
     member_person_id,
@@ -29,7 +35,8 @@ def session_hash(anonymous_session: str) -> str:
     return hashlib.sha256(anonymous_session.encode()).hexdigest()
 
 
-def save_draft(conn: Connection, anonymous_session: str, payload: CareerDraftPayload,
+def save_draft(conn: Connection, anonymous_session: str,
+               payload: CareerDraftPayload | AcquisitionPayload | BaseModel,
                ttl_hours: int, draft_id: str | None = None) -> dict:
     sid = session_hash(anonymous_session)
     data = payload.model_dump(mode="json")
@@ -89,9 +96,15 @@ def merge_draft(conn: Connection, account_id: str, draft_id: str, anonymous_sess
             {"a": account_id, "t": consent_type, "v": consent_policy_version,
              "scope": json.dumps({"granted_at_step": "merge_draft", "draft_id": draft_id})})
 
-    payload = CareerDraftPayload.model_validate(row.payload_json)
-    norm = normalize(conn, payload)
-    written = write_member_career(conn, account_id, norm, f"draft:{draft_id}", row.payload_json)
+    if is_acquisition_payload(row.payload_json):
+        written = write_acquisition_profile(
+            conn, account_id, AcquisitionPayload.model_validate(row.payload_json), draft_id,
+            row.payload_json)
+    else:
+        payload = CareerDraftPayload.model_validate(row.payload_json)
+        norm = normalize(conn, payload)
+        written = write_member_career(conn, account_id, norm, f"draft:{draft_id}",
+                                      row.payload_json)
     conn.execute(text(
         """UPDATE anonymous_draft SET claimed_account_id = :a, claimed_person_id = :p,
                claimed_at = now() WHERE draft_id = CAST(:d AS uuid)"""),
