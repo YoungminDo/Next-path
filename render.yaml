@@ -1,0 +1,28 @@
+# Render Blueprint — HELLOMYME Career API (test deployment).
+# Web (Next.js) goes to Vercel; the database is a managed PostgreSQL 16 (e.g. Supabase).
+services:
+  - type: web
+    name: nextpath-api
+    runtime: docker
+    rootDir: apps/api
+    dockerfilePath: ./Dockerfile
+    region: singapore
+    plan: starter
+    healthCheckPath: /health
+    autoDeploy: true
+    branch: main
+    envVars:
+      # staging = test deployment: PRE_SEED is allowed and every result is labelled SIMULATION.
+      # Switch to production (and SEED/VERIFIED only) at launch.
+      - key: HELLOMYME_ENV
+        value: staging
+      - key: HELLOMYME_DATABASE_URL
+        sync: false   # postgresql+psycopg://USER:PASSWORD@HOST:5432/postgres?sslmode=require
+      - key: HELLOMYME_CAREER_MAP_DATA_LAYERS
+        value: '["PRE_SEED","SEED","VERIFIED"]'
+      - key: HELLOMYME_AUTH_PROVIDERS
+        value: '["HMM_ID"]'
+      - key: HELLOMYME_HMM_ID_BASE_URL
+        value: https://id.da-sh.io
+      - key: HELLOMYME_CORS_ORIGINS
+        value: '["https://nextpath.da-sh.io"]'
