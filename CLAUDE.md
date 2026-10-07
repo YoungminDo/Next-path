@@ -15,6 +15,9 @@ Will later merge into Hello My Me. Read `docs/` before large changes:
 - Pre-seed CSV package is NOT in the repo (generated data, kept outside git).
 
 ## Approved decisions (do not re-ask)
+- Positioning: Nextpath is Hello My Me's first **acquisition / traffic-generator** product (like Toss
+  remittance): free result → data → 튜브 micro-payments (cash cow) → data-driven connection to people
+  "one step ahead" (helpers earn 튜브). Not a sub-layer of the FACE/Hello My Me journey.
 - Stack Next.js + FastAPI + PostgreSQL; deploy Vercel (web) + managed FastAPI/Postgres.
 - PRE_SEED is dev/UX/simulation only; production Career Map = SEED + VERIFIED (API refuses
   to start otherwise). Test deployment runs `HELLOMYME_ENV=staging` with SIMULATION labels.
