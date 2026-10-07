@@ -46,8 +46,10 @@ POST /auth/merge-draft {draft_id, consent_policy_version}  → 익명 입력이 
 
 ## 배포 전 필요한 것 (hmm-id 쪽)
 
-1. **SP 등록** — `hmm-id/src/lib/sp-registry.ts` 의 `KNOWN_SPS` 에 이 웹의 origin 추가.
-   HMM ID 는 `redirect_uri` 의 origin 이 정확히 일치하는 active SP 만 허용합니다(와일드카드 금지).
+1. **SP 등록** — 운영 도메인 **`https://nextpath.da-sh.io`** (SP id `nextpath`).
+   hmm-id 브랜치 `claude/register-nextpath-sp` 에서 `src/lib/sp-registry.ts` 의 `KNOWN_SPS` 에 추가함
+   (main 반영 + 배포 필요). HMM ID 는 `redirect_uri` 의 origin 이 정확히 일치하는 active SP 만
+   허용합니다(와일드카드 금지).
 2. **같은 상위 도메인** — 웹이 `*.da-sh.io` 아래에 있어야 `Domain=.da-sh.io` 쿠키를 받을 수 있습니다.
 3. `ALLOWED_ORIGINS`(CORS) 추가는 **불필요** — `/me` 는 서버 간 호출입니다.
 
@@ -56,7 +58,7 @@ POST /auth/merge-draft {draft_id, consent_policy_version}  → 익명 입력이 
 | 위치 | 변수 | 운영 값 예 |
 |---|---|---|
 | web (server) | `HMM_ID_BASE_URL` | `https://id.da-sh.io` |
-| web (server) | `APP_ORIGIN` | SP 로 등록한 origin |
+| web (server) | `APP_ORIGIN` | `https://nextpath.da-sh.io` |
 | web (server) | `HELLOMYME_API_URL` | FastAPI 주소 |
 | api | `HELLOMYME_AUTH_PROVIDERS` | `["HMM_ID"]` |
 | api | `HELLOMYME_HMM_ID_BASE_URL` | `https://id.da-sh.io` |
