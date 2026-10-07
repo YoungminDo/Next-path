@@ -11,6 +11,16 @@ from hellomyme.importer.retire import RetireRefused, retire_dataset
 from tests.conftest import AS_OF, build_package
 
 SOURCE = ("PRE_SEED", "PRE_SEED_FILE")
+# Shared by the test workbooks; nodes are reused by code across imports.
+NODES = [["R1", "ROLE", None, "비즈니스", "비즈니스", 1, "ACTIVE"],
+         ["R2", "ROLE", "R1", "마케팅", "마케팅", 2, "ACTIVE"],
+         ["R3", "ROLE", "R2", "브랜드 마케팅", "브랜드 마케팅", 3, "ACTIVE"],
+         ["R2B", "ROLE", "R1", "데이터·AI", "데이터·AI", 2, "ACTIVE"],
+         ["R3B", "ROLE", "R2B", "데이터 분석", "데이터 분석", 3, "ACTIVE"],
+         ["M1", "MAJOR", None, "상경", "상경", 1, "ACTIVE"],
+         ["M2", "MAJOR", "M1", "경영·경제", "경영·경제", 2, "ACTIVE"],
+         ["M3", "MAJOR", "M2", "경영학", "경영학", 3, "ACTIVE"],
+         ["I1", "INDUSTRY", None, "IT", "IT", 1, "ACTIVE"]]
 
 
 def write_workbook(path: Path, *, bad_node: bool = False, ref: str = "WBT") -> Path:
@@ -29,12 +39,7 @@ def write_workbook(path: Path, *, bad_node: bool = False, ref: str = "WBT") -> P
            ["TAX_INDUSTRY", "INDUSTRY", "I", "t1"]])
     sheet("07_TAXONOMY_NODE", ["taxonomy_node_id", "taxonomy_id", "parent_node_id",
                                "canonical_name", "display_name", "depth", "status"],
-          [["R1", "ROLE", None, "비즈니스", "비즈니스", 1, "ACTIVE"],
-           ["R2", "ROLE", "R1", "마케팅", "마케팅", 2, "ACTIVE"],
-           ["R3", "ROLE", "R2", "브랜드 마케팅", "브랜드 마케팅", 3, "ACTIVE"],
-           ["M1", "MAJOR", None, "상경", "상경", 1, "ACTIVE"],
-           ["M2", "MAJOR", "M1", "경영·경제", "경영·경제", 2, "ACTIVE"],
-           ["I1", "INDUSTRY", None, "IT", "IT", 1, "ACTIVE"]])
+          NODES)
     sheet("01_PERSON", ["person_id", "user_stage", "gender_code", "data_layer", "source_ref",
                         "source_type"],
           [[f"P{i}", "PROFESSIONAL", g, *SOURCE[:1], f"{ref}_P{i}", SOURCE[1]]
@@ -73,7 +78,7 @@ def test_workbook_import_writes_v14_fields(engine, tmp_path):
     report = run_import(engine, write_workbook(tmp_path / "wb.xlsx"), as_of=AS_OF,
                         dataset_version="wb-test")
     assert report["status"] == "COMPLETED", report
-    assert report["imported"]["taxonomy_nodes"] == 6
+    assert report["imported"]["taxonomy_nodes"] == len(NODES)
     assert report["imported"]["organization_industries"] == 1
     assert all(c["pass"] for c in report["integrity_checks"].values())
     with engine.begin() as conn:
