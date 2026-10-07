@@ -1,0 +1,29 @@
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from hellomyme.api import auth, career, commerce
+from hellomyme.config import get_settings
+
+
+def create_app() -> FastAPI:
+    settings = get_settings()
+    app = FastAPI(title="HELLOMYME Career API", version="0.1.0")
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    app.include_router(auth.router)
+    app.include_router(career.router)
+    app.include_router(commerce.router)
+
+    @app.get("/health")
+    def health():
+        return {"status": "ok", "env": settings.env,
+                "data_basis": "SIMULATION" if settings.is_simulation else "OBSERVED"}
+
+    return app
+
+
+app = create_app()
