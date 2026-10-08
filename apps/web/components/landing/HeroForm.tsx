@@ -14,10 +14,17 @@ export default function HeroForm() {
   const [institutions, setInstitutions] = useState<{ id: string; name: string }[]>([]);
   const [majors, setMajors] = useState<Node[]>([]);
   const [f, setF] = useState({ inst: "", major: "", adm: "", grad: "" });
+  // "error": the API did not answer; "empty": it answered but has no data yet.
+  const [status, setStatus] = useState<"loading" | "ok" | "error" | "empty">("loading");
 
   useEffect(() => {
-    acq.institutions().then(setInstitutions).catch(() => undefined);
-    acq.majors(3).then(setMajors).catch(() => undefined);
+    Promise.all([acq.institutions(), acq.majors(3)])
+      .then(([i, m]) => {
+        setInstitutions(i);
+        setMajors(m);
+        setStatus(i.length && m.length ? "ok" : "empty");
+      })
+      .catch(() => setStatus("error"));
   }, []);
 
   const groups = useMemo(() => {
@@ -56,6 +63,8 @@ export default function HeroForm() {
           {YEARS.map((y) => <option key={y} value={y}>{y}</option>)}
         </select>
       </div>
+      {status === "error" && <p className="heroform-warn" role="status">서버에 연결하지 못했어요. 잠시 후 새로고침해 주세요.</p>}
+      {status === "empty" && <p className="heroform-warn" role="status">학교·전공 데이터를 준비하고 있어요. 잠시 후 다시 와주세요.</p>}
       <button className="cta" type="submit">나와 같은 자리였던 사람들 보기</button>
       <p className="heroform-note">카카오로 3초 · 무료 · 광고 연락 없음</p>
       <a className="heroform-alt" href="/start?type=pro">지금 일하고 있어요 →</a>

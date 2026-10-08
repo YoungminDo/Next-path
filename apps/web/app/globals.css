@@ -300,3 +300,4 @@ body { word-break: keep-all; overflow-wrap: break-word; }
 .reward { margin-top: -36px; }
 @media (max-width: 720px) { .hero { grid-template-columns: 1fr; gap: 24px; } .reward { margin-top: -28px; } }
 .sticky-cta[hidden] { display: none !important; }
+.heroform-warn { margin: 0; background: var(--caution-bg); color: var(--caution); border-radius: 10px; padding: 10px 12px; font-size: 13px; }
