@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nextpath.da-sh.io/schemas/career_extraction.v1.json",
+  "title": "career_extraction.v1",
+  "description": "What the AI read from one person's career screenshots. Raw text and evidence only: no canonical ids, no guessed dates, no inferred gender. One submission = one person, any number of screenshots.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "submission_id", "assets", "person", "educations", "work_events"],
+  "properties": {
+    "schema_version": { "const": "career_extraction.v1" },
+    "submission_id": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "assets": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/asset" } },
+    "person": { "$ref": "#/$defs/person" },
+    "educations": { "type": "array", "items": { "$ref": "#/$defs/education" } },
+    "work_events": { "type": "array", "items": { "$ref": "#/$defs/work_event" } },
+    "warnings": { "type": "array", "items": { "type": "string", "maxLength": 500 } }
+  },
+  "$defs": {
+    "asset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["asset_id", "page_order"],
+      "properties": {
+        "asset_id": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "page_order": { "type": "integer", "minimum": 1 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "captured_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "partial_date": {
+      "description": "Only the precision the screenshot shows. 'Mar 2019' -> {value: '2019-03', precision: 'MONTH'}; '2019' -> {value: '2019', precision: 'YEAR'}. Durations such as '3 yrs 2 mos' are never turned into dates.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "precision"],
+      "properties": {
+        "value": { "type": "string", "pattern": "^[12][0-9]{3}(-(0[1-9]|1[0-2]))?$" },
+        "precision": { "enum": ["YEAR", "MONTH"] }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["asset_id", "text"],
+      "properties": {
+        "asset_id": { "type": "string", "minLength": 1 },
+        "text": { "type": "string", "minLength": 1, "maxLength": 2000, "description": "The line(s) exactly as shown." }
+      }
+    },
+    "confidence": {
+      "type": "object",
+      "additionalProperties": { "type": "number", "minimum": 0, "maximum": 1 }
+    },
+    "person": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "display_name_raw": { "type": ["string", "null"], "maxLength": 200 },
+        "headline_raw": { "type": ["string", "null"], "maxLength": 500 },
+        "location_raw": { "type": ["string", "null"], "maxLength": 200 },
+        "evidence": { "type": "array", "items": { "$ref": "#/$defs/evidence" } }
+      }
+    },
+    "education": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["local_id", "institution_raw", "evidence"],
+      "properties": {
+        "local_id": { "type": "string", "minLength": 1, "maxLength": 50 },
+        "institution_raw": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "major_raw": { "type": ["string", "null"], "maxLength": 200 },
+        "degree_raw": { "type": ["string", "null"], "maxLength": 200 },
+        "start": { "oneOf": [{ "$ref": "#/$defs/partial_date" }, { "type": "null" }] },
+        "end": { "oneOf": [{ "$ref": "#/$defs/partial_date" }, { "type": "null" }] },
+        "evidence": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/evidence" } },
+        "confidence": { "$ref": "#/$defs/confidence" }
+      }
+    },
+    "work_event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["local_id", "evidence"],
+      "anyOf": [
+        { "required": ["organization_raw"], "properties": { "organization_raw": { "type": "string" } } },
+        { "required": ["role_raw"], "properties": { "role_raw": { "type": "string" } } }
+      ],
+      "properties": {
+        "local_id": { "type": "string", "minLength": 1, "maxLength": 50 },
+        "organization_raw": { "type": ["string", "null"], "maxLength": 200 },
+        "role_raw": { "type": ["string", "null"], "maxLength": 200 },
+        "employment_type_raw": { "type": ["string", "null"], "maxLength": 100, "description": "e.g. '정규직', 'Internship', 'Thực tập' as shown" },
+        "event_type_hint": {
+          "enum": ["EMPLOYMENT", "INTERN", "STARTUP", "FREELANCE", "SELF_EMPLOYED", "SIDE_BUSINESS",
+                   "MILITARY", "CAREER_BREAK", "STUDY", "PROJECT", "OTHER", "UNKNOWN"]
+        },
+        "start": { "oneOf": [{ "$ref": "#/$defs/partial_date" }, { "type": "null" }] },
+        "end": { "oneOf": [{ "$ref": "#/$defs/partial_date" }, { "type": "null" }] },
+        "is_current": { "type": ["boolean", "null"], "description": "true only when the screenshot says Present/현재" },
+        "location_raw": { "type": ["string", "null"], "maxLength": 200 },
+        "evidence": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/evidence" } },
+        "confidence": { "$ref": "#/$defs/confidence" }
+      }
+    }
+  }
+}

@@ -6,7 +6,8 @@ Will later merge into Hello My Me. Read `docs/` before large changes:
 `00_ARCHITECTURE_REVIEW.md` (original review), `01_PRESEED_V12_VALIDATION_AND_MIGRATIONS.md`
 (validation, migration list, decision log), `02_HMM_ID_INTEGRATION.md` (login),
 `03_DEPLOYMENT.md` (deploy status and steps), `07_SERVICE_DESIGN.html` (service design),
-`08_DATA_MOAT.md` (which source data is the moat; migration 0019).
+`08_DATA_MOAT.md` (which source data is the moat; migration 0019), `09_INGESTION_PIPELINE.md`
+(capture → AI JSON → checks → field review → SEED; migration 0022).
 
 ## Layout & commands
 - `apps/api` — FastAPI + PostgreSQL 16, raw-SQL Alembic migrations (`migrations/versions`), pytest.
@@ -18,6 +19,9 @@ Will later merge into Hello My Me. Read `docs/` before large changes:
 - v1.4 code paths: `domain/career_query.py` (CareerQuery engine, cohort v2), `domain/acquisition.py`
   + `api/acquisition.py` (`/acq/*` student/professional flows, login merge, `/acq/me`),
   web `components/AcquisitionFlow.tsx`. Legacy `/career/*` + snapshot engine remain for old drafts.
+- SEED ingestion: `hellomyme/ingest/` (`career_extraction.v1.schema.json`, `pipeline.py`, CLI
+  `hellomyme-ingest`). AI never picks canonical ids; raw names stay, standardisation = aliases + mapping_queue;
+  career order is derived from dates at query time. Legal review (docs/09 §9) gates production loads.
 
 ## Approved decisions (do not re-ask)
 - Positioning: Nextpath is Hello My Me's first **acquisition / traffic-generator** product (like Toss
