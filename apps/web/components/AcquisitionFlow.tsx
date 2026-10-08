@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
+import type { Options } from "@/lib/server/options";
 import {
   acq,
   api,
@@ -85,13 +86,13 @@ function conclusion(r: QueryResult & { n_directions?: number | null }, professio
     : `모두 ${ro(top.label ?? "")} 갔어요.`;
 }
 
-export default function AcquisitionFlow() {
+export default function AcquisitionFlow({ initial }: { initial?: Options }) {
   const [screen, setScreen] = useState<Screen>("start");
   const [userType, setUserType] = useState<UserType>("STUDENT");
-  const [institutions, setInstitutions] = useState<{ id: string; name: string }[]>([]);
-  const [majors, setMajors] = useState<Node[]>([]);
-  const [roles, setRoles] = useState<Node[]>([]);
-  const [middleRoles, setMiddleRoles] = useState<Node[]>([]);
+  const [institutions, setInstitutions] = useState<{ id: string; name: string }[]>(initial?.institutions ?? []);
+  const [majors, setMajors] = useState<Node[]>(initial?.majors ?? []);
+  const [roles, setRoles] = useState<Node[]>(initial?.roles ?? []);
+  const [middleRoles, setMiddleRoles] = useState<Node[]>(initial?.middleRoles ?? []);
   const [edu, setEdu] = useState<Edu>({ institution_id: "", major_node_id: "", admission_year: "", graduation_year: "" });
   const [current, setCurrent] = useState<Job>(emptyJob);
   const [first, setFirst] = useState<Job>(emptyJob);
@@ -118,7 +119,9 @@ export default function AcquisitionFlow() {
   };
 
   useEffect(() => {
-    Promise.all([acq.institutions(), acq.majors(3), acq.roles(3), acq.roles(2)])
+    const preloaded = initial && initial.institutions.length && initial.majors.length &&
+      initial.roles.length && initial.middleRoles.length;
+    if (!preloaded) Promise.all([acq.institutions(), acq.majors(3), acq.roles(3), acq.roles(2)])
       .then(([i, m, r, r2]) => {
         setInstitutions(i);
         setMajors(m);

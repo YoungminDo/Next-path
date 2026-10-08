@@ -2,6 +2,7 @@ import ConditionDemo from "./ConditionDemo";
 import HeroForm from "./HeroForm";
 import InsightGallery from "./InsightGallery";
 import StickyCta from "./StickyCta";
+import type { Options } from "@/lib/server/options";
 
 /* Landing (/). Results sit behind a free Kakao login, so this page has to make the login feel
    like an obvious "why not": curiosity (many real-looking insights, mobileindex-style), a big
@@ -23,7 +24,7 @@ const FREE = [
   { b: "한 걸음 먼저 간 사람에게 묻기", s: "곧 열려요", soon: true },
 ];
 
-export default function Landing() {
+export default function Landing({ options }: { options: Options }) {
   return (
     <div className="landing">
       <nav className="lnav">
@@ -42,7 +43,7 @@ export default function Landing() {
             <li>광고 · 영업 연락은 절대 없어요</li>
           </ul>
         </div>
-        <HeroForm />
+        <HeroForm institutions={options.institutions} majors={options.majors} />
       </header>
 
       <a className="reward" href="#hero-form">

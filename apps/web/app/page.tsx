@@ -1,5 +1,8 @@
 import Landing from "@/components/landing/Landing";
+import { loadOptions } from "@/lib/server/options";
 
-export default function Home() {
-  return <Landing />;
+export const revalidate = 600;
+
+export default async function Home() {
+  return <Landing options={await loadOptions()} />;
 }

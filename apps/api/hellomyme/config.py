@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     session_ttl_hours: int = 24 * 30
     anonymous_draft_ttl_hours: int = 24 * 7
 
+    # Taxonomy/policy rows change only through migrations and imports, so the query engine keeps
+    # them in process this long instead of re-reading them on every request (0 disables).
+    reference_cache_seconds: int = 60
+
     @field_validator("database_url")
     @classmethod
     def _psycopg_driver(cls, value: str) -> str:

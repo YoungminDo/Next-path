@@ -41,6 +41,9 @@ async function proxy(req: NextRequest, ctx: { params: Promise<{ path: string[] }
   const res = new NextResponse(body, { status: upstream.status });
   const type = upstream.headers.get("content-type");
   if (type) res.headers.set("content-type", type);
+  // Public pick lists carry a CDN cache header from the API; everything else stays uncached.
+  const cache = upstream.headers.get("cache-control");
+  if (req.method === "GET" && !token && cache?.includes("public")) res.headers.set("cache-control", cache);
   if (upstream.status === 401 && token) res.cookies.delete(SESSION_COOKIE);
   return res;
 }

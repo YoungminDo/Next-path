@@ -13,12 +13,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
+import time
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field, replace
 from datetime import date, timedelta
 
 from sqlalchemy import Connection, text
 
+from hellomyme.config import get_settings
 from hellomyme.domain.policies import PolicyMissing
 
 LOOKBACKS = {"1Y": 1, "3Y": 3, "5Y": 5, "10Y": 10, "ALL": None}
@@ -78,7 +81,32 @@ class CohortPolicyV2:
     fallback_steps: tuple[dict, ...]
 
 
+_REF_CACHE: dict[tuple, tuple[float, object]] = {}
+_REF_LOCK = threading.Lock()
+
+
+def _cached(key: tuple, load):
+    """Short in-process cache for reference rows (taxonomy, policies). Each saved lookup is a
+    database round trip; the API and the database are in different regions."""
+    ttl = 0 if get_settings().env == "test" else get_settings().reference_cache_seconds
+    now = time.monotonic()
+    if ttl > 0:
+        with _REF_LOCK:
+            hit = _REF_CACHE.get(key)
+        if hit and now - hit[0] < ttl:
+            return hit[1]
+    value = load()
+    if ttl > 0:
+        with _REF_LOCK:
+            _REF_CACHE[key] = (now, value)
+    return value
+
+
 def active_cohort_policy_v2(conn: Connection) -> CohortPolicyV2:
+    return _cached(("cohort_policy_v2",), lambda: _load_cohort_policy_v2(conn))
+
+
+def _load_cohort_policy_v2(conn: Connection) -> CohortPolicyV2:
     row = conn.execute(text(
         """SELECT version, min_exact_n, min_cell_n, demographic_min_n, demographic_min_cell_n,
                   top_n, fallback_steps
@@ -135,6 +163,10 @@ class Taxonomy:
 
 
 def load_taxonomy(conn: Connection, taxonomy_type: str) -> Taxonomy:
+    return _cached(("taxonomy", taxonomy_type), lambda: _load_taxonomy(conn, taxonomy_type))
+
+
+def _load_taxonomy(conn: Connection, taxonomy_type: str) -> Taxonomy:
     rows = conn.execute(text(
         """SELECT n.taxonomy_node_id::text AS id, n.code, n.display_name AS label, n.depth,
                   n.parent_node_id::text AS parent, t.version
@@ -149,10 +181,10 @@ def load_taxonomy(conn: Connection, taxonomy_type: str) -> Taxonomy:
 
 def surface_depth(conn: Connection, surface: str, taxonomy_type: str,
                   requested: int | None) -> int:
-    row = conn.execute(text(
+    row = _cached(("surface", surface, taxonomy_type), lambda: conn.execute(text(
         """SELECT default_depth, min_depth, max_depth FROM product_taxonomy_view
            WHERE surface_code = :s AND taxonomy_type = :t AND status = 'ACTIVE'"""),
-        {"s": surface, "t": taxonomy_type}).first()
+        {"s": surface, "t": taxonomy_type}).first())
     if row is None:
         raise PolicyMissing(f"no product_taxonomy_view for {surface}/{taxonomy_type}")
     if requested is None:

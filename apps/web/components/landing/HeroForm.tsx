@@ -10,14 +10,16 @@ import { acq, type Node } from "@/lib/api";
 const THIS_YEAR = new Date().getFullYear();
 const YEARS = Array.from({ length: 22 }, (_, i) => THIS_YEAR + 4 - i);
 
-export default function HeroForm() {
-  const [institutions, setInstitutions] = useState<{ id: string; name: string }[]>([]);
-  const [majors, setMajors] = useState<Node[]>([]);
+export default function HeroForm(props: { institutions: { id: string; name: string }[]; majors: Node[] }) {
+  const [institutions, setInstitutions] = useState(props.institutions);
+  const [majors, setMajors] = useState<Node[]>(props.majors);
   const [f, setF] = useState({ inst: "", major: "", adm: "", grad: "" });
   // "error": the API did not answer; "empty": it answered but has no data yet.
-  const [status, setStatus] = useState<"loading" | "ok" | "error" | "empty">("loading");
+  const preloaded = props.institutions.length > 0 && props.majors.length > 0;
+  const [status, setStatus] = useState<"loading" | "ok" | "error" | "empty">(preloaded ? "ok" : "loading");
 
   useEffect(() => {
+    if (preloaded) return; // already in the HTML
     Promise.all([acq.institutions(), acq.majors(3)])
       .then(([i, m]) => {
         setInstitutions(i);
@@ -25,7 +27,7 @@ export default function HeroForm() {
         setStatus(i.length && m.length ? "ok" : "empty");
       })
       .catch(() => setStatus("error"));
-  }, []);
+  }, [preloaded]);
 
   const groups = useMemo(() => {
     const g = new Map<string, Node[]>();

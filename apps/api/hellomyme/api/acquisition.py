@@ -2,7 +2,7 @@
 from datetime import UTC, datetime
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel
 
 from hellomyme.api.deps import Account, AnonSession, AppSettings, AsOf, Conn, IdempotencyKey
@@ -33,24 +33,30 @@ def _run(fn):
 
 
 # --- options --------------------------------------------------------------------------------
+# Same for every visitor and changed only by an import: let the CDN keep them.
+OPTIONS_CACHE = "public, max-age=300, s-maxage=600, stale-while-revalidate=86400"
 
 @router.get("/options/institutions")
-def institutions(conn: Conn):
+def institutions(conn: Conn, response: Response):
+    response.headers["Cache-Control"] = OPTIONS_CACHE
     return acq.institutions(conn)
 
 
 @router.get("/options/majors")
-def majors(conn: Conn, q: str | None = None, depth: int | None = None):
+def majors(conn: Conn, response: Response, q: str | None = None, depth: int | None = None):
+    response.headers["Cache-Control"] = OPTIONS_CACHE
     return acq.taxonomy_options(conn, "MAJOR", q, depth)
 
 
 @router.get("/options/roles")
-def roles(conn: Conn, q: str | None = None, depth: int | None = None):
+def roles(conn: Conn, response: Response, q: str | None = None, depth: int | None = None):
+    response.headers["Cache-Control"] = OPTIONS_CACHE
     return acq.taxonomy_options(conn, "ROLE", q, depth)
 
 
 @router.get("/options/organizations")
-def organizations(conn: Conn, q: str | None = None):
+def organizations(conn: Conn, response: Response, q: str | None = None):
+    response.headers["Cache-Control"] = OPTIONS_CACHE
     return acq.organizations(conn, q)
 
 
