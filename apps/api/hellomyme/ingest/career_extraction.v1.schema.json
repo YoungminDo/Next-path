@@ -13,7 +13,8 @@
     "person": { "$ref": "#/$defs/person" },
     "educations": { "type": "array", "items": { "$ref": "#/$defs/education" } },
     "work_events": { "type": "array", "items": { "$ref": "#/$defs/work_event" } },
-    "warnings": { "type": "array", "items": { "type": "string", "maxLength": 500 } }
+    "warnings": { "type": "array", "items": { "type": "string", "maxLength": 500 } },
+    "sheet": { "type": "object", "description": "Workbook provenance when the input is the ingestion workbook (template v2.1) instead of an AI extraction: the person's raw rows, their review status and the workbook's own reference ids. Not set by the AI." }
   },
   "$defs": {
     "asset": {
@@ -24,7 +25,8 @@
         "asset_id": { "type": "string", "minLength": 1, "maxLength": 200 },
         "page_order": { "type": "integer", "minimum": 1 },
         "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-        "captured_at": { "type": "string", "format": "date-time" }
+        "captured_at": { "type": "string", "format": "date-time" },
+        "storage_ref": { "type": "string", "maxLength": 1000, "description": "Where the file lives in access-controlled storage" }
       }
     },
     "partial_date": {
@@ -57,6 +59,7 @@
         "display_name_raw": { "type": ["string", "null"], "maxLength": 200 },
         "headline_raw": { "type": ["string", "null"], "maxLength": 500 },
         "location_raw": { "type": ["string", "null"], "maxLength": 200 },
+        "declared_stage": { "enum": ["STUDENT", "JOB_SEEKER", "PROFESSIONAL", null], "description": "Only when the source states it" },
         "evidence": { "type": "array", "items": { "$ref": "#/$defs/evidence" } }
       }
     },

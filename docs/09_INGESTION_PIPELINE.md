@@ -1,17 +1,23 @@
 # 경력 수집 파이프라인 (Ingestion Pipeline)
 
-> 캡처 → AI JSON → 자동 검증 → 사람 검수 → DB(SEED) → (필요할 때) 엑셀 추출.
-> 코드: `apps/api/hellomyme/ingest/` · 마이그레이션 `0022_ingestion_pipeline.py` ·
-> 계약: `ingest/career_extraction.v1.schema.json` · 테스트 `tests/test_ingest.py`.
-> 기준 템플릿: `HELLOMYME_Career_Ingestion_Template_v2.1` (19시트, 2026-10-08).
+> **입력 표준은 수집 엑셀(템플릿 v2.1)이다** (2026-10-09 결정: 운영팀이 엑셀로 데이터화해서 올리고,
+> 시스템은 그 기준으로 받는다). 엑셀 → 시트 검증 → 사람 단위 자동 검증 → (검수 대기만 보류) → DB(SEED).
+> 캡처 → AI JSON 경로는 같은 파이프라인의 두 번째 입구로 남겨 둔다.
+> 코드: `apps/api/hellomyme/ingest/` (`sheet.py` 엑셀, `pipeline.py` 공통) · 마이그레이션 `0022`, `0023` ·
+> 계약: `ingest/career_extraction.v1.schema.json` · 테스트 `tests/test_ingest.py`, `tests/test_ingest_sheet.py`.
+> 기준 템플릿: `HELLOMYME_Career_Ingestion_Template_v2.1` (19시트, 2026-10-08). 엑셀 규칙은 §10.
 
-## 1. 결정: 엑셀이 아니라 DB가 원본이다 (안 B)
+## 1. 결정: 엑셀은 입력 표준, 기록의 원본은 DB (안 B)
 
 | 안 | 흐름 | 장점 | 단점 |
 |---|---|---|---|
 | A | 캡처 → 사람이 엑셀 입력 → 업로드 | 도구가 익숙하고 시작이 빠름 | 셀 한 칸에 별칭이 여러 개 들어가는 등 구조가 깨짐. 원본과 수정본을 구분할 수 없음. 같은 사람이 여러 번 들어가기 쉬움 |
 | **B (채택)** | 캡처 → AI JSON → 자동 검증 → 필드 검수 → DB → 엑셀은 추출만 | AI 출력 원문, 검수 결정, 근거 스크린샷이 각각 행으로 남음. 같은 입력을 다시 넣어도 결과가 하나 (멱등). 표준화가 별칭으로 쌓임 | 검수 화면이 필요함 (Phase 1에서는 CLI, 다음 단계에서 엑셀 왕복) |
 | C | AI 결과를 검수 없이 바로 적재 | 가장 빠름 | 오독이 그대로 통계에 들어감. "unknown = NULL" 원칙과 충돌 |
+
+2026-10-09 보완: 운영팀이 엑셀로 데이터화해서 올리기로 했다. 그래서 엑셀이 **입력 표준**이 된다.
+다만 A의 단점은 적재기가 막는다. 시트와 행 단위로 검증하고, 사람 단위로 멱등 처리하며, 검수 상태를 따른다.
+표준화는 별칭과 매핑 대기열로 하고, 각 사람의 원본 행은 그대로 보관한다(§10).
 
 B를 택한 근거는 세 가지다. 첫째, 프로젝트 원칙(원본 append-only, 모르면 NULL, 멱등 적재)을 엑셀로는
 강제할 수 없다. 둘째, 해자 데이터(docs/08)는 시간이 지나며 쌓이는데, 출처를 행 단위로 추적하지 못하면
@@ -133,29 +139,38 @@ AI 프롬프트에 넣을 금지 사항(스키마 description에도 있음):
 - 성별·나이를 추정하지 않는다.
 - 보이지 않는 값은 키 자체를 넣지 않는다.
 
-## 6. 템플릿 v2.1 시트 → DB
+## 6. 템플릿 v2.1 시트 → DB (구현됨)
 
-| 시트 | DB | 비고 |
+| 시트 | DB | 적재 방식 |
 |---|---|---|
-| 01_PERSON | `person` (+ `person_pii`) | `member_id`는 ACCOUNT 연결이므로 SEED에서는 비움 (ACCOUNT ≠ PERSON) |
-| 02_EDUCATION | `education` + `education_source` | **보완 필요:** `admission_year`, 연도 정밀도 열 추가 (cohort가 입학연도를 씀) |
-| 03_WORK_EVENT | `work_event` + `work_event_source` | **보완 필요:** `event_type` 열 추가. `is_parallel`은 저장하지 않음 (기간에서 계산) |
-| 04_ORGANIZATION | `organization` + `organization_alias` | `aliases`는 셀 하나에 몰지 말고 별칭 1개당 1행으로 |
-| 05_INSTITUTION | `institution` | 별칭은 매핑 큐 승인으로 관리 |
-| 06~08 *_TAXONOMY | `taxonomy` / `taxonomy_node` / `taxonomy_alias` | **보완 필요:** taxonomy 버전 열. 부모 변경은 새 버전 + mapping |
-| 09_SOURCE | `source_submission` + `source_asset` + `source_record` | submission(사람 1명)과 asset(스크린샷 N장)을 분리 |
-| 10_PARSE_JOB | `parse_run` | prompt/schema/rule 버전까지 기록 |
-| 11_FIELD_REVIEW | `extraction_field` | 근거 스크린샷과 근거 줄 포함 |
-| 12_CONSENT | 기존 consent 테이블 | 가입자(VERIFIED)용. SEED는 `permitted_use`/`legal_basis`로 관리 |
-| 13_SNAPSHOT · 14_TRANSITION · 16_SIMILARITY | **입력 아님** | 질의 엔진이 계산하는 결과물. 입력으로 받으면 원본과 계산이 섞임 |
-| 15_MENTOR | 기존 mentor 테이블 | **본인 opt-in만.** SEED 인물은 멘토나 사람으로 노출하지 않음 |
-| 17_MAPPING_QUEUE | `mapping_queue` | 정규화한 이름 1개당 1행, 등장 횟수 포함 |
-| 18_QA_LOG | `parse_run.issues` + 기존 `qa_review` | |
+| 01_PERSON | `person` (SEED) | 1행 = 1명 = 1 submission. `career_stage` → `declared_stage`. `record_status`가 demo/test/excluded면 건너뜀. `member_id`는 쓰지 않음 (ACCOUNT ≠ PERSON) |
+| 02_EDUCATION | `education` + `education_source` | 원문 학교·전공 보존. `institution_id`/`major_id`는 05/08 시트로 연결. 졸업예정·재학·중퇴는 졸업연도를 넣지 않음 |
+| 03_WORK_EVENT | `work_event` + `work_event_source` | 원문 회사·직무 보존. `employment_type`으로 경력 유형과 고용형태를 함께 판정. `is_parallel`·`industry_id`는 저장하지 않음 (계산값, 회사 속성) |
+| 04_ORGANIZATION | `organization` + `organization_alias` (+ `organization_industry`) | 이름·별칭으로 기존 회사를 찾고, 없으면 새로 만듦. 별칭은 `,` `;` `|` 줄바꿈으로 구분 |
+| 05_INSTITUTION | `institution` + `institution_alias` (0023) | 04와 같음 |
+| 06·07·08 *_TAXONOMY | 기존 분류표에 **연결만** + `taxonomy_alias` | 분류표 자체는 만들지 않음 (제품 분류표는 하나). 못 찾은 직무·전공은 매핑 대기열로 |
+| 09_SOURCE | `source_submission` + `source_asset` | `source_type`·`permitted_use` 필수. `storage_ref` 보존 |
+| 12_CONSENT | `source_submission.legal_basis` | 동의가 있으면 `CONSENT:목적:버전`이 근거. 철회·거부면 적재하지 않음 |
+| 15_MENTOR | 사용 안 함 | SEED는 멘토로 노출하지 않음. 멘토는 가입 후 본인 opt-in |
+| 13·14·16 | **입력 아님** | 질의 엔진이 계산하는 결과물 |
+| 10·11·17·18 | 반영 안 함 | 작업 기록. 각 사람의 원본 행은 parse run에 그대로 보관 |
 
 ## 7. 운영 명령 (CLI)
 
+엑셀(주 경로). PowerShell 한 줄로 실행하면 미리보기 → 리포트 확인 → y 입력 → 적재 순서로 진행된다.
+```powershell
+irm https://raw.githubusercontent.com/YoungminDo/Next-path/main/scripts/ingest-sheet.ps1 | iex
+```
 ```bash
 cd apps/api
+uv run hellomyme-ingest sheet 수집.xlsx --dry-run --legal-basis "..."   # 저장 없이 리포트만
+uv run hellomyme-ingest sheet 수집.xlsx --legal-basis "..."             # 적재 + 리포트(xlsx)
+#   --accept-unreviewed  review_status가 비었거나 pending인 행도 올린 사람이 검수한 것으로 처리
+#   --collector NAME     업로드할 때마다 같은 이름을 써야 다시 올려도 중복이 생기지 않음 (기본 workbook)
+#   운영(production) 환경에서는 --legal-reviewed 없이는 적재하지 않음
+```
+AI JSON 경로:
+```bash
 uv run hellomyme-ingest receive out/VN-0001.json --collector ops-vn-01 \
     --source-type PUBLIC_PROFILE --permitted-use AGGREGATE_ONLY \
     --legal-basis "<법률 검토 후 확정한 근거>" --model <model> --prompt extract_v1
@@ -187,10 +202,48 @@ uv run hellomyme-ingest map <mapping_id> --ref <organization_id>   # 또는 --ne
    - **국외 이전:** 베트남에서 열람·처리하는 것은 제28조의8 국외 이전에 해당할 수 있다(동의, 고지·공개, 인증 중 하나).
      베트남 쪽 개인정보 규정(Decree 13/2023/ND-CP, 2026년 시행 개인정보보호법)의 적용 여부도 확인한다.
    - 검토가 끝나면 `legal_basis` 문구와 `permitted_use` 값 목록을 확정한다. 확정 전에는 스테이징에만 적재한다.
-2. **엑셀 검수 왕복:** PENDING 필드와 매핑 큐를 xlsx로 내보낸다. 운영팀이 결정 열만 채우고, 그 파일을 다시 받아 `review_field`/`resolve_mapping`에 일괄 적용한다(검증은 같은 규칙).
-3. **경로 접두 지표(k-step):** "k번째 직장까지 비슷한 사람의 k+1, k+2번째"를 계산한다. CareerQuery에 `PATH_PREFIX` 지표로 추가하고, 소표본 억제는 기존 정책을 그대로 쓴다.
-4. **추출 품질 측정:** 정답을 붙인 캡처 50~100건으로 프롬프트·모델 버전별 필드 정확도를 비교한다(`parse_run`에 이미 버전이 기록됨). 자동 승인 기준(0.9)은 이 결과로 조정한다.
-5. 스크린샷 업로드와 오브젝트 스토리지 연결(`storage_ref`), 보존 기한, 삭제 요청 처리 절차.
+2. **적재 후 수정:** 이미 적재된 사람의 행이 바뀌면 지금은 `LOADED_CHANGED`로 알리기만 한다.
+   바뀐 행을 새 이벤트로 넣고 기존 행은 `supersedes_*`로 대체하는 방식으로 연결한다(덮어쓰지 않음).
+3. **동의 철회 후 삭제:** 이미 적재된 사람의 동의가 철회되면 지금은 `WITHDRAWN_AFTER_LOAD`로 알린다.
+   erasure 모드로 삭제하는 절차와 명령을 만든다.
+4. **표준화 대기열 엑셀 왕복:** 리포트의 `표준화 대기` 시트에 연결할 대상 열을 채워 다시 올리면 `resolve_mapping`에 일괄 적용한다.
+5. **경로 접두 지표(k-step):** "k번째 직장까지 비슷한 사람의 k+1, k+2번째"를 계산한다. CareerQuery에 `PATH_PREFIX` 지표로 추가하고, 소표본 억제는 기존 정책을 그대로 쓴다.
+6. **추출 품질 측정 (AI 경로를 쓸 때):** 정답을 붙인 캡처 50~100건으로 프롬프트·모델 버전별 필드 정확도를 비교한다(`parse_run`에 이미 버전이 기록됨). 자동 승인 기준(0.9)은 이 결과로 조정한다.
+7. 스크린샷 업로드와 오브젝트 스토리지 연결(`storage_ref`), 보존 기한(`retention_until`) 집행.
+
+## 10. 엑셀 입력 표준 (템플릿 v2.1 그대로)
+
+열 이름은 템플릿과 같아야 한다. 대소문자와 앞뒤 공백은 무시한다. 시트 이름은 번호를 빼고 비교한다
+(`01_PERSON`과 `PERSON` 모두 인식). 값은 한글과 영어를 모두 받는다.
+
+**필수:** `01_PERSON.person_id`, `02/03.person_id`·`source_id`, `09_SOURCE.source_id`·`person_id`·`source_type`·`permitted_use`.
+이 열이 없으면 파일 전체를 적재하지 않는다(`MISSING_COLUMN`).
+
+| 열 | 받는 값 | 결과 |
+|---|---|---|
+| `employment_type` | employee·직원 / full_time·정규직 / intern·인턴 / contract·계약직 / part_time·파트타임 / freelance·프리랜서 / founder·창업 / self_employed·자영업 / side_business·부업 / military·군복무 / career_break·휴직 / study·학업 / project / other | 경력 유형 + 고용형태. employee는 고용형태를 비워 둔다(정규직이라고 가정하지 않음). 비어 있으면 **검수 대기** |
+| `start_value`·`end_value` | `2018`, `2018-03`, `2018.3`, `2018년 3월`, 엑셀 날짜 | 함께 적힌 `*_precision`(year/month)을 따른다. 정밀도가 비어 있으면 값에서 판단하고, 월을 지어내지 않는다 |
+| `is_current` | TRUE/FALSE, Y/N, 예/아니오, 현재 | 못 읽으면 비워 두고 경고 |
+| `degree_level` | bachelor·학사 / master·석사 / doctorate·박사 / associate·전문학사 / other | |
+| `graduation_status` | graduated·졸업 (또는 비움) / expected·졸업예정·재학·휴학·중퇴 | 졸업이 아니면 졸업연도를 넣지 않음 |
+| `admission_year` (선택 열) | `2014` | 있으면 입학연도로 넣음. **추가 권장:** 입학연도 기준 비교가 가능해짐 |
+| `event_type` (선택 열) | 위 유형 코드 | 있으면 `employment_type`보다 우선. 고용형태는 `employment_type`에서 읽음 |
+| `review_status` | approved·검수완료·승인 → 적재 / pending·비움 → **대기** / rejected·삭제 → 제외 | 대기 행이 하나라도 있으면 그 사람은 보류. `--accept-unreviewed`를 주면 올린 사람이 검수한 것으로 처리 |
+| `source_type` | linkedin_capture·링크드인 → PUBLIC_PROFILE / linkedin_upload → LINKEDIN_USER_UPLOAD / resume·이력서·self_submitted·직접제출 → CAREER_DOCUMENT / manual → MANUAL_RESEARCH | 모르는 값이면 그 사람은 막힘. 한 사람에게 출처가 여러 개면 가장 엄격한 것(PUBLIC_PROFILE 우선)을 쓴다 |
+| `12_CONSENT.granted`·`withdrawn_at` | TRUE + 철회일 없음 | 동의가 법적 근거가 됨. 철회·거부면 적재하지 않음(적재된 뒤라면 `WITHDRAWN_AFTER_LOAD`) |
+| `aliases` (04~08) | `인제스트(주), Ingest Co.` | 별칭이 쌓여 다음 파일부터 자동으로 표준화됨 |
+
+**적재 단위와 다시 올리기**
+- 사람 1명 = 1 submission(`person_id`).
+- 내용이 같으면 `이미 적재됨`이 나오고 아무것도 바뀌지 않는다.
+- 검수 대기였던 사람은 상태를 바꿔 다시 올리면 적재된다.
+- 시트 오류는 **그 사람만** 막고, 다른 사람은 그대로 진행한다.
+
+**리포트** (`<파일명>_미리보기.xlsx` / `_적재결과.xlsx`)
+- `요약`
+- `사람별 결과`: 적재됨, 검수 대기, 거부, 건너뜀, 동의 철회
+- `고칠 것`: 심각도, 시트, **엑셀 행 번호**, ID, 설명
+- `표준화 대기`: 연결되지 않은 이름과 등장 횟수
 
 ## 출처
 - LinkedIn User Agreement §8.2 (Don'ts: 스크래핑·복사 금지) — https://www.linkedin.com/legal/user-agreement

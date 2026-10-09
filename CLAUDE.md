@@ -19,9 +19,10 @@ Will later merge into Hello My Me. Read `docs/` before large changes:
 - v1.4 code paths: `domain/career_query.py` (CareerQuery engine, cohort v2), `domain/acquisition.py`
   + `api/acquisition.py` (`/acq/*` student/professional flows, login merge, `/acq/me`),
   web `components/AcquisitionFlow.tsx`. Legacy `/career/*` + snapshot engine remain for old drafts.
-- SEED ingestion: `hellomyme/ingest/` (`career_extraction.v1.schema.json`, `pipeline.py`, CLI
-  `hellomyme-ingest`). AI never picks canonical ids; raw names stay, standardisation = aliases + mapping_queue;
-  career order is derived from dates at query time. Legal review (docs/09 §9) gates production loads.
+- SEED ingestion: input standard = the ingestion workbook (template v2.1, `ingest/sheet.py`,
+  `hellomyme-ingest sheet <xlsx> --dry-run`, `scripts/ingest-sheet.ps1`); AI JSON path shares
+  `pipeline.py`. Raw names stay, standardisation = aliases + mapping_queue; career order is derived
+  from dates at query time; rows not reviewed are held. Legal review (docs/09 §9) gates production loads.
 
 ## Approved decisions (do not re-ask)
 - Positioning: Nextpath is Hello My Me's first **acquisition / traffic-generator** product (like Toss

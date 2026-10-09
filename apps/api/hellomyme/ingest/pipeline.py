@@ -144,26 +144,25 @@ def _duplicates(issues: list[Issue]) -> set[str]:
 
 # --- normalisation (deterministic lookups; the queue holds what they cannot match) ----------
 
-def _lookup(conn: Connection, kind: str, raw: str | None) -> str | None:
+def _candidates(conn: Connection, kind: str, raw: str | None) -> set[str]:
+    """Canonical ids a name could mean: an approved mapping first, else every best-ranked match
+    by name or alias. More than one means the name is ambiguous."""
     if not raw:
-        return None
+        return set()
     approved = conn.execute(text(
         """SELECT resolved_ref::text FROM mapping_queue WHERE entity_kind = :k
              AND normalized_key = normalize_label(:r) AND status IN ('APPROVED','NEW_ENTITY')"""),
         {"k": kind, "r": raw}).scalar()
     if approved:
-        return approved
-    # Every candidate with its rank; a tie between different entries is ambiguous and goes to
-    # the queue instead of being decided arbitrarily.
-    if kind == "INSTITUTION":
-        sql = """SELECT institution_id::text AS id, 0 AS rank FROM institution
-                 WHERE normalize_label(name) = normalize_label(:r)"""
-    elif kind == "ORGANIZATION":
-        sql = """SELECT organization_id::text AS id, 0 AS rank FROM organization
-                 WHERE normalize_label(name) = normalize_label(:r) AND NOT is_placeholder
-                 UNION
-                 SELECT organization_id::text, 0 FROM organization_alias
-                 WHERE normalized_alias = normalize_label(:r) AND status = 'ACTIVE'"""
+        return {approved}
+    if kind in ("INSTITUTION", "ORGANIZATION"):
+        table = kind.lower()
+        placeholder = "AND NOT is_placeholder" if kind == "ORGANIZATION" else ""
+        sql = f"""SELECT {table}_id::text AS id, 0 AS rank FROM {table}
+                  WHERE normalize_label(name) = normalize_label(:r) {placeholder}
+                  UNION
+                  SELECT {table}_id::text, 0 FROM {table}_alias
+                  WHERE normalized_alias = normalize_label(:r) AND status = 'ACTIVE'"""
     else:  # the most specific taxonomy node wins
         sql = """SELECT n.taxonomy_node_id::text AS id, -n.depth AS rank
                  FROM taxonomy_node n JOIN taxonomy t USING (taxonomy_id)
@@ -175,10 +174,16 @@ def _lookup(conn: Connection, kind: str, raw: str | None) -> str | None:
                                      AND a.normalized_alias = normalize_label(:r)))"""
     rows = conn.execute(text(sql), {"r": raw, "k": kind}).all()
     if not rows:
-        return None
+        return set()
     best = min(r.rank for r in rows)
-    top = {r.id for r in rows if r.rank == best}
-    return top.pop() if len(top) == 1 else None
+    return {r.id for r in rows if r.rank == best}
+
+
+def _lookup(conn: Connection, kind: str, raw: str | None) -> str | None:
+    """The one canonical id for a name, or None when unknown or ambiguous (a tie is queued for
+    a person instead of being decided arbitrarily)."""
+    found = _candidates(conn, kind, raw)
+    return next(iter(found)) if len(found) == 1 else None
 
 
 def _queue(conn: Connection, kind: str, raw: str) -> None:
@@ -192,7 +197,15 @@ def _queue(conn: Connection, kind: str, raw: str) -> None:
 
 def receive(conn: Connection, raw_output: str, *, collector: str, source_type: str,
             permitted_use: str, legal_basis: str, model_version: str, prompt_version: str,
-            as_of: date) -> dict:
+            as_of: date, trusted: bool = False, refs: dict | None = None,
+            held: set | None = None, codes: dict | None = None,
+            extra_issues: list[Issue] | None = None) -> dict:
+    """trusted: a person typed and checked the values (the ingestion workbook), so readings are
+    accepted; unknown names are still queued for standardisation. refs: canonical ids the
+    workbook already resolved, keyed (entity, local_id, field). held: (entity, local_id) rows the
+    workbook marks as not reviewed yet; their fields wait as PENDING. codes: coded values the
+    workbook states directly (employment_type, degree_type), same keys as refs."""
+    refs, held, codes = refs or {}, held or set(), codes or {}
     try:
         doc = json.loads(raw_output)
     except json.JSONDecodeError as exc:
@@ -220,11 +233,11 @@ def receive(conn: Connection, raw_output: str, *, collector: str, source_type: s
         {"s": sub.source_submission_id, "h": sha}).first()
     if prior:  # the same output again is the same run, whatever happened to it since
         return {"parse_run_id": prior.parse_run_id, "status": prior.status, "issues": prior.issues,
-                "replayed": True}
+                "pending": None, "unmapped": [], "replayed": True}
     if sub.status in ("LOADED", "WITHDRAWN"):
         raise IngestError(f"submission {doc['submission_id']} is already {sub.status}")
 
-    issues = check(doc, as_of)
+    issues = check(doc, as_of) + list(extra_issues or [])
     blocked = any(i.severity == "BLOCK" for i in issues)
     conn.execute(text(
         """UPDATE parse_run SET status = 'SUPERSEDED'
@@ -252,13 +265,15 @@ def receive(conn: Connection, raw_output: str, *, collector: str, source_type: s
     for a in doc["assets"]:
         assets[a["asset_id"]] = conn.execute(text(
             """INSERT INTO source_asset (source_submission_id, external_asset_id, page_order, sha256,
-                   captured_at)
-               VALUES (:s, :a, :p, :h, :c)
+                   captured_at, storage_ref)
+               VALUES (:s, :a, :p, :h, :c, :ref)
                ON CONFLICT (source_submission_id, external_asset_id)
-               DO UPDATE SET page_order = EXCLUDED.page_order
+               DO UPDATE SET page_order = EXCLUDED.page_order,
+                             storage_ref = coalesce(EXCLUDED.storage_ref, source_asset.storage_ref)
                RETURNING source_asset_id::text"""),
             {"s": sub.source_submission_id, "a": a["asset_id"], "p": a["page_order"],
-             "h": a.get("sha256"), "c": a.get("captured_at")}).scalar_one()
+             "h": a.get("sha256"), "c": a.get("captured_at"),
+             "ref": a.get("storage_ref")}).scalar_one()
 
     unmapped: list[tuple[str, str]] = []
     rows: list[dict] = []
@@ -267,32 +282,36 @@ def receive(conn: Connection, raw_output: str, *, collector: str, source_type: s
         rows.append({"r": run_id, "e": entity, "l": lid, "f": name, "raw": raw, "n": normalized,
                      "ref": ref, "c": conf, "a": assets.get(ev[0]["asset_id"]) if ev else None,
                      "t": " / ".join(x["text"] for x in ev) if ev else None,
-                     "s": "AUTO_ACCEPTED" if auto else "PENDING"})
+                     "s": "AUTO_ACCEPTED" if auto and (entity, lid) not in held else "PENDING"})
 
     def mapped(kind, entity, lid, name, raw, conf, ev):
-        # Nothing shown -> nothing to review (stays unknown). A name no alias knows, or a
-        # low-confidence reading, waits for a person.
-        ref = _lookup(conn, kind, raw)
+        # Nothing shown -> nothing to review (stays unknown). From the AI, a name no alias
+        # knows or a low-confidence reading waits for a person; a typed name is accepted.
+        ref = refs.get((entity, lid, name)) or _lookup(conn, kind, raw)
         if raw and not ref:
             unmapped.append((kind, raw))
         add(entity, lid, name, raw, raw, ref, conf, ev,
-            auto=raw is None or (bool(ref) and (conf is None or conf >= AUTO_ACCEPT_CONFIDENCE)))
+            auto=raw is None or trusted
+            or (bool(ref) and (conf is None or conf >= AUTO_ACCEPT_CONFIDENCE)))
 
     def dated(entity, lid, key, d, ev, required=False):
         add(entity, lid, key, d and d["value"], d and f"{d['value']}|{d['precision']}", ev=ev,
-            auto=bool(d) or not required)
+            auto=bool(d) or not required or trusted)
 
     person = doc["person"]
     if person.get("display_name_raw"):
         add("PERSON", "person", "display_name", person["display_name_raw"],
             person["display_name_raw"])
+    if person.get("declared_stage"):
+        add("PERSON", "person", "declared_stage", person["declared_stage"], person["declared_stage"])
     for e in doc["educations"]:
         lid, ev, conf = e["local_id"], e["evidence"], e.get("confidence") or {}
         mapped("INSTITUTION", "EDUCATION", lid, "institution", e["institution_raw"],
                conf.get("institution"), ev)
         mapped("MAJOR", "EDUCATION", lid, "major", e.get("major_raw"), conf.get("major"), ev)
+        k = ("EDUCATION", lid, "degree_type")
         add("EDUCATION", lid, "degree_type", e.get("degree_raw"),
-            _first(DEGREE_RULES, e.get("degree_raw")), ev=ev)
+            codes.get(k, _first(DEGREE_RULES, e.get("degree_raw"))), ev=ev)
         for key in ("start", "end"):
             dated("EDUCATION", lid, key, e.get(key), ev)
     dupes = _duplicates(issues)
@@ -309,7 +328,9 @@ def receive(conn: Connection, raw_output: str, *, collector: str, source_type: s
         # An internship is employment with employment_type INTERN; UNKNOWN waits for a person.
         event_type = "EMPLOYMENT" if hint == "INTERN" else (hint if hint in EVENT_TYPES else None)
         add("WORK_EVENT", lid, "event_type", hint, event_type, ev=ev, auto=event_type is not None)
-        add("WORK_EVENT", lid, "employment_type", w.get("employment_type_raw"), emp, ev=ev)
+        k = ("WORK_EVENT", lid, "employment_type")
+        add("WORK_EVENT", lid, "employment_type", w.get("employment_type_raw"),
+            codes.get(k, emp), ev=ev)
         dated("WORK_EVENT", lid, "start", w.get("start"), ev, required=True)
         dated("WORK_EVENT", lid, "end", w.get("end"), ev)
         cur = w.get("is_current")
@@ -341,6 +362,7 @@ CORRECTION_RULES = {
     "end": r"^[12][0-9]{3}(-(0[1-9]|1[0-2]))?$",
     "is_current": r"^(true|false)$",
     "event_type": "^(" + "|".join(sorted(EVENT_TYPES)) + ")$",
+    "declared_stage": r"^(STUDENT|JOB_SEEKER|PROFESSIONAL)$",
     "employment_type": r"^(FULL_TIME|PART_TIME|CONTRACT|INTERN|UNKNOWN)$",
     "degree_type": r"^(ASSOCIATE|BACHELOR|MASTER|DOCTORATE|OTHER)$",
 }
@@ -492,9 +514,11 @@ def approve(conn: Connection, parse_run_id: str, *, reviewer_account_id: str | N
          "meta": json.dumps({"permitted_use": run.permitted_use, "model_version": run.model_version,
                              "prompt_version": run.prompt_version, "rule_version": run.rule_version,
                              "parse_run_id": parse_run_id, "pii_redacted": True})}).scalar_one()
+    stage = by.get(("PERSON", "person"), {}).get("declared_stage")
     person_id = conn.execute(text(
-        """INSERT INTO person (origin_layer, primary_source_id) VALUES ('SEED', :s)
-           RETURNING person_id::text"""), {"s": source_id}).scalar_one()
+        """INSERT INTO person (origin_layer, primary_source_id, declared_stage) VALUES ('SEED', :s, :st)
+           RETURNING person_id::text"""),
+        {"s": source_id, "st": stage and _final(stage)[0]}).scalar_one()
     name = by.get(("PERSON", "person"), {}).get("display_name")
     if name and _final(name)[0]:
         conn.execute(text("INSERT INTO person_pii (person_id, display_name) VALUES (:p, :n)"),
@@ -627,10 +651,11 @@ def resolve_mapping(conn: Connection, mapping_queue_id: str, *, resolved_ref: st
             """INSERT INTO taxonomy_alias (taxonomy_node_id, alias_text, source_type)
                VALUES (CAST(:r AS uuid), :a, 'MAPPING_QUEUE') ON CONFLICT DO NOTHING"""),
             {"r": resolved_ref, "a": q.raw_value})
-    elif q.entity_kind == "ORGANIZATION":
+    else:
         conn.execute(text(
-            """INSERT INTO organization_alias (organization_id, alias_text, source_type)
-               VALUES (CAST(:r AS uuid), :a, 'MAPPING_QUEUE') ON CONFLICT DO NOTHING"""),
+            f"""INSERT INTO {q.entity_kind.lower()}_alias ({q.entity_kind.lower()}_id, alias_text,
+                    source_type)
+                VALUES (CAST(:r AS uuid), :a, 'MAPPING_QUEUE') ON CONFLICT DO NOTHING"""),
             {"r": resolved_ref, "a": q.raw_value})
     conn.execute(text(
         """UPDATE mapping_queue SET status = :s, resolved_ref = CAST(:r AS uuid),

@@ -1,5 +1,7 @@
 """hellomyme-ingest: operate the career ingestion pipeline (docs/09_INGESTION_PIPELINE.md).
 
+  sheet    <workbook.xlsx> [--dry-run] [--report out.xlsx]
+                                  load the ingestion workbook (template v2.1) as SEED people
   receive  <ai_output.json> ...   store an AI extraction, check it, open it for review
   fields   <parse_run_id>         list a run's fields (pending first)
   review   <field_id> accept|reject|correct [--value V]
@@ -16,8 +18,9 @@ from pathlib import Path
 
 from sqlalchemy import text
 
+from hellomyme.config import get_settings
 from hellomyme.db import get_engine
-from hellomyme.ingest import pipeline
+from hellomyme.ingest import pipeline, sheet
 from hellomyme.ingest.pipeline import IngestError
 
 SOURCE_TYPES = ["PUBLIC_PROFILE", "LINKEDIN_USER_UPLOAD", "CAREER_DOCUMENT", "MANUAL_RESEARCH"]
@@ -32,6 +35,18 @@ def main() -> None:
     p = argparse.ArgumentParser(prog="hellomyme-ingest", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
+    w = sub.add_parser("sheet", help="load the ingestion workbook (template v2.1)")
+    w.add_argument("path")
+    w.add_argument("--dry-run", action="store_true", help="check and report only; nothing is saved")
+    w.add_argument("--report", help="also write the report as .xlsx (default: next to the workbook)")
+    w.add_argument("--collector", default="workbook",
+                   help="keep the same name across uploads so re-uploads update, not duplicate")
+    w.add_argument("--legal-basis", help="basis for people without a 12_CONSENT row")
+    w.add_argument("--accept-unreviewed", action="store_true",
+                   help="treat pending/blank review_status as reviewed by the uploader")
+    w.add_argument("--legal-reviewed", action="store_true",
+                   help="required in production: the legal review in docs/09 §9 is done")
+    w.add_argument("--as-of", type=date.fromisoformat, default=date.today())
     r = sub.add_parser("receive")
     r.add_argument("path")
     r.add_argument("--collector", required=True, help="collector name, e.g. ops-vn-01")
@@ -59,6 +74,23 @@ def main() -> None:
     g.add_argument("--ref", help="existing organization/institution id or taxonomy node id")
     g.add_argument("--new", help="create this organization/institution")
     args = p.parse_args()
+
+    if args.cmd == "sheet":
+        if get_settings().env == "production" and not args.legal_reviewed and not args.dry_run:
+            p.error("production loads wait for the legal review (docs/09 §9); pass --legal-reviewed")
+        engine = get_engine()
+        with engine.connect() as conn:
+            tx = conn.begin()
+            report = sheet.import_workbook(
+                conn, args.path, as_of=args.as_of, collector=args.collector,
+                legal_basis=args.legal_basis, accept_unreviewed=args.accept_unreviewed)
+            tx.rollback() if args.dry_run else tx.commit()
+        report["dry_run"] = args.dry_run
+        out = args.report or str(Path(args.path).with_name(
+            Path(args.path).stem + ("_미리보기" if args.dry_run else "_적재결과") + ".xlsx"))
+        sheet.write_report(report, out, dry_run=args.dry_run)
+        _dump({"summary": report["summary"], "report": out, "dry_run": args.dry_run})
+        return
 
     try:
         with get_engine().begin() as conn:
