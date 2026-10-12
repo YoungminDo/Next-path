@@ -169,7 +169,10 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
     // Every screen change is a step in the browser's history too, so the phone's back button
     // walks back through the flow instead of leaving it (in-app browsers included).
     if (prev && !fromPop.current && screen !== "finding") {
-      window.history.pushState({ nextpath: screen }, "");
+      // The browser's own pushState with a null state: Next.js patches window.history.pushState
+      // and would treat the entry as its own (on back it re-renders the route, wiping the
+      // answers), while it leaves null-state entries alone and only our handler moves the screen.
+      History.prototype.pushState.call(window.history, null, "");
       depth.current += 1;
     }
     fromPop.current = false;
