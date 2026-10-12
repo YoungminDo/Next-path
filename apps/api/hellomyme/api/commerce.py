@@ -173,6 +173,9 @@ EventName = Literal[
     # Acquisition demand test (migration 0024)
     "landing_viewed", "login_clicked", "result_step_viewed", "result_left", "intent_selected",
     "school_requested",
+    # Inputs as data, interview opt-in (migration 0026)
+    "desired_role_selected", "interview_step_viewed", "interview_skipped", "interview_code_sent",
+    "interview_submitted", "interview_withdrawn",
 ]
 
 

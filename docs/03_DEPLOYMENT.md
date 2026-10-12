@@ -91,4 +91,7 @@ HELLOMYME_DATABASE_URL='<위 URL>' uv run hellomyme-import-preseed /path/to/HELL
 
 - API: `HELLOMYME_ENV=production`, `HELLOMYME_CAREER_MAP_DATA_LAYERS=["SEED","VERIFIED"]`
   (PRE_SEED 가 남아 있으면 API 가 기동을 거부합니다)
+- API: `HELLOMYME_PHONE_HASH_SECRET` (임의의 긴 문자열; 없으면 production 기동 거부). 인터뷰 번호 인증 문자를
+  보내려면 `HELLOMYME_SMS_PROVIDER=solapi` + `HELLOMYME_SOLAPI_API_KEY` / `_API_SECRET` / `HELLOMYME_SMS_SENDER_NUMBER`
+  (docs/10 §진로 인터뷰). 키는 Render 환경변수에만 넣고 채팅·저장소에 붙여넣지 않습니다.
 - 테스트 기간 튜브 원장은 수정·삭제가 불가능하므로, 초기화가 필요하면 새 DB 로 시작하거나 REVERSAL 로 정정

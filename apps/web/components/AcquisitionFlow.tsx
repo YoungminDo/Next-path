@@ -7,9 +7,13 @@ import {
   acq,
   api,
   ApiError,
+  errorMessage,
   pending,
   type Cell,
+  type CohortFilters,
+  type DesiredStatus,
   type Institution,
+  type InterviewStatus,
   type MyResult,
   type Node,
   type QueryResult,
@@ -18,13 +22,13 @@ import {
   type Unlisted,
 } from "@/lib/api";
 import SearchSelect, { type Picked } from "@/components/SearchSelect";
-import { inAppBrowser, track } from "@/lib/track";
+import { inAppBrowser, isInternal, track } from "@/lib/track";
 
 /* Order (product decision): input -> teaser (how many people, how many directions) -> login ->
    every distribution, intent and path. The server enforces the same gate: before login it only
    answers the teaser. Tone: "people who stood where I stand", never "seniors". */
 type Screen =
-  | "start" | "s_edu" | "p_now" | "finding" | "gate"
+  | "start" | "s_edu" | "p_now" | "finding" | "gate" | "interview"
   | "s_result" | "s_intent" | "p_next" | "p_first" | "p_similar" | "me";
 type UserType = "STUDENT" | "PROFESSIONAL";
 
@@ -34,15 +38,9 @@ const CONSENT_VERSION = process.env.NEXT_PUBLIC_CONSENT_POLICY_VERSION ?? "caree
 const THIS_YEAR = new Date().getFullYear();
 const YEARS = Array.from({ length: 30 }, (_, i) => THIS_YEAR + 4 - i);
 
-const REASONS: Record<string, string> = {
-  WIDEN_GRADUATION_YEAR_2Y: "졸업 ±2년",
-  WIDEN_ADMISSION_YEAR_2Y: "입학 ±2년",
-  BROADEN_MAJOR_1_LEVEL: "비슷한 전공 계열",
-  DROP_GENDER: "성별 조건 제외",
-  DROP_ADMISSION_YEAR: "입학연도 제외",
-  DROP_GRADUATION_YEAR: "졸업연도 제외",
-  DROP_INSTITUTION: "다른 학교 포함",
-};
+const INTERVIEW_SKIPPED = "hellomyme.interview_skipped";
+// The version of the interview consent wording shown in InterviewStep; change both together.
+const INTERVIEW_CONSENT_VERSION = "interview_contact_v1";
 const SIZES: Record<string, string> = {
   ENTERPRISE: "대기업", LARGE: "대형", MID: "중견", SMALL: "소형", MICRO: "초소형",
   OTHER: "기타",
@@ -65,11 +63,15 @@ function unlistedNote(u?: Unl): string | null {
   if (!u) return null;
   const school = u.kinds.includes("institution") && u.institution;
   const major = u.kinds.includes("major") && u.major;
-  if (school && major) return `‘${u.institution}’, ‘${u.major}’ 기록은 아직 모으는 중이라 다른 학교·다른 전공 사람들까지 포함해서 찾았어요.`;
+  if (school && major) return `‘${u.institution}’·‘${u.major}’ 기록은 아직 모으는 중이라 다른 학교·다른 전공 사람들까지 포함해서 찾았어요.`;
   if (school) return `‘${u.institution}’ 기록은 아직 모으는 중이라 다른 학교 사람들까지 포함해서 찾았어요.`;
   if (major) return `‘${u.major}’ 기록은 아직 모으는 중이라 다른 전공 사람들까지 포함해서 찾았어요.`;
   return null;
 }
+/** Desired role answer: up to three roles (listed or typed), or an explicit "none yet" /
+ * "stay in my role". Nothing chosen (status null) means the question was skipped. */
+type Desired = { roles: Picked[]; status: DesiredStatus | null };
+const NO_DESIRED: Desired = { roles: [], status: null };
 type Job = { organization_name: string; role_node_id: string; start_year: string; end_year: string };
 const emptyJob: Job = { organization_name: "", role_node_id: "", start_year: "", end_year: "" };
 
@@ -90,23 +92,37 @@ export function ro(word: string): string {
   return `${word}${/[mn036]/i.test(last) ? "으로" : "로"}`;
 }
 
-function reasonText(reasons: string[]) {
-  const has = new Set(reasons);
-  const shown = reasons.filter((r) =>
-    !(r === "WIDEN_GRADUATION_YEAR_2Y" && has.has("DROP_GRADUATION_YEAR")) &&
-    !(r === "WIDEN_ADMISSION_YEAR_2Y" && has.has("DROP_ADMISSION_YEAR")));
-  if (has.has("DROP_ADMISSION_YEAR") && has.has("DROP_GRADUATION_YEAR")) {
-    return shown.filter((r) => r !== "DROP_ADMISSION_YEAR" && r !== "DROP_GRADUATION_YEAR")
-      .map((r) => REASONS[r] ?? r).concat("학번 조건 제외").join(" · ");
-  }
-  return shown.map((r) => REASONS[r] ?? r).join(" · ");
+/** How far the group's years reach from the answer (0 = the same year), or null when that
+ * year is not part of the group at all. */
+function spread(range: { from: number | null; to: number | null } | null | undefined, year: number) {
+  if (!range || !year) return null;
+  return Math.max(Math.abs((range.from ?? year) - year), Math.abs((range.to ?? year) - year));
 }
 
-/** "Widened to …" line; the exact-match count only when it is big enough to be told. */
-function widenedText(exactN: number | null | undefined, reasons: string[]): string {
-  const how = reasonText(reasons);
-  return exactN ? `딱 같은 사람은 ${exactN}명이라 ${how}까지 넓혀서 찾았어요`
-    : `딱 같은 조건의 사람이 적어서 ${how}까지 넓혀서 찾았어요`;
+/** What the number counts, in words, from the group actually used (after any widening), shown
+ * right under the number so a big or a round number is never read as more than it is. */
+export function basisText(f: CohortFilters | undefined, reasons: string[],
+                          years: { admission_year?: number | string; graduation_year?: number | string },
+                          professional: boolean): string | null {
+  if (!f) return null;
+  const parts = professional ? ["같은 직무"] : [];
+  parts.push(f.institution_ids?.length ? "같은 학교" : "여러 학교");
+  parts.push(f.majors?.length
+    ? (reasons.includes("BROADEN_MAJOR_1_LEVEL") ? "비슷한 전공 계열" : "같은 전공") : "여러 전공");
+  const g = spread(f.graduation_year, Number(years.graduation_year));
+  const a = professional ? null : spread(f.admission_year, Number(years.admission_year));
+  if (g === null && a === null) parts.push("모든 학번");
+  else if (g !== null && a !== null) parts.push(Math.max(g, a) === 0 ? "같은 학번" : `비슷한 학번(±${Math.max(g, a)}년)`);
+  else if (g !== null) parts.push(g === 0 ? "같은 졸업 연도" : `졸업 ±${g}년`);
+  else parts.push(a === 0 ? "같은 입학 연도" : `입학 ±${a}년`);
+  return parts.join(" · ");
+}
+
+/** Said when the group had to be widened; the exact-match count only when it can be told. */
+function widenedText(exactN: number | null | undefined): string {
+  if (exactN === 0) return "딱 같은 사람은 아직 없어서, 비슷한 사람까지 넓혀서 찾았어요";
+  return exactN ? `딱 같은 사람은 ${exactN}명이라, 비슷한 사람까지 넓혀서 찾았어요`
+    : "딱 같은 사람이 적어서, 비슷한 사람까지 넓혀서 찾았어요";
 }
 
 /** One sentence that says what the bars mean, leaning on how many paths there were. */
@@ -148,6 +164,15 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
   const [error, setError] = useState<string>();
   const [unl, setUnl] = useState<Unl>();
   const app = useMemo(() => (typeof window === "undefined" ? null : inAppBrowser()), []);
+  // Desired role (optional, on the preview): kept in a ref too, so a save always sends the latest.
+  const [desired, setDesired] = useState<Desired>(NO_DESIRED);
+  const desiredRef = useRef<Desired>(NO_DESIRED);
+  const desiredDirty = useRef(false);
+  const desiredTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const desiredSaving = useRef<Promise<unknown> | null>(null);
+  // Interview invitation (optional, after login), then the result they were waiting for.
+  const [interview, setInterview] = useState<InterviewStatus>();
+  const afterInterview = useRef<(() => Promise<void>) | null>(null);
 
   const professional = userType === "PROFESSIONAL";
   const simulation = (me?.data_basis ?? base?.data_basis ?? teaser?.data_basis) === "SIMULATION";
@@ -194,6 +219,13 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
     track("career_input_started", { surface: "flow", user_type: userType });
   };
   const answer = (next: Edu) => { markStarted(); setEdu(next); };
+  useEffect(() => {
+    // Back from the login page via the back/forward cache: the page is restored as it was left,
+    // with the Kakao button still waiting. Make it usable again.
+    const restored = (e: PageTransitionEvent) => { if (e.persisted) setBusy(false); };
+    window.addEventListener("pageshow", restored);
+    return () => window.removeEventListener("pageshow", restored);
+  }, []);
   useEffect(() => {
     const leave = () => {
       const cur = shownAt.current;
@@ -290,11 +322,41 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
       first_job: null,
       first_job_is_current: false,
       intents: [],
+      desired_roles: desiredRef.current.roles.map((r) => ({ role_node_id: r.id, role_raw: r.id ? null : r.label })),
+      // KEEP_CURRENT is a professional's answer: a student who switched type keeps nothing of it.
+      desired_role_status: desiredRef.current.status === "KEEP_CURRENT" && type !== "PROFESSIONAL"
+        ? null : desiredRef.current.status,
     };
   }
 
+  function changeDesired(next: Desired) {
+    setDesired(next);
+    desiredRef.current = next;
+    desiredDirty.current = true;
+    if (desiredTimer.current) clearTimeout(desiredTimer.current);
+    desiredTimer.current = setTimeout(() => void flushDesired(), 600);
+  }
+
+  /** Save a changed desired-role answer now (also right before leaving for login). */
+  function flushDesired(): Promise<unknown> {
+    if (desiredTimer.current) clearTimeout(desiredTimer.current);
+    desiredTimer.current = null;
+    if (!desiredDirty.current || !draftId) return desiredSaving.current ?? Promise.resolve();
+    desiredDirty.current = false;
+    const d = desiredRef.current;
+    desiredSaving.current = acq.saveDraft(payload(edu, userType), draftId, isInternal())
+      .then(() => track("desired_role_selected", {
+        user_type: userType, status: d.status, n_roles: d.roles.length,
+        n_listed: d.roles.filter((r) => r.id).length, n_typed: d.roles.filter((r) => !r.id).length,
+      }))
+      .catch(() => { desiredDirty.current = true; });
+    return desiredSaving.current;
+  }
+  const settle = (p: Promise<unknown>, ms: number) =>
+    Promise.race([p, new Promise((done) => setTimeout(done, ms))]);
+
   async function toTeaser(e: Edu, type: UserType) {
-    const d = await acq.saveDraft(payload(e, type), draftId);
+    const d = await acq.saveDraft(payload(e, type), draftId, isInternal());
     setDraftId(d.draft_id);
     setUnl({ kinds: d.unlisted ?? [], institution: e.institution_raw, major: e.major_raw });
     track("career_input_completed", {
@@ -351,27 +413,63 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
       pending.consentVersion(null);
     }
     track("signup_completed", { merged_draft: Boolean(saved && version) });
+    let m: MyResult;
     try {
-      await resumeMember(await acq.me());
+      m = await acq.me();
     } catch (e) {
       if (e instanceof ApiError && e.status === 404) {
         setError("아직 저장된 정보가 없어요. 처음부터 입력해 주세요.");
         setScreen("start");
-      } else throw e;
+        return;
+      }
+      throw e;
     }
+    // Right after login, once: the optional interview invitation, then the result.
+    const iv = await acq.interview().catch(() => null);
+    let skipped = false;
+    try { skipped = localStorage.getItem(INTERVIEW_SKIPPED) === "1"; } catch { /* private mode */ }
+    if (iv && iv.enabled && iv.status === "NONE" && !skipped) {
+      setInterview(iv);
+      afterInterview.current = () => resumeMember(m);
+      pending.member("1");
+      track("interview_step_viewed", { surface: "after_login", user_type: m.profile.user_type });
+      setScreen("interview");
+      return;
+    }
+    await resumeMember(m);
   }
+
+  const openInterview = run(async () => {
+    setInterview(await acq.interview());
+    afterInterview.current = async () => { setMe(await acq.me()); setScreen("me"); };
+    track("interview_step_viewed", { surface: "result", user_type: userType });
+    setScreen("interview");
+  });
+  const leaveInterview = (status?: InterviewStatus) => {
+    if (status) setInterview(status);
+    else {
+      track("interview_skipped", { user_type: userType });
+      try { localStorage.setItem(INTERVIEW_SKIPPED, "1"); } catch { /* private mode */ }
+    }
+    const next = afterInterview.current;
+    afterInterview.current = null;
+    run(async () => { if (next) await next(); else setScreen("me"); })();
+  };
 
   const eduReady = (edu.institution_id || edu.institution_raw) && (edu.major_node_id || edu.major_raw) &&
     edu.admission_year && edu.graduation_year &&
     Number(edu.admission_year) <= Number(edu.graduation_year);
 
   const submitInput = run(() => toTeaser(edu, userType));
-  const kakao = () => {
+  const kakao = async () => {
     track("login_clicked", { user_type: userType, provider: "KAKAO" });
+    setBusy(true);
+    await settle(flushDesired(), 1500); // a desired role picked a moment ago is saved first
     rememberDraft();
     window.location.href = "/auth/hmm/start";
   };
   const devLogin = run(async () => {
+    await settle(flushDesired(), 1500);
     rememberDraft();
     await api.devLogin();
     await finishLogin();
@@ -419,6 +517,13 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
   };
   const n = teaser?.base.effective_n ?? 0;
   const note = unlistedNote(unl);
+  // Years for the basis line: the answers on this page, or the member's saved profile.
+  const profileEdu = (me?.profile.education ?? {}) as { admission_year?: number; graduation_year?: number };
+  const years = edu.graduation_year ? edu : profileEdu;
+  const teaserBasis = teaser && basisText(teaser.base.effective_filters, teaser.base.fallback_reason, years, professional);
+  const startCaption = (f?: CohortFilters) =>
+    professional ? "나와 같은 자리에 있었던 사람"
+      : f && !f.institution_ids?.length && !f.majors?.length ? "나와 학번이 비슷한 사람" : "나와 같은 출발점에서 시작한 사람";
 
   return (
     <main className="app">
@@ -477,7 +582,7 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
                           onChange={(v) => {
                             answer({ ...edu, major_node_id: v?.id ?? "", major_raw: v && !v.id ? v.label : "" });
                             if (v && !v.id) track("school_requested", { kind: "major", name: v.label, surface: "flow" });
-                          }} />
+                          }} suggestSimilar />
           </Field>
           <div className="pair">
             <Field label="입학">
@@ -517,8 +622,9 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
             <>
               <span className="badge">찾았어요</span>
               <div className="lock">
-                <span className="small">{professional ? "나와 같은 자리에 있었던 사람" : "나와 같은 출발점에서 시작한 사람"}</span>
+                <span className="small">{startCaption(teaser.base.effective_filters)}</span>
                 <span className="lockbig">{n.toLocaleString()}명</span>
+                {teaserBasis && <span className="basis">{teaserBasis}</span>}
                 {teaser.n_directions != null && (
                   <span className="small">
                     {professional
@@ -531,7 +637,7 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
               </div>
               {note && <p className="hint">{note}</p>}
               {teaser.base.fallback_reason.length > 0 && (
-                <p className="hint">{widenedText(teaser.base.exact_n, teaser.base.fallback_reason)}</p>
+                <p className="hint">{widenedText(teaser.base.exact_n)}</p>
               )}
               <div className="blur" aria-hidden="true">
                 {[88, 64, 52, 40, 30].slice(0, Math.max(2, Math.min(5, (teaser.n_directions ?? 4) + 1))).map((w, i) => (
@@ -540,11 +646,13 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
               </div>
               <h2 className="gate-title">이 중에 내 길도 있을까요?</h2>
               <p className="sub">어디로 갔는지는 로그인하면 바로 보여드려요. 입력한 내용은 그대로 이어져요.</p>
+              <DesiredPicker roles={[...middleRoles, ...roles]} professional={professional}
+                             value={desired} onChange={changeDesired} />
               <label className="check">
                 <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
                 입력한 학교·경력 정보를 HMM 계정과 연결해 결과 제공과 익명 통계에 쓰는 것에 동의해요.
               </label>
-              <button className="cta kakao" disabled={!consent || busy} onClick={kakao}>카카오로 3초 만에 보기</button>
+              <button className="cta kakao" disabled={!consent || busy} onClick={() => void kakao()}>카카오로 3초 만에 보기</button>
               {app && app !== "kakaotalk" && (
                 <p className="hint">로그인이 잘 안 되면 화면 위 ⋯ 메뉴에서 ‘외부 브라우저로 열기’를 눌러 주세요. 입력한 내용은 그대로 이어져요.</p>
               )}
@@ -554,9 +662,13 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
         </section>
       )}
 
+      {screen === "interview" && interview && (
+        <InterviewStep status={interview} userType={userType} onDone={leaveInterview} onSkip={() => leaveInterview()} />
+      )}
+
       {(screen === "s_result" || screen === "p_next") && base && (
         <section className="screen">
-          <ResultCount r={base.result} note={note}
+          <ResultCount r={base.result} note={note} basis={basisText(base.result.effective_filters, base.result.fallback_reason, years, professional)}
                        caption={professional ? "나와 같은 자리에 있었던 사람들이 고른 다음" : "나와 같은 출발점의 사람들이 처음 간 길"} />
           <Bars r={base.result} professional={professional} />
           {conclusion(base.result, professional) && <p className="conclusion">{conclusion(base.result, professional)}</p>}
@@ -590,7 +702,8 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
             similar.result.suppressed ? (
               <p className="sub">나와 같은 두 걸음을 걸은 사람은 아직 적어요. 지금 직무가 같은 사람 기준으로 보여드릴게요.</p>
             ) : (
-              <ResultCount r={similar.result} caption="나와 같은 두 걸음을 걸은 사람" />
+              <ResultCount r={similar.result} caption="나와 같은 두 걸음을 걸은 사람"
+                           basis={basisText(similar.result.effective_filters, similar.result.fallback_reason, years, true)} />
             )
           )}
           <h2>{professional ? "어떤 다음이 궁금해요?" : "이 중에 끌리는 길이 있나요?"}</h2>
@@ -610,7 +723,8 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
         </section>
       )}
 
-      {screen === "me" && me && <MyScreen me={me} busy={busy} onUnlock={unlock} onChangeIntent={changeIntent} />}
+      {screen === "me" && me && <MyScreen me={me} busy={busy} onUnlock={unlock} onChangeIntent={changeIntent}
+                                          onInterview={openInterview} />}
       {simulation && (RESULT_SCREENS.has(screen) || screen === "gate") && (
         <p className="beta-note">베타 · 실제 기록이 모이기 전까지 결과는 예시 데이터로 계산돼요</p>
       )}
@@ -696,14 +810,18 @@ function JobFields(props: {
   );
 }
 
-function ResultCount({ r, caption, note }: { r: QueryResult; caption: string; note?: string | null }) {
-  const told = r.exact_n >= (r.min_cell_n ?? 5) ? r.exact_n : null; // small exact groups untold
+function ResultCount({ r, caption, note, basis }: {
+  r: QueryResult; caption: string; note?: string | null; basis?: string | null;
+}) {
+  // Small exact groups are not told; nobody at all (0) is.
+  const told = r.exact_n === 0 || r.exact_n >= (r.min_cell_n ?? 5) ? r.exact_n : null;
   return (
     <div className="count">
       {!r.suppressed && <div><span className="big">{r.effective_n.toLocaleString()}</span><b> 명</b></div>}
+      {!r.suppressed && basis && <p className="basis">{basis}</p>}
       <p className="sub">{caption}</p>
       {note && <p className="hint">{note}</p>}
-      {r.fallback_reason.length > 0 && <p className="hint">{widenedText(told, r.fallback_reason)}</p>}
+      {r.fallback_reason.length > 0 && <p className="hint">{widenedText(told)}</p>}
     </div>
   );
 }
@@ -774,8 +892,8 @@ function months(m: number) {
   return `${(m / 12).toFixed(1)}년`;
 }
 
-function MyScreen({ me, busy, onUnlock, onChangeIntent }: {
-  me: MyResult; busy: boolean; onUnlock: () => void; onChangeIntent: () => void;
+function MyScreen({ me, busy, onUnlock, onChangeIntent, onInterview }: {
+  me: MyResult; busy: boolean; onUnlock: () => void; onChangeIntent: () => void; onInterview: () => void;
 }) {
   const p = me.intent_paths.paths;
   const professional = me.profile.user_type === "PROFESSIONAL";
@@ -834,6 +952,7 @@ function MyScreen({ me, busy, onUnlock, onChangeIntent }: {
         </>
       )}
       <p className="hint">한 걸음 먼저 간 사람과의 연결은 가입하고 인증한 사람들로 준비 중이에요.</p>
+      <InterviewEntry onOpen={onInterview} />
     </section>
   );
 }
@@ -852,4 +971,152 @@ function Breakdown({ title, items }: { title: string; items: { key: string; labe
       ))}
     </div>
   );
+}
+
+function DesiredPicker({ roles, professional, value, onChange }: {
+  roles: Node[]; professional: boolean; value: Desired; onChange: (d: Desired) => void;
+}) {
+  const items = useMemo(() => {
+    const seen = new Set<string>();
+    return roles.filter((r) => !seen.has(r.node_id) && seen.add(r.node_id))
+      .map((r) => ({ id: r.node_id, label: r.label, group: r.depth <= 2 ? "직무 분야" : r.parent_label,
+                     keywords: r.aliases ?? [] }));
+  }, [roles]);
+  const add = (v: Picked | null) => {
+    if (!v) return;
+    const dup = value.roles.some((r) => (v.id ? r.id === v.id : !r.id && r.label === v.label));
+    if (!dup) onChange({ roles: [...value.roles, v].slice(0, 3), status: "CHOSEN" });
+  };
+  const remove = (i: number) => {
+    const rest = value.roles.filter((_, j) => j !== i);
+    onChange({ roles: rest, status: rest.length ? "CHOSEN" : null });
+  };
+  const toggle = (s: DesiredStatus) => onChange(value.status === s ? NO_DESIRED : { roles: [], status: s });
+  return (
+    <div className="desired">
+      <p className="desired-q">{professional ? "옮기고 싶은 직무가 있어요?" : "어떤 일을 하고 싶어요?"}
+        <small> 선택 · 최대 3개</small></p>
+      {value.roles.length > 0 && (
+        <div className="chips">
+          {value.roles.map((r, i) => (
+            <button key={r.id ?? `typed-${r.label}`} className="chip" aria-pressed="true"
+                    aria-label={`${r.label} 빼기`} onClick={() => remove(i)}>{r.label} ✕</button>
+          ))}
+        </div>
+      )}
+      {value.roles.length < 3 && (
+        <SearchSelect ariaLabel="희망 직무" noun="직무" placeholder="직무 검색 (예: 마케팅, 개발)"
+                      items={items} value={null} onChange={add} suggestSimilar clearOnPick />
+      )}
+      <div className="chips">
+        <button className="chip" aria-pressed={value.status === "NONE"} onClick={() => toggle("NONE")}>아직 없어요</button>
+        {professional && (
+          <button className="chip" aria-pressed={value.status === "KEEP_CURRENT"}
+                  onClick={() => toggle("KEEP_CURRENT")}>지금 직무 유지</button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const phoneDigits = (p: string) => p.replace(/[^0-9]/g, "");
+
+function InterviewStep({ status, userType, onDone, onSkip }: {
+  status: InterviewStatus; userType: UserType; onDone: (s: InterviewStatus) => void; onSkip: () => void;
+}) {
+  const [phone, setPhone] = useState("");
+  const [code, setCode] = useState("");
+  const [sent, setSent] = useState(false);
+  const [agree, setAgree] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string>();
+  const needCode = status.verification_required;
+  const phoneOk = /^01[016789][0-9]{7,8}$/.test(phoneDigits(phone));
+  const act = (fn: () => Promise<void>) => async () => {
+    setErr(undefined);
+    setBusy(true);
+    try {
+      await fn();
+    } catch (e) {
+      setErr(errorMessage(e) ?? "잠시 후 다시 시도해 주세요.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const sendCode = act(async () => {
+    await acq.interviewCode(phone);
+    setSent(true);
+    track("interview_code_sent", { user_type: userType });
+  });
+  const submit = act(async () => {
+    const s = await acq.interviewApply(phone, needCode ? code : null, INTERVIEW_CONSENT_VERSION);
+    track("interview_submitted", { user_type: userType, verified: s.verified });
+    onDone(s);
+  });
+  return (
+    <section className="screen">
+      <span className="badge">선택</span>
+      <h2>진로 인터뷰에 참여해 주실래요?</h2>
+      <p className="sub">30분 정도, 지금 하고 있는 고민을 들려주세요. 나와 같은 자리였던 사람들의 길을 더 정확하게 보여드리는 데 써요.</p>
+      {status.reward_text && <p className="conclusion">{status.reward_text}</p>}
+      <Field label="휴대전화번호">
+        <input type="tel" inputMode="numeric" autoComplete="tel" placeholder="010-1234-5678" value={phone}
+               onChange={(e) => { setPhone(e.target.value); setSent(false); setCode(""); }} />
+      </Field>
+      {needCode && (sent ? (
+        <Field label="인증번호 (3분 안에 입력)">
+          <input inputMode="numeric" autoComplete="one-time-code" maxLength={6} placeholder="6자리" value={code}
+                 onChange={(e) => setCode(phoneDigits(e.target.value).slice(0, 6))} />
+        </Field>
+      ) : (
+        <button className="cta ghost" disabled={!phoneOk || busy} onClick={sendCode}>인증번호 받기</button>
+      ))}
+      <label className="check consent-detail">
+        <input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} />
+        <span>
+          <b>[선택] 인터뷰 연락을 위한 개인정보 수집·이용 동의</b><br />
+          목적: 진로 인터뷰(유저 인터뷰) 참여 연락 · 항목: 휴대전화번호 ·
+          보유 기간: 동의한 날부터 1년 (그 전에 철회하면 바로 삭제)<br />
+          동의하지 않아도 되고, 동의하지 않아도 서비스는 그대로 이용할 수 있어요.
+        </span>
+      </label>
+      {err && <p className="error" role="alert">{err}</p>}
+      {sent && needCode && <button className="link" disabled={busy} onClick={sendCode}>인증번호 다시 받기</button>}
+      <button className="cta" disabled={busy || !phoneOk || !agree || (needCode && (!sent || code.length !== 6))}
+              onClick={submit}>인터뷰 신청하기</button>
+      <button className="cta ghost" disabled={busy} onClick={onSkip}>다음에 할게요</button>
+    </section>
+  );
+}
+
+/** On the result: invite again later (if skipped), or show the request and let them withdraw. */
+function InterviewEntry({ onOpen }: { onOpen: () => void }) {
+  const [s, setS] = useState<InterviewStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => { acq.interview().then(setS).catch(() => setS(null)); }, []);
+  if (!s) return null;
+  if (s.status === "APPLIED") {
+    const withdraw = async () => {
+      setBusy(true);
+      setFailed(false);
+      try {
+        setS(await acq.interviewWithdraw());
+        track("interview_withdrawn", {});
+      } catch {
+        setFailed(true);
+      } finally {
+        setBusy(false);
+      }
+    };
+    return (
+      <>
+        <p className="hint">진로 인터뷰 신청 완료 ({s.phone_masked}) · {" "}
+          <button className="link" disabled={busy} onClick={withdraw}>신청 취소하고 번호 지우기</button></p>
+        {failed && <p className="error" role="alert">취소하지 못했어요. 잠시 후 다시 눌러 주세요.</p>}
+      </>
+    );
+  }
+  if (!s.enabled) return null;
+  return <button className="link share" onClick={onOpen}>진로 인터뷰 참여하기 (30분)</button>;
 }

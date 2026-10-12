@@ -49,10 +49,28 @@ function rank(item: Item, q: string): number | null {
   return null;
 }
 
-function optionBody(o: Item | { id: null; label: string }, noun: string) {
-  return o.id === null
-    ? <span className="typed">‘{o.label}’ 그대로 입력 <small>목록에 없는 {noun}</small></span>
-    : <>{o.label}{"group" in o && o.group ? <small>{o.group}</small> : null}</>;
+/** Nothing matches: list entries that share the start of the name (after the usual suffix), so
+ * "경영정보학과" offers 경영학. Never picked for them; "그대로 입력" stays available. */
+function similar(items: Item[], q: string): Item[] {
+  let base = norm(q);
+  for (const s of [...SUFFIXES].sort((a, b) => b.length - a.length)) {
+    if (base.endsWith(s) && base.length > s.length + 1) { base = base.slice(0, -s.length); break; }
+  }
+  if (base.endsWith("학") && base.length > 2) base = base.slice(0, -1);
+  for (let len = base.length - 1; len >= 2; len -= 1) {
+    const head = base.slice(0, len);
+    const found = items.filter((i) => [i.label, ...(i.keywords ?? [])].some((n) => norm(n).startsWith(head)));
+    if (found.length) return found.slice(0, 3);
+  }
+  return [];
+}
+
+type Option = (Item & { similar?: boolean }) | { id: null; label: string };
+
+function optionBody(o: Option, noun: string) {
+  if (o.id === null) return <span className="typed">‘{o.label}’ 그대로 입력 <small>목록에 없는 {noun}</small></span>;
+  const hint = "similar" in o && o.similar ? `비슷한 ${noun}` : o.group;
+  return <>{o.label}{hint ? <small>{hint}</small> : null}</>;
 }
 
 export default function SearchSelect(props: {
@@ -64,6 +82,8 @@ export default function SearchSelect(props: {
   noun: string; // "학교" | "전공", used in the free-text option
   inputId?: string;
   invalid?: boolean;
+  suggestSimilar?: boolean; // when nothing matches, offer entries that start the same way
+  clearOnPick?: boolean; // an "add one more" box: empty again (and still focused) after a pick
 }) {
   const { items, value, onChange, placeholder, ariaLabel, noun } = props;
   const [query, setQuery] = useState(value?.label ?? "");
@@ -76,7 +96,7 @@ export default function SearchSelect(props: {
   // press would land on nothing.
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [closing, setClosing] = useState(false);
-  const frozen = useRef<(Item | { id: null; label: string })[]>([]);
+  const frozen = useRef<Option[]>([]);
   useEffect(() => () => { if (closeTimer.current) clearTimeout(closeTimer.current); }, []);
   // A value set from outside (e.g. answers carried over from the landing) shows up in the box.
   useEffect(() => {
@@ -94,13 +114,18 @@ export default function SearchSelect(props: {
   const exact = items.find((i) => same(i, typed));
   // Only initial consonants ("ㄱㄹ") is a search, never a name to keep.
   const jamoOnly = [...norm(typed)].every((c) => CHO.includes(c));
-  const options: (Item | { id: null; label: string })[] = [
+  const near = useMemo(() => (props.suggestSimilar && shown.length === 0 && typed && !jamoOnly
+    ? similar(items, typed).map((i) => ({ ...i, similar: true })) : []), [props.suggestSimilar, shown.length, typed, jamoOnly, items]);
+  // Suggestions come after "그대로 입력": Enter (or the phone's enter key) keeps what was typed and
+  // never swaps it for a guess.
+  const options: Option[] = [
     ...shown,
     ...(typed && !exact && !jamoOnly ? [{ id: null, label: typed }] : []),
+    ...near,
   ];
 
-  function pick(o: Item | { id: null; label: string }) {
-    setQuery(o.label);
+  function pick(o: Option) {
+    setQuery(props.clearOnPick ? "" : o.label);
     onChange({ id: o.id, label: o.label });
   }
 

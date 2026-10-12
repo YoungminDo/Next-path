@@ -13,6 +13,7 @@ from hellomyme.domain import ledger
 from hellomyme.domain.acquisition import (
     AcquisitionPayload,
     is_acquisition_payload,
+    record_desired_roles,
     write_acquisition_profile,
 )
 from hellomyme.domain.career_input import (
@@ -37,27 +38,35 @@ def session_hash(anonymous_session: str) -> str:
 
 def save_draft(conn: Connection, anonymous_session: str,
                payload: CareerDraftPayload | AcquisitionPayload | BaseModel,
-               ttl_hours: int, draft_id: str | None = None) -> dict:
+               ttl_hours: int, draft_id: str | None = None, internal: bool = False) -> dict:
+    """The draft row holds the latest answer; every changed answer is also appended to
+    anonymous_draft_revision, so nothing typed is lost when it is edited."""
     sid = session_hash(anonymous_session)
-    data = payload.model_dump(mode="json")
+    data = json.dumps(payload.model_dump(mode="json"))
+    params = {"p": data, "u": payload.user_type, "ttl": timedelta(hours=ttl_hours), "s": sid,
+              "i": internal}
     if draft_id:
+        # A changed answer is a new revision; the same answer again only extends the expiry.
         row = conn.execute(text(
             """UPDATE anonymous_draft SET payload_json = CAST(:p AS jsonb), user_type = :u,
-                   expires_at = now() + :ttl
+                   expires_at = now() + :ttl, internal = internal OR :i,
+                   revision = revision + CASE WHEN payload_json = CAST(:p AS jsonb) THEN 0 ELSE 1 END
                WHERE draft_id = CAST(:d AS uuid) AND session_id = :s AND claimed_at IS NULL
-               RETURNING draft_id::text, expires_at"""),
-            {"p": json.dumps(data), "u": payload.user_type, "ttl": timedelta(hours=ttl_hours),
-             "d": draft_id, "s": sid}).first()
+               RETURNING draft_id::text, expires_at, revision"""),
+            {**params, "d": draft_id}).first()
         if row is None:
             raise DraftNotFound(draft_id)
     else:
         row = conn.execute(text(
-            """INSERT INTO anonymous_draft (session_id, user_type, payload_json, expires_at)
-               VALUES (:s, :u, CAST(:p AS jsonb), now() + :ttl)
-               RETURNING draft_id::text, expires_at"""),
-            {"s": sid, "u": payload.user_type, "p": json.dumps(data),
-             "ttl": timedelta(hours=ttl_hours)}).first()
-    return {"draft_id": row.draft_id, "expires_at": row.expires_at.isoformat()}
+            """INSERT INTO anonymous_draft (session_id, user_type, payload_json, expires_at, internal)
+               VALUES (:s, :u, CAST(:p AS jsonb), now() + :ttl, :i)
+               RETURNING draft_id::text, expires_at, revision"""), params).first()
+    conn.execute(text(
+        """INSERT INTO anonymous_draft_revision (draft_id, revision, payload_json)
+           VALUES (CAST(:d AS uuid), :r, CAST(:p AS jsonb)) ON CONFLICT DO NOTHING"""),
+        {"d": row.draft_id, "r": row.revision, "p": data})
+    return {"draft_id": row.draft_id, "expires_at": row.expires_at.isoformat(),
+            "revision": row.revision}
 
 
 def load_draft(conn: Connection, draft_id: str, anonymous_session: str | None = None,
@@ -86,7 +95,8 @@ def merge_draft(conn: Connection, account_id: str, draft_id: str, anonymous_sess
         return {"person_id": row.claimed_person_id, "merged": False, "rewards": []}
     if not row.live:
         raise DraftNotFound(draft_id)
-    if member_person_id(conn, account_id):
+    existing = member_person_id(conn, account_id)
+    if existing and not is_acquisition_payload(row.payload_json):
         raise DraftConflict("account already has a career profile; edit it instead")
 
     for consent_type in CAREER_CONSENTS:
@@ -95,6 +105,15 @@ def merge_draft(conn: Connection, account_id: str, draft_id: str, anonymous_sess
                VALUES (:a, :t, :v, 'GRANTED', CAST(:scope AS jsonb))"""),
             {"a": account_id, "t": consent_type, "v": consent_policy_version,
              "scope": json.dumps({"granted_at_step": "merge_draft", "draft_id": draft_id})})
+
+    if existing:
+        # A returning member: the profile they already have stays as it is (no second person,
+        # no duplicate records). The new answers stay in the draft, now linked to the account,
+        # and a new desired-role answer is added to their history.
+        record_desired_roles(conn, existing, AcquisitionPayload.model_validate(row.payload_json),
+                             draft_id)
+        _claim(conn, draft_id, account_id, existing)
+        return {"person_id": existing, "merged": False, "linked": True, "rewards": []}
 
     if is_acquisition_payload(row.payload_json):
         written = write_acquisition_profile(
@@ -105,10 +124,7 @@ def merge_draft(conn: Connection, account_id: str, draft_id: str, anonymous_sess
         norm = normalize(conn, payload)
         written = write_member_career(conn, account_id, norm, f"draft:{draft_id}",
                                       row.payload_json)
-    conn.execute(text(
-        """UPDATE anonymous_draft SET claimed_account_id = :a, claimed_person_id = :p,
-               claimed_at = now() WHERE draft_id = CAST(:d AS uuid)"""),
-        {"a": account_id, "p": written["person_id"], "d": draft_id})
+    _claim(conn, draft_id, account_id, written["person_id"])
 
     rewards = []
     if written["education_id"]:
@@ -120,3 +136,10 @@ def merge_draft(conn: Connection, account_id: str, draft_id: str, anonymous_sess
         rewards.append(ledger.grant_reward(conn, account_id, action, "WORK_EVENT", weid))
     return {"person_id": written["person_id"], "merged": True,
             "rewards": [{"ledger_id": r.ledger_id, "amount": r.amount} for r in rewards if r]}
+
+
+def _claim(conn: Connection, draft_id: str, account_id: str, person_id: str) -> None:
+    conn.execute(text(
+        """UPDATE anonymous_draft SET claimed_account_id = :a, claimed_person_id = :p,
+               claimed_at = now() WHERE draft_id = CAST(:d AS uuid)"""),
+        {"a": account_id, "p": person_id, "d": draft_id})

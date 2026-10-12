@@ -1,9 +1,10 @@
 from functools import lru_cache
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DATA_LAYERS = ("PRE_SEED", "SEED", "VERIFIED")
+DEV_PHONE_HASH_SECRET = "nextpath-phone-hash-dev"
 
 
 class Settings(BaseSettings):
@@ -33,6 +34,22 @@ class Settings(BaseSettings):
     # them in process this long instead of re-reading them on every request (0 disables).
     reference_cache_seconds: int = 60
 
+    # User-interview opt-in (phone). "none": the number is kept unverified (no SMS sent);
+    # "solapi": a 6-digit code is sent and must be entered; "log": development only, the code is
+    # written to the server log instead of being sent.
+    sms_provider: str = Field(default="none", pattern="^(none|log|solapi)$")
+    solapi_api_key: SecretStr | None = None
+    solapi_api_secret: SecretStr | None = None
+    sms_sender_number: str | None = None  # a sender number registered with the provider
+    # Keyed hash for verification/rate-limit rows, so they never hold a readable number.
+    # Only used when codes are sent (sms_provider other than "none"); a real secret is required then.
+    phone_hash_secret: SecretStr = SecretStr(DEV_PHONE_HASH_SECRET)
+    # Off: the invitation is not shown and new applications are refused (withdrawal still works).
+    interview_enabled: bool = True
+    interview_consent_version: str = "interview_contact_v1"
+    # Shown under the invitation only when set (the reward is a business decision).
+    interview_reward_text: str | None = None
+
     @field_validator("database_url")
     @classmethod
     def _psycopg_driver(cls, value: str) -> str:
@@ -56,6 +73,15 @@ class Settings(BaseSettings):
                 raise ValueError("DEV auth provider is not allowed in production")
             if "HMM_ID" in self.auth_providers and not self.hmm_id_base_url.startswith("https://"):
                 raise ValueError("HMM ID must be reached over HTTPS in production")
+        # The live demand test runs as staging: real people's numbers, so the same rules as production.
+        if self.env in ("staging", "production") and self.sms_provider != "none":
+            if self.sms_provider == "log":
+                raise ValueError("the log SMS provider writes codes to the log: development only")
+            if self.phone_hash_secret.get_secret_value() == DEV_PHONE_HASH_SECRET:
+                raise ValueError("set HELLOMYME_PHONE_HASH_SECRET before sending verification codes")
+        if self.sms_provider == "solapi" and not (self.solapi_api_key and self.solapi_api_secret
+                                                  and self.sms_sender_number):
+            raise ValueError("solapi needs api key, api secret and a registered sender number")
         return self
 
     @property

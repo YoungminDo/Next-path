@@ -94,6 +94,14 @@ h4 { font-size: 14px; margin: 0 0 8px; }
 
 .lock { background: var(--dark); color: #fff; border-radius: 14px; padding: 18px; display: flex; flex-direction: column; gap: 6px; }
 .lockbig { font-size: 40px; font-weight: 900; color: var(--mint); line-height: 1.1; font-variant-numeric: tabular-nums; }
+/* What the number counts, right under it: never a bare number. */
+.lock .basis { font-size: 13px; font-weight: 700; color: #fff; opacity: .92; }
+.count .basis { font-size: 13px; font-weight: 700; color: var(--ink); margin: 0; }
+.desired { display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--line); border-radius: 14px; padding: 14px; background: var(--card); }
+.desired-q { margin: 0; font-weight: 700; }
+.desired-q small { color: var(--sub); font-weight: 400; }
+.consent-detail span { color: var(--sub); font-size: 13px; line-height: 1.5; }
+.consent-detail b { color: var(--ink); }
 .blur { filter: blur(4px); opacity: 0.7; background: var(--card); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 8px; user-select: none; }
 .path { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 13px; }
 .path span { background: var(--line); border-radius: 6px; padding: 3px 8px; }
@@ -315,6 +323,8 @@ body { word-break: keep-all; overflow-wrap: break-word; }
 .search-select-note { color: var(--sub); font-size: 12px; }
 .heroform .search-select input { padding: 14px; border-radius: 10px; border: 0; background: #fff; color: #141517; font-size: 15px; }
 .heroform .search-select-note { color: #c9cdd2; }
+.hint .link { font-size: inherit; padding: 0; }
+.desired .search-select input { color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 12px; font-size: 15px; }
 .search-select.invalid input, .heroform select[aria-invalid="true"] { outline: 2px solid var(--danger); outline-offset: 1px; }
 /* Beta note under results while results are computed from example data */
 .beta-note { color: var(--sub); font-size: 12px; margin: 8px 0 0; text-align: center; }

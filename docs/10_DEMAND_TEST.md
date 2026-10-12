@@ -38,3 +38,58 @@
 2. 미리보기 → 로그인 완료: 로그인 벽을 넘을 만큼 궁금한가
 3. 첫 결과 → 궁금한 길 고름 → 경로 결과: 결과를 끝까지 보는가 (체류 시간 중앙값과 함께)
 4. 목록 밖 입력 비율과 이름: 다음에 데이터를 모을 학교·학과 우선순위
+
+## 입력은 전부 DB에 남는다 (migration 0026)
+가입 여부와 관계없이, 화면에서 입력한 내용은 저장할 때마다 서버 DB에 남는다. 이벤트가 끊겨도 입력은 남는다.
+
+| 무엇 | 어디 |
+|---|---|
+| 최신 입력 (학교·전공 id 또는 입력한 이름, 학번, 직장인 직무·회사·입사 연도, 희망 직무) | `anonymous_draft.payload_json` |
+| 수정 이력 (덮어쓰지 않음, append-only) | `anonymous_draft_revision` (draft_id, revision) |
+| 팀 브라우저 표시 | `anonymous_draft.internal` (`?internal=1`) |
+| 로그인 연결 | `anonymous_draft.claimed_account_id / claimed_person_id / claimed_at` |
+| 동의 (항목·문구 버전·시각) | `data_consent` (PRIVACY_PROCESSING, CAREER_DATA_AGGREGATION, `policy_version`, `consented_at`, scope.draft_id) |
+| 가입자의 희망 직무 (변경 시 행 추가) | `desired_role` (CHOSEN 1~3순위 / NONE / UNSURE / KEEP_CURRENT) |
+| 통계용 뷰 | `analytics.acq_input`, `analytics.acq_desired_role`, `analytics.acq_unlisted_backlog` |
+
+- **목록에 없는 이름:** 입력한 그대로 저장한다. `name_key()`(공백·기호, 대학교/학과 같은 접미사 정리)로 철자만 다른 이름을 묶어,
+  `acq_unlisted_backlog`에서 몇 명이 입력했는지 센다. 원문은 바꾸지 않는다.
+- **희망 직무:** 질문을 건너뛴 경우(`desired_role_status` NULL)와 "아직 없어요"(`NONE`)를 구분해서 저장한다.
+- **로그인:**
+  - 처음 가입하면 입력을 회원 기록으로 한 번만 옮긴다.
+  - 같은 계정으로 다시 로그인하면 사람(person)을 새로 만들지 않는다. 새 입력은 계정에 연결하고, 희망 직무만 이력에 추가한다.
+  - 로그인하지 않은 입력은 어떤 계정에도 연결하지 않는다.
+- **퍼널 연결:** 이벤트의 `anonymous_session_id`를 SHA-256 하면 `anonymous_draft.session_id`와 같다.
+  계정에는 이벤트를 붙이지 않고, draft의 claimed 열로 연결한다.
+- **식별 정보:** 익명 입력에는 IP·UA·이름·연락처를 저장하지 않는다.
+
+## 진로 인터뷰 신청 (migration 0027, 선택)
+- **흐름:** 카카오 로그인 직후 한 번 "진로 인터뷰에 참여해 주실래요?" 화면이 나온다.
+  - 화면 구성: 휴대전화번호 → (문자 업체 설정 시) 인증번호 → 별도 동의 → 신청.
+  - "다음에 할게요"를 누르면 바로 결과로 간다. 건너뛰어도 아무것도 막히지 않는다(개인정보보호법 §16③).
+  - 결과 화면 아래에서 나중에 신청하거나, 신청을 취소(번호 즉시 삭제)할 수 있다.
+- **동의 문구:** 목적·항목·보유 기간(동의일부터 1년, 철회하면 즉시 삭제)·거부할 권리를 적는다(§15②).
+  버전은 `interview_contact_v1`이다(웹 `INTERVIEW_CONSENT_VERSION` 상수와 서버 설정이 같아야 신청된다).
+- **삭제:** 1년이 지난 번호와 하루가 지난 인증 기록은 인터뷰 API가 호출될 때마다 지운다. 철회하면 번호와 인증 기록을 바로 지운다.
+- **끄기:** `HELLOMYME_INTERVIEW_ENABLED=false`로 두면 초대 화면이 사라지고 새 신청을 받지 않는다(철회는 계속 된다).
+  홍보 문자는 이 동의로 보낼 수 없다(정보통신망법 §50, 별도 수신 동의 필요).
+- **저장 위치:**
+  - `interview_contact`: 계정당 1행. `phone_e164`, `phone_verified_at`, `consent_text_version`, `consented_at`, `withdrawn_at`
+  - `data_consent`: `INTERVIEW_CONTACT` 동의와 철회 행
+  - `phone_verification`: 번호와 코드는 키를 건 해시로만 저장한다.
+- **문자 인증 설정** (Render 환경변수):
+  - `HELLOMYME_SMS_PROVIDER=solapi`, `HELLOMYME_SOLAPI_API_KEY`, `HELLOMYME_SOLAPI_API_SECRET`, `HELLOMYME_SMS_SENDER_NUMBER`(등록한 발신번호), `HELLOMYME_PHONE_HASH_SECRET`
+  - 설정하지 않으면(`none`) 인증 없이 번호와 동의만 저장한다(`phone_verified_at` NULL).
+  - staging·production에서 문자를 보내려면 `HELLOMYME_PHONE_HASH_SECRET`이 필요하다(없으면 API가 기동을 거부한다). `log` 방식은 개발 환경에서만 쓸 수 있다.
+  - 인증 규칙: 6자리, 3분 만료, 5회까지 입력, 30초 재요청 간격, 번호·계정당 시간당 5회, 하루 10회.
+- **보상 문구:** `HELLOMYME_INTERVIEW_REWARD_TEXT`를 설정했을 때만 화면에 보인다. 보상이 정해지기 전에는 약속하지 않는다.
+- **인터뷰 대상 뽑기:**
+  - Supabase SQL Editor에서 `interview_contact`(withdrawn_at IS NULL) → account → `person` / `canonical_education` / `desired_role`을 조인한다.
+  - 번호를 내려받은 파일은 공유 드라이브에 두지 않고, 인터뷰가 끝나면 1년 안에 지운다.
+
+## 숫자 아래 기준 표시 (신뢰도)
+- 미리보기와 결과의 큰 숫자 바로 아래에, 그 숫자가 세는 사람이 누구인지 적는다(실제로 쓴 조건 기준).
+  - 예: "같은 학교 · 비슷한 전공 계열 · 비슷한 학번(±2년)", "여러 학교 · 여러 전공 · 같은 학번"
+- 숫자를 자르거나 바꾸지 않는다.
+  - 서로 다른 학교에서 같은 숫자(예: 35명)가 반복되는 것은 상한 때문이 아니다.
+  - 예시 데이터(PRE_SEED)가 학교·전공마다 약 42명씩 고르게 만들어져 있어서다(2026-10-12 확인).

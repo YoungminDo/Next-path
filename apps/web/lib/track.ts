@@ -7,7 +7,9 @@ import { anonymousSession } from "@/lib/api";
 export type FunnelEvent =
   | "landing_viewed" | "career_input_started" | "career_input_completed" | "login_wall_viewed"
   | "login_clicked" | "signup_completed" | "result_step_viewed" | "result_left"
-  | "intent_selected" | "unlock_purchased" | "school_requested";
+  | "intent_selected" | "unlock_purchased" | "school_requested" | "desired_role_selected"
+  | "interview_step_viewed" | "interview_skipped" | "interview_code_sent" | "interview_submitted"
+  | "interview_withdrawn";
 
 const TOUCH = "hellomyme.touch";
 
@@ -62,6 +64,12 @@ function attribution(): Record<string, string> {
   } catch {
     return {};
   }
+}
+
+/** The team's own browser (?internal=1): drafts and events are kept but left out of statistics. */
+export function isInternal(): boolean {
+  attribution(); // reads ?internal=1 / ?internal=0 on the first call of a page
+  return store(INTERNAL) === "1";
 }
 
 export function track(name: FunnelEvent, properties: Record<string, unknown> = {}) {

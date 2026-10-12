@@ -79,8 +79,15 @@ export type Institution = { id: string; name: string; region?: string | null; al
 export type Unlisted = ("institution" | "major")[];
 export type Cell = { key: string; code: string; label: string | null; depth: number | null;
   n: number; share: number };
+/** The group actually used, after any widening: what the number counts. */
+export type CohortFilters = {
+  institution_ids?: string[]; majors?: { node_id: string; code: string; label: string }[];
+  admission_year?: { from: number | null; to: number | null } | null;
+  graduation_year?: { from: number | null; to: number | null } | null;
+};
 export type QueryResult = {
   exact_n: number; effective_n: number; fallback_reason: string[]; suppressed: boolean;
+  effective_filters?: CohortFilters;
   cells: Cell[]; other: { n: number | null; share: number | null; suppressed?: boolean } | null;
   threshold: number; min_cell_n?: number; time_window: { start: string | null; end: string };
 };
@@ -110,8 +117,16 @@ export type AcqStep = "first_roles" | "next_roles" | "similar_paths";
 export type TeaserResult = {
   step: "teaser"; n_directions: number | null; data_basis: "SIMULATION" | "OBSERVED";
   // Sizes are withheld (null) when the group is too small to describe.
-  base: { effective_n: number | null; exact_n: number | null; fallback_reason: string[]; suppressed: boolean };
+  base: { effective_n: number | null; exact_n: number | null; fallback_reason: string[]; suppressed: boolean;
+    effective_filters?: CohortFilters };
   unlisted?: Unlisted;
+};
+export type DesiredRole = { role_node_id: string | null; role_raw: string | null };
+export type DesiredStatus = "CHOSEN" | "NONE" | "UNSURE" | "KEEP_CURRENT";
+export type InterviewStatus = {
+  enabled: boolean;
+  status: "NONE" | "APPLIED" | "WITHDRAWN"; phone_masked: string | null; verified: boolean;
+  verification_required: boolean; consent_text_version: string; reward_text: string | null;
 };
 export type Intent = { surface: "STUDENT_FIRST_ROLE" | "PROFESSIONAL_NEXT_ROLE";
   target_kind: "ROLE" | "UNDECIDED"; target_node_id: string | null };
@@ -122,10 +137,10 @@ export const acq = {
   roles: (depth?: number) => call<Node[]>(`/acq/options/roles${depth ? `?depth=${depth}` : ""}`),
   organizations: (q: string) =>
     call<{ id: string; name: string }[]>(`/acq/options/organizations?q=${encodeURIComponent(q)}`),
-  saveDraft: (payload: unknown, draftId?: string) =>
-    call<{ draft_id: string; unlisted?: Unlisted }>("/acq/draft", {
+  saveDraft: (payload: unknown, draftId?: string, internal = false) =>
+    call<{ draft_id: string; unlisted?: Unlisted; revision?: number }>("/acq/draft", {
       method: "POST",
-      body: JSON.stringify({ draft_id: draftId ?? null, payload }),
+      body: JSON.stringify({ draft_id: draftId ?? null, payload, internal }),
     }),
   /** Before login only the teaser exists: how many people, how many directions. */
   teaser: (draftId: string) =>
@@ -146,7 +161,29 @@ export const acq = {
       method: "POST",
       headers: { "Idempotency-Key": crypto.randomUUID() },
     }),
+  interview: () => call<InterviewStatus>("/acq/me/interview"),
+  interviewCode: (phone: string) =>
+    call<{ sent: boolean; expires_in: number; phone_masked: string }>("/acq/me/interview/code", {
+      method: "POST", body: JSON.stringify({ phone }),
+    }),
+  interviewApply: (phone: string, code: string | null, consentTextVersion: string) =>
+    call<InterviewStatus>("/acq/me/interview", {
+      method: "POST",
+      body: JSON.stringify({ phone, code, consent: true, consent_text_version: consentTextVersion }),
+    }),
+  interviewWithdraw: () => call<InterviewStatus>("/acq/me/interview", { method: "DELETE" }),
 };
+
+/** The message of an API error body ({"detail": {"message": ...}}), if any. */
+export function errorMessage(e: unknown): string | null {
+  if (!(e instanceof ApiError)) return null;
+  try {
+    const d = JSON.parse(e.message.slice(e.message.indexOf(" ") + 1)).detail;
+    return typeof d === "object" && d && typeof d.message === "string" ? d.message : null;
+  } catch {
+    return null;
+  }
+}
 
 export const api = {
   taxonomy: (kind: "institutions" | "majors" | "roles") => call<TaxonomyItem[]>(`/taxonomy/${kind}`),

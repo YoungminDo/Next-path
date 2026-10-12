@@ -89,7 +89,7 @@ export default function HeroForm(props: { institutions: Institution[]; majors: N
       <SearchSelect inputId="hero-major" ariaLabel="전공" noun="전공" placeholder="전공 검색 (예: 경영, 컴퓨터)"
                     items={majors.map((n) => ({ id: n.node_id, label: n.label, group: n.parent_label,
                                                 keywords: n.aliases ?? [] }))}
-                    value={major} onChange={(v) => picked("major", v)} invalid={tried && !major} />
+                    value={major} onChange={(v) => picked("major", v)} invalid={tried && !major} suggestSimilar />
       <div className="pair">
         <select id="hero-adm" aria-label="입학 연도" value={years.adm} aria-invalid={tried && !years.adm}
                 onChange={(e) => { touched(); setYears({ ...years, adm: e.target.value }); }}>

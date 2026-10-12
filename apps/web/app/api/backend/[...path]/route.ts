@@ -31,7 +31,7 @@ async function proxy(req: NextRequest, ctx: { params: Promise<{ path: string[] }
     upstream = await fetch(target, {
       method: req.method,
       headers,
-      body: req.method === "GET" ? undefined : await req.text(),
+      body: req.method === "GET" || req.method === "DELETE" ? undefined : await req.text(),
       cache: "no-store",
     });
   } catch {
@@ -50,3 +50,4 @@ async function proxy(req: NextRequest, ctx: { params: Promise<{ path: string[] }
 
 export const GET = proxy;
 export const POST = proxy;
+export const DELETE = proxy;

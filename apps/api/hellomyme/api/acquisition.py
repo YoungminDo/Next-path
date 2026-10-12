@@ -3,14 +3,15 @@ from datetime import UTC, datetime
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from hellomyme.api.deps import Account, AnonSession, AppSettings, AsOf, Conn, IdempotencyKey
 from hellomyme.domain import acquisition as acq
-from hellomyme.domain import drafts, ledger
+from hellomyme.domain import drafts, interview, ledger
 from hellomyme.domain.career_input import member_person_id
 from hellomyme.domain.career_query import QueryInvalid
 from hellomyme.domain.policies import PolicyMissing, active_unlock_policy
+from hellomyme.sms import SmsUnavailable, get_sender
 
 router = APIRouter(prefix="/acq", tags=["acquisition"])
 # Before login only the teaser is served; every distribution needs a member (login first).
@@ -65,6 +66,8 @@ def organizations(conn: Conn, response: Response, q: str | None = None):
 class DraftRequest(BaseModel):
     draft_id: str | None = None
     payload: acq.AcquisitionPayload
+    # The team's own browsers (?internal=1): kept, but left out of statistics.
+    internal: bool = False
 
 
 @router.post("/draft")
@@ -72,7 +75,7 @@ def save_draft(body: DraftRequest, conn: Conn, settings: AppSettings, anon: Anon
     payload = _run(lambda: acq.resolve_names(conn, body.payload.stamp_intents(datetime.now(UTC))))
     try:
         saved = drafts.save_draft(conn, anon, payload, settings.anonymous_draft_ttl_hours,
-                                  body.draft_id)
+                                  body.draft_id, internal=body.internal)
     except drafts.DraftNotFound as exc:
         raise HTTPException(404, "draft not found, expired or already claimed") from exc
     return {**saved, "payload": payload.model_dump(mode="json"), "unlisted": acq.unlisted(payload)}
@@ -186,6 +189,49 @@ def add_job(body: JobRequest, conn: Conn, account_id: Account, key: IdempotencyK
                                 written["work_event_id"])
         reward = r and {"ledger_id": r.ledger_id, "amount": r.amount}
     return {**written, "reward": reward}
+
+
+# --- user-interview opt-in (separate, optional consent; docs/10 §interview) ----------------
+
+def _interview(fn):
+    try:
+        return fn()
+    except interview.InterviewError as exc:
+        raise HTTPException(exc.status, {"message": exc.message, **exc.extra}) from exc
+    except SmsUnavailable as exc:
+        raise HTTPException(503, {"message": "문자를 보내지 못했어요. 잠시 후 다시 시도해 주세요"}) from exc
+
+
+@router.get("/me/interview")
+def interview_status(conn: Conn, settings: AppSettings, account_id: Account):
+    return interview.status(conn, settings, account_id, get_sender(settings))
+
+
+class PhoneRequest(BaseModel):
+    phone: str = Field(min_length=8, max_length=20)
+
+
+@router.post("/me/interview/code")
+def interview_code(body: PhoneRequest, conn: Conn, settings: AppSettings, account_id: Account):
+    return _interview(lambda: interview.send_code(conn, settings, account_id, body.phone,
+                                                  get_sender(settings)))
+
+
+class InterviewRequest(PhoneRequest):
+    code: str | None = Field(default=None, max_length=10)
+    consent: Literal[True]  # the separate interview consent, ticked by the member
+    consent_text_version: str = Field(min_length=1, max_length=64)
+
+
+@router.post("/me/interview")
+def interview_apply(body: InterviewRequest, conn: Conn, settings: AppSettings, account_id: Account):
+    return _interview(lambda: interview.apply(conn, settings, account_id, body.phone, body.code,
+                                              body.consent_text_version, get_sender(settings)))
+
+
+@router.delete("/me/interview")
+def interview_withdraw(conn: Conn, settings: AppSettings, account_id: Account):
+    return interview.withdraw(conn, settings, account_id, get_sender(settings))
 
 
 class IntentRequest(BaseModel):

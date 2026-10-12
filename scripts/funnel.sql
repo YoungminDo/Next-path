@@ -127,3 +127,53 @@ FROM analytics.event e CROSS JOIN params p
 WHERE e.event_name = 'school_requested' AND e.received_at >= p.t_from AND e.received_at < p.t_to
   AND coalesce(e.properties->>'internal', 'false') <> 'true'
 GROUP BY 1, 2 ORDER BY 3 DESC, 2;
+
+-- ============================================================================================
+-- 아래는 이벤트가 아니라 저장된 입력 자체(DB, migration 0026)로 본 숫자. 가입하지 않고 떠난 입력도
+-- 모두 들어 있습니다. 수정할 때마다 남는 이력은 anonymous_draft_revision 에 있습니다.
+
+-- [입력 DB] 기간 안에 저장된 입력: 사람(브라우저) 수, 희망 직무 응답, 로그인으로 계정에 연결된 수
+WITH params AS (
+  SELECT (date_trunc('day', now() AT TIME ZONE 'Asia/Seoul')) AT TIME ZONE 'Asia/Seoul' AS t_from, now() AS t_to
+)
+SELECT user_type AS "유형",
+       count(DISTINCT session_hash) AS "입력한 사람",
+       count(DISTINCT session_hash) FILTER (WHERE NOT institution_listed) AS "목록 밖 학교",
+       count(DISTINCT session_hash) FILTER (WHERE NOT major_listed) AS "목록 밖 전공",
+       count(DISTINCT session_hash) FILTER (WHERE desired_role_status = 'CHOSEN') AS "희망 직무 고름",
+       count(DISTINCT session_hash) FILTER (WHERE desired_role_status = 'NONE') AS "희망 직무 아직 없음",
+       count(DISTINCT session_hash) FILTER (WHERE desired_role_status = 'KEEP_CURRENT') AS "지금 직무 유지",
+       count(DISTINCT session_hash) FILTER (WHERE desired_role_status IS NULL) AS "희망 직무 건너뜀",
+       count(DISTINCT session_hash) FILTER (WHERE claimed_at IS NOT NULL) AS "로그인으로 연결"
+FROM analytics.acq_input i CROSS JOIN params p
+WHERE NOT i.internal AND i.created_at >= p.t_from AND i.created_at < p.t_to
+GROUP BY 1 ORDER BY 2 DESC;
+
+-- [희망 직무] 학교 × 전공 × 졸업연도 × 희망 직무 ('아직 없음'·'건너뜀'도 한 줄씩)
+WITH params AS (
+  SELECT (date_trunc('day', now() AT TIME ZONE 'Asia/Seoul')) AT TIME ZONE 'Asia/Seoul' AS t_from, now() AS t_to
+),
+d AS (
+  SELECT i.draft_id, i.session_hash, coalesce(i.institution_name, i.institution_raw) AS school,
+         coalesce(i.major_label, i.major_raw) AS major, i.graduation_year,
+         CASE i.desired_role_status WHEN 'NONE' THEN '(아직 없음)' WHEN 'KEEP_CURRENT' THEN '(지금 직무 유지)'
+              WHEN 'UNSURE' THEN '(모르겠음)' ELSE NULL END AS status_label, i.desired_role_status
+  FROM analytics.acq_input i CROSS JOIN params p
+  WHERE NOT i.internal AND i.created_at >= p.t_from AND i.created_at < p.t_to
+)
+SELECT d.school AS "학교", d.major AS "전공", d.graduation_year AS "졸업",
+       coalesce(r.role_label, r.role_raw, d.status_label, '(건너뜀)') AS "희망 직무",
+       r.rank AS "순위", count(DISTINCT d.session_hash) AS "사람 수"
+FROM d LEFT JOIN analytics.acq_desired_role r ON r.draft_id = d.draft_id AND d.desired_role_status = 'CHOSEN'
+GROUP BY 1, 2, 3, 4, 5 ORDER BY 6 DESC, 1, 2, 3, 5;
+
+-- [표준화 대기] 목록에 없는 학교·전공·희망 직무: 철자가 달라도 같은 이름끼리 묶어 사람 수 순 (전체 기간)
+SELECT kind AS "종류", most_typed AS "가장 많이 쓴 이름", people AS "사람 수",
+       array_to_string(spellings, ' / ') AS "적힌 철자들", first_seen AS "처음", last_seen AS "마지막"
+FROM analytics.acq_unlisted_backlog ORDER BY people DESC, kind, most_typed LIMIT 100;
+
+-- [인터뷰 신청] 숫자만 (번호는 이 파일에서 꺼내지 않습니다). 신청 대상 뽑기는 docs/10 의 안내대로.
+SELECT count(*) FILTER (WHERE withdrawn_at IS NULL) AS "신청 중",
+       count(*) FILTER (WHERE withdrawn_at IS NULL AND phone_verified_at IS NOT NULL) AS "번호 인증됨",
+       count(*) FILTER (WHERE withdrawn_at IS NOT NULL) AS "철회"
+FROM interview_contact;

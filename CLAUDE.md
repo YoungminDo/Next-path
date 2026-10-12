@@ -8,7 +8,9 @@ Will later merge into Hello My Me. Read `docs/` before large changes:
 `03_DEPLOYMENT.md` (deploy status and steps), `07_SERVICE_DESIGN.html` (service design),
 `08_DATA_MOAT.md` (which source data is the moat; migration 0019), `09_INGESTION_PIPELINE.md`
 (capture → AI JSON → checks → field review → SEED; migration 0022), `10_DEMAND_TEST.md` (funnel
-events from `web/lib/track.ts`, migration 0024, `scripts/funnel.sql`).
+events from `web/lib/track.ts`, migration 0024, `scripts/funnel.sql`; inputs as data + desired roles 0026,
+interview phone opt-in 0027). Migration 0025 closes the Supabase Data API: every new table enables RLS
+(`tests/test_data_api_lock.py`).
 
 ## Layout & commands
 - `apps/api` — FastAPI + PostgreSQL 16, raw-SQL Alembic migrations (`migrations/versions`), pytest.
@@ -43,6 +45,7 @@ raw/source records append-only; unknown = NULL (never fabricate or repair data);
 credit ledger (corrections = REVERSAL); idempotent imports/rewards/unlocks/merges; small-cohort
 and small-cell suppression; ACCOUNT ≠ PERSON; PII separated; PRE_SEED never identity-matched or
 shown as a person/mentor; consent recorded before combining HMM identity with career data.
+Interview phone numbers: own consent (INTERVIEW_CONTACT), optional, never logged, cleared on withdrawal.
 While results come from PRE_SEED, result screens keep one small beta line (`data_basis ===
 "SIMULATION"`); test/SIMULATION banners are gone for the demand test, but simulated numbers are
 never presented as real people's outcomes.

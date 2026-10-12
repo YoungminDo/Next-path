@@ -86,6 +86,28 @@ class AcqJob(BaseModel):
     end_year: int | None = Field(default=None, ge=1950, le=2100)
 
 
+class AcqDesiredRole(BaseModel):
+    """One wanted role: a node from the role list, or the typed name when it is not listed."""
+    role_node_id: str | None = None
+    role_raw: str | None = Field(default=None, max_length=100)
+
+    @model_validator(mode="after")
+    def _one(self):
+        self.role_raw = (self.role_raw or "").strip() or None
+        self.role_node_id = (self.role_node_id or "").strip() or None
+        if self.role_node_id is not None and not UUID_RE.match(self.role_node_id):
+            raise ValueError("role_node_id is not an id")
+        if not (self.role_node_id or self.role_raw):
+            raise ValueError("role_node_id or role_raw is required")
+        return self
+
+
+# CHOSEN: desired_roles holds 1-3 roles in the member's order. NONE: no desired role yet.
+# UNSURE: not sure. KEEP_CURRENT: professionals who want to stay in their role. None: not asked
+# or skipped, which is different from NONE.
+DesiredRoleStatus = Literal["CHOSEN", "NONE", "UNSURE", "KEEP_CURRENT"]
+
+
 class AcqIntent(BaseModel):
     surface: Literal["STUDENT_FIRST_ROLE", "PROFESSIONAL_NEXT_ROLE"]
     target_kind: Literal["ROLE", "UNDECIDED"]
@@ -108,6 +130,20 @@ class AcquisitionPayload(BaseModel):
     first_job_is_current: bool = False
     gender_code: Literal["MALE", "FEMALE", "OTHER", "UNDISCLOSED"] | None = None
     intents: list[AcqIntent] = Field(default_factory=list, max_length=10)
+    desired_roles: list[AcqDesiredRole] = Field(default_factory=list, max_length=3)
+    desired_role_status: DesiredRoleStatus | None = None
+
+    @model_validator(mode="after")
+    def _desired(self):
+        if self.desired_roles and self.desired_role_status in (None, "CHOSEN"):
+            self.desired_role_status = "CHOSEN"
+        elif self.desired_roles:
+            raise ValueError(f"{self.desired_role_status} must not list desired roles")
+        elif self.desired_role_status == "CHOSEN":
+            raise ValueError("CHOSEN needs at least one desired role")
+        if self.desired_role_status == "KEEP_CURRENT" and self.user_type != "PROFESSIONAL":
+            raise ValueError("KEEP_CURRENT is for professionals")
+        return self
 
     @property
     def is_professional(self) -> bool:
@@ -409,7 +445,8 @@ def _summary(out: dict) -> dict:
     # and the exact-match count is only told once it is large enough to stand on its own.
     if summary["suppressed"]:
         summary["effective_n"] = None
-    if summary["exact_n"] is not None and summary["exact_n"] < out.get("min_cell_n", 0):
+    # "Nobody matches exactly" (0) is safe to say; 1 to min_cell_n - 1 is not told.
+    if summary["exact_n"] and summary["exact_n"] < out.get("min_cell_n", 0):
         summary["exact_n"] = None
     return summary
 
@@ -420,6 +457,7 @@ def resolve_names(conn: Connection, p: AcquisitionPayload) -> AcquisitionPayload
     stay typed: that dimension is left out of the cohort."""
     from hellomyme.ingest.pipeline import _lookup  # shared deterministic matcher
 
+    p = _resolve_desired(conn, p, _lookup)
     e = p.education
     if e is None:
         return p
@@ -438,6 +476,25 @@ def resolve_names(conn: Connection, p: AcquisitionPayload) -> AcquisitionPayload
         update={"institution_id": inst, "major_node_id": major})})
 
 
+def _resolve_desired(conn: Connection, p: AcquisitionPayload, lookup) -> AcquisitionPayload:
+    """Same rules for desired roles: listed ids are checked, typed names the list knows get their
+    id (the typed text stays), and a role given twice counts once."""
+    if not p.desired_roles:
+        return p
+    roles = load_taxonomy(conn, "ROLE")
+    out, seen = [], set()
+    for r in p.desired_roles:
+        if r.role_node_id and r.role_node_id not in roles.nodes:
+            raise QueryInvalid("unknown role")
+        node = r.role_node_id or lookup(conn, "ROLE", r.role_raw)
+        key = node or f"raw:{r.role_raw.casefold()}"
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(r.model_copy(update={"role_node_id": node}))
+    return p.model_copy(update={"desired_roles": out})
+
+
 def unlisted(p: AcquisitionPayload) -> list[str]:
     """Which answers were typed names the list does not know (said next to the result)."""
     e = p.education
@@ -449,7 +506,7 @@ def unlisted(p: AcquisitionPayload) -> list[str]:
 
 def insight_key(p: AcquisitionPayload, target_node: str | None) -> str:
     """Entitlement key: the cohort inputs plus the target, independent of wording/order."""
-    basis = p.model_dump(mode="json", exclude={"intents"})
+    basis = p.model_dump(mode="json", exclude={"intents", "desired_roles", "desired_role_status"})
     # Keep keys of payloads from before typed school names existed unchanged (an unlock bought
     # then must stay unlocked and never be charged again).
     if basis.get("education") and basis["education"].get("institution_raw") is None:
@@ -599,7 +656,36 @@ def write_acquisition_profile(conn: Connection, account_id: str, p: AcquisitionP
             out["current_work_event_ids"].append(weid)
 
     out["intent_event_ids"] = record_intents(conn, person_id, p, draft_id)
+    out["desired_role_ids"] = record_desired_roles(conn, person_id, p, draft_id)
     return out
+
+
+DESIRED_SURFACE = {"STUDENT": "STUDENT_PREVIEW", "JOB_SEEKER": "STUDENT_PREVIEW",
+                   "PROFESSIONAL": "PROFESSIONAL_PREVIEW"}
+
+
+def record_desired_roles(conn: Connection, person_id: str, p: AcquisitionPayload,
+                         draft_id: str | None, captured_at: datetime | None = None) -> list[str]:
+    """The desired-role answer as rows of the member's own (replay-safe per draft). A skipped
+    question writes nothing; 'no desired role yet' writes one NONE row."""
+    if p.desired_role_status is None:
+        return []
+    at = captured_at or datetime.now(UTC)
+    rows = ([(i + 1, r.role_node_id, r.role_raw) for i, r in enumerate(p.desired_roles)]
+            if p.desired_role_status == "CHOSEN" else [(1, None, None)])
+    ids = []
+    for rank, node, raw in rows:
+        rid = conn.execute(text(
+            """INSERT INTO desired_role (person_id, status, rank, role_taxonomy_node_id, role_raw,
+                   source_surface, anonymous_draft_id, captured_at)
+               VALUES (:p, :s, :r, CAST(:n AS uuid), :raw, :surface, CAST(:d AS uuid), :at)
+               ON CONFLICT (anonymous_draft_id, rank) WHERE anonymous_draft_id IS NOT NULL
+               DO NOTHING RETURNING desired_role_id::text"""),
+            {"p": person_id, "s": p.desired_role_status, "r": rank, "n": node, "raw": raw,
+             "surface": DESIRED_SURFACE[p.user_type], "d": draft_id, "at": at}).scalar()
+        if rid:
+            ids.append(rid)
+    return ids
 
 
 def _write_job(conn: Connection, person_id: str, account_id: str, source_id: str, j: AcqJob,
