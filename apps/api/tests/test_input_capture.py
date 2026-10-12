@@ -129,3 +129,19 @@ def test_login_links_the_draft_once_and_a_returning_member_gets_no_second_profil
                       abandoned["draft_id"]: None}
     assert consents == 4  # two consents for each linked draft
     assert client.get("/acq/me", headers=auth).status_code == 200
+
+
+def test_team_sessions_are_internal_even_without_the_draft_flag(client, engine, ids):  # noqa: F811
+    """Migration 0028: a browser that ever sent an event marked internal is the team's."""
+    h = anon()
+    draft = post(client, h, student(ids)).json()["draft_id"]  # saved without the flag
+    r = client.post("/analytics/events", json={
+        "event_name": "landing_viewed", "occurred_at": "2026-10-12T00:00:00Z",
+        "anonymous_session_id": h["X-Anonymous-Session"], "properties": {"internal": True}})
+    assert r.status_code == 202
+    with engine.begin() as conn:
+        assert conn.execute(text("SELECT internal FROM analytics.acq_input WHERE draft_id = :d"),
+                            {"d": draft}).scalar() is True
+        stored = conn.execute(text("SELECT internal FROM anonymous_draft WHERE draft_id = :d"),
+                              {"d": draft}).scalar()
+    assert stored is False  # the stored row is left as it was
