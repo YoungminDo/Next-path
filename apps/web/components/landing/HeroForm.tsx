@@ -106,7 +106,7 @@ export default function HeroForm(props: { institutions: { id: string; name: stri
       {status === "error" && <p className="heroform-warn" role="status">서버에 연결하지 못했어요. 잠시 후 새로고침해 주세요.</p>}
       {status === "empty" && <p className="heroform-warn" role="status">학교·전공 데이터를 준비하고 있어요. 잠시 후 다시 와주세요.</p>}
       <button className="cta" type="submit">나와 같은 자리였던 사람들 보기</button>
-      <p className="heroform-note">카카오로 3초 · 무료 · 광고 연락 없음</p>
+      <p className="heroform-note">카카오로 3초 · 무료</p>
       <a className="heroform-alt" href="/start?type=pro">지금 일하고 있어요 →</a>
     </form>
   );

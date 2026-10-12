@@ -42,7 +42,6 @@ export default function Landing({ options }: { options: Options }) {
           <ul className="reasons">
             <li>추천이 아니라, 같은 출발점의 사람들이 간 길이에요</li>
             <li>로그인은 카카오로 3초, 무료예요</li>
-            <li>광고 · 영업 연락은 절대 없어요</li>
           </ul>
         </div>
         <HeroForm institutions={options.institutions} majors={options.majors} />
