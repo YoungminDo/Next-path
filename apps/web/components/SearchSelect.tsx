@@ -29,6 +29,12 @@ function matches(item: Item, q: string): boolean {
   return [...query].every((c) => CHO.includes(c)) && hay.some((h) => initials(h).includes(query));
 }
 
+function optionBody(o: Item | { id: null; label: string }, noun: string) {
+  return o.id === null
+    ? <span className="typed">‘{o.label}’ 그대로 입력 <small>목록에 없는 {noun}</small></span>
+    : <>{o.label}{"group" in o && o.group ? <small>{o.group}</small> : null}</>;
+}
+
 export default function SearchSelect(props: {
   items: Item[];
   value: Picked | null;
@@ -37,6 +43,7 @@ export default function SearchSelect(props: {
   ariaLabel: string;
   noun: string; // "학교" | "전공", used in the free-text option
   inputId?: string;
+  invalid?: boolean;
 }) {
   const { items, value, onChange, placeholder, ariaLabel, noun } = props;
   const [query, setQuery] = useState(value?.label ?? "");
@@ -44,6 +51,13 @@ export default function SearchSelect(props: {
   const [active, setActive] = useState(0);
   const listId = useId();
   const box = useRef<HTMLDivElement>(null);
+  // Leaving the field hides the list but keeps its space, unchanged, for a moment: collapsing (or
+  // re-filtering) at once would move the button below it while it is being pressed, and the
+  // press would land on nothing.
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [closing, setClosing] = useState(false);
+  const frozen = useRef<(Item | { id: null; label: string })[]>([]);
+  useEffect(() => () => { if (closeTimer.current) clearTimeout(closeTimer.current); }, []);
   // A value set from outside (e.g. answers carried over from the landing) shows up in the box.
   useEffect(() => {
     if (!open) setQuery(value?.label ?? "");
@@ -62,23 +76,28 @@ export default function SearchSelect(props: {
 
   function pick(o: Item | { id: null; label: string }) {
     setQuery(o.label);
-    setOpen(false);
     onChange({ id: o.id, label: o.label });
   }
 
   function commitTyped() {
-    // Leaving the field: an exact name counts as picked, anything else typed is kept as typed.
+    // Leaving the field: an exact name, or a partial one that fits exactly one entry ("고려" →
+    // 고려대학교), counts as picked. Text that fits nothing in the list is kept as typed. Text
+    // that fits several entries stays unpicked: they choose one (or "그대로 입력") explicitly.
     if (!typed) {
       if (value) onChange(null);
       return;
     }
     if (value && norm(value.label) === norm(typed)) return;
+    const byName = items.filter((i) => norm(i.label).includes(norm(typed)));
     if (exact) pick(exact);
-    else if (!jamoOnly) pick({ id: null, label: typed });
+    else if (byName.length === 1) pick(byName[0]);
+    else if (shown.length === 1) pick(shown[0]);
+    else if (shown.length === 0 && !jamoOnly) pick({ id: null, label: typed });
+    else if (value) onChange(null);
   }
 
   return (
-    <div className="search-select" ref={box}>
+    <div className={props.invalid ? "search-select invalid" : "search-select"} ref={box}>
       <input
         id={props.inputId}
         role="combobox"
@@ -90,29 +109,47 @@ export default function SearchSelect(props: {
         autoComplete="off"
         placeholder={placeholder}
         value={query}
-        onFocus={() => { setOpen(true); setActive(0); }}
+        onFocus={() => {
+          if (closeTimer.current) clearTimeout(closeTimer.current);
+          setClosing(false);
+          setOpen(true);
+          setActive(0);
+        }}
         onChange={(e) => { setQuery(e.target.value); setOpen(true); setActive(0); }}
-        onBlur={() => { setOpen(false); commitTyped(); }}
+        onBlur={() => {
+          frozen.current = open ? options : [];
+          setClosing(open);
+          setOpen(false);
+          commitTyped(); // the value is settled now, before any button press is handled
+          closeTimer.current = setTimeout(() => setClosing(false), 300);
+        }}
         onKeyDown={(e) => {
+          if (e.nativeEvent.isComposing) return; // Korean IME: Enter that only finishes a syllable
           if (e.key === "ArrowDown") { e.preventDefault(); setOpen(true); setActive((a) => Math.min(a + 1, options.length - 1)); }
           else if (e.key === "ArrowUp") { e.preventDefault(); setActive((a) => Math.max(a - 1, 0)); }
-          else if (e.key === "Enter" && open && options[active]) { e.preventDefault(); pick(options[active]); }
+          else if (e.key === "Enter" && open && options[active]) { e.preventDefault(); pick(options[active]); setOpen(false); }
           else if (e.key === "Escape") setOpen(false);
         }}
       />
-      {value && value.id === null && !open && (
+      {value && value.id === null && !open && !closing && (
         <span className="search-select-note">목록에 없어서 입력한 이름 그대로 쓸게요</span>
+      )}
+      {!value && typed && !open && !closing && shown.length > 1 && (
+        <span className="search-select-note">목록에서 하나를 골라주세요</span>
+      )}
+      {closing && frozen.current.length > 0 && (
+        <ul className="search-select-list" aria-hidden="true" style={{ visibility: "hidden" }}>
+          {frozen.current.map((o) => <li key={o.id ?? `typed-${o.label}`}>{optionBody(o, noun)}</li>)}
+        </ul>
       )}
       {open && options.length > 0 && (
         <ul className="search-select-list" id={listId} role="listbox">
           {options.map((o, i) => (
             <li key={o.id ?? `typed-${o.label}`} id={`${listId}-${i}`} role="option" aria-selected={i === active}
                 className={i === active ? "active" : undefined}
-                onMouseDown={(e) => { e.preventDefault(); pick(o); }}
+                onMouseDown={(e) => { e.preventDefault(); pick(o); setOpen(false); }}
                 onMouseEnter={() => setActive(i)}>
-              {o.id === null
-                ? <span className="typed">‘{o.label}’ 그대로 입력 <small>목록에 없는 {noun}</small></span>
-                : <>{o.label}{"group" in o && o.group ? <small>{o.group}</small> : null}</>}
+              {optionBody(o, noun)}
             </li>
           ))}
         </ul>

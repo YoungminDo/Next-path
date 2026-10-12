@@ -20,6 +20,7 @@ export default function HeroForm(props: { institutions: { id: string; name: stri
   const [major, setMajor] = useState<Picked | null>(null);
   const [years, setYears] = useState({ adm: "", grad: "" });
   const [started, setStarted] = useState(false);
+  const [tried, setTried] = useState(false); // pressed the button with something missing
   const touched = () => {
     if (started) return;
     setStarted(true);
@@ -47,7 +48,15 @@ export default function HeroForm(props: { institutions: { id: string; name: stri
     if (v && v.id === null) track("school_requested", { kind, name: v.label, surface: "hero" });
   }
 
-  const ready = inst && major && years.adm && years.grad && Number(years.adm) <= Number(years.grad);
+  const yearsOk = years.adm && years.grad && Number(years.adm) <= Number(years.grad);
+  const ready = inst && major && yearsOk;
+  // What is still missing, in form order, so the button can point at it instead of leaving.
+  const missing = [
+    !inst && { id: "hero-inst", label: "학교" },
+    !major && { id: "hero-major", label: "전공" },
+    !years.adm && { id: "hero-adm", label: "입학 연도" },
+    !years.grad && { id: "hero-grad", label: "졸업 연도" },
+  ].filter(Boolean) as { id: string; label: string }[];
   const params = new URLSearchParams({ type: "student" });
   if (ready) {
     params.set(inst.id ? "inst" : "inst_raw", inst.id ?? inst.label);
@@ -58,27 +67,42 @@ export default function HeroForm(props: { institutions: { id: string; name: stri
   const href = `/start?${params.toString()}`;
 
   return (
-    <form id="hero-form" className="heroform" onSubmit={(e) => { e.preventDefault(); window.location.href = href; }}>
+    <form id="hero-form" className="heroform" onSubmit={(e) => {
+      e.preventDefault();
+      if (ready) {
+        window.location.href = href;
+        return;
+      }
+      setTried(true);
+      document.getElementById(missing[0]?.id ?? "hero-adm")?.focus();
+    }}>
       <p className="heroform-title">무료로 내 진로 지도 받기</p>
       <SearchSelect inputId="hero-inst" ariaLabel="학교" noun="학교" placeholder="학교 검색 (예: 고려대, ㄱㄹㄷ)"
                     items={institutions.map((i) => ({ id: i.id, label: i.name }))}
-                    value={inst} onChange={(v) => picked("school", v)} />
+                    value={inst} onChange={(v) => picked("school", v)} invalid={tried && !inst} />
       <SearchSelect inputId="hero-major" ariaLabel="전공" noun="전공" placeholder="전공 검색 (예: 경영, 컴퓨터)"
                     items={majors.map((n) => ({ id: n.node_id, label: n.label, group: n.parent_label,
                                                 keywords: n.matched_alias ? [n.matched_alias] : [] }))}
-                    value={major} onChange={(v) => picked("major", v)} />
+                    value={major} onChange={(v) => picked("major", v)} invalid={tried && !major} />
       <div className="pair">
-        <select id="hero-adm" aria-label="입학 연도" value={years.adm}
+        <select id="hero-adm" aria-label="입학 연도" value={years.adm} aria-invalid={tried && !years.adm}
                 onChange={(e) => { touched(); setYears({ ...years, adm: e.target.value }); }}>
           <option value="">입학 연도</option>
           {YEARS.map((y) => <option key={y} value={y}>{y}</option>)}
         </select>
-        <select id="hero-grad" aria-label="졸업 연도" value={years.grad}
+        <select id="hero-grad" aria-label="졸업 연도" value={years.grad} aria-invalid={tried && !years.grad}
                 onChange={(e) => { touched(); setYears({ ...years, grad: e.target.value }); }}>
           <option value="">졸업 (예정)</option>
           {YEARS.map((y) => <option key={y} value={y}>{y}</option>)}
         </select>
       </div>
+      {tried && !ready && (
+        <p className="heroform-warn" role="alert">
+          {missing.length
+            ? `${missing.map((m) => m.label).join(", ")}만 고르면 바로 볼 수 있어요`
+            : "졸업 연도가 입학 연도보다 빨라요"}
+        </p>
+      )}
       {status === "error" && <p className="heroform-warn" role="status">서버에 연결하지 못했어요. 잠시 후 새로고침해 주세요.</p>}
       {status === "empty" && <p className="heroform-warn" role="status">학교·전공 데이터를 준비하고 있어요. 잠시 후 다시 와주세요.</p>}
       <button className="cta" type="submit">나와 같은 자리였던 사람들 보기</button>

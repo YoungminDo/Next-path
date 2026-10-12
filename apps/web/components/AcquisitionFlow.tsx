@@ -22,7 +22,7 @@ import { track } from "@/lib/track";
    every distribution, intent and path. The server enforces the same gate: before login it only
    answers the teaser. Tone: "people who stood where I stand", never "seniors". */
 type Screen =
-  | "start" | "s_edu" | "p_now" | "gate"
+  | "start" | "s_edu" | "p_now" | "finding" | "gate"
   | "s_result" | "s_intent" | "p_next" | "p_first" | "p_similar" | "me";
 type UserType = "STUDENT" | "PROFESSIONAL";
 
@@ -184,19 +184,28 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
     const type = params.get("type");
     if (type === "pro") { setUserType("PROFESSIONAL"); setScreen("p_now"); }
     if (type === "student") {
-      setScreen("s_edu");
-      // The landing hero passes the four answers: go straight to the teaser.
+      // The landing passes what was already answered: never ask for it again.
       const fromHero: Edu = {
         institution_id: params.get("inst") ?? "", institution_raw: params.get("inst_raw") ?? "",
         major_node_id: params.get("major") ?? "", major_raw: params.get("major_raw") ?? "",
         admission_year: params.get("adm") ?? "", graduation_year: params.get("grad") ?? "",
       };
+      setEdu(fromHero);
       if ((fromHero.institution_id || fromHero.institution_raw) && (fromHero.major_node_id || fromHero.major_raw)
           && fromHero.admission_year && fromHero.graduation_year) {
-        setEdu(fromHero);
-        run(() => toTeaser(fromHero, "STUDENT"))();
+        // All four answers: straight to the result preview, with a "finding" screen meanwhile.
+        setScreen("finding");
+        run(async () => {
+          try {
+            await toTeaser(fromHero, "STUDENT");
+          } catch (e) {
+            setScreen("s_edu"); // answers stay filled in; the error says what to change
+            throw e;
+          }
+        })();
         return;
       }
+      setScreen("s_edu");
     }
     // Already a member: continue where they are.
     acq.me().then((m) => resumeMember(m)).catch(() => undefined);
@@ -365,6 +374,14 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
               지금 일하고 있어요
             </button>
           </div>
+        </section>
+      )}
+
+      {screen === "finding" && (
+        <section className="screen" aria-busy="true">
+          <Progress value={0.66} />
+          <h2>나와 같은 자리였던 사람들을 찾고 있어요</h2>
+          <p className="sub">입력한 학교·전공·학번으로 비슷한 사람을 고르는 중이에요.</p>
         </section>
       )}
 
