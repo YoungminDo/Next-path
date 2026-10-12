@@ -9,14 +9,16 @@ import {
   ApiError,
   pending,
   type Cell,
+  type Institution,
   type MyResult,
   type Node,
   type QueryResult,
   type StepResult,
   type TeaserResult,
+  type Unlisted,
 } from "@/lib/api";
 import SearchSelect, { type Picked } from "@/components/SearchSelect";
-import { track } from "@/lib/track";
+import { inAppBrowser, track } from "@/lib/track";
 
 /* Order (product decision): input -> teaser (how many people, how many directions) -> login ->
    every distribution, intent and path. The server enforces the same gate: before login it only
@@ -57,13 +59,15 @@ type Edu = { institution_id: string; institution_raw: string; major_node_id: str
 const EMPTY_EDU: Edu = { institution_id: "", institution_raw: "", major_node_id: "", major_raw: "",
   admission_year: "", graduation_year: "" };
 
-/** Said wherever results are shown for a typed name: which comparison was used instead. */
-function unlistedNote(e: Edu): string | null {
-  const school = !e.institution_id && e.institution_raw;
-  const major = !e.major_node_id && e.major_raw;
-  if (school && major) return `‘${e.institution_raw}’ ‘${e.major_raw}’ 기록은 아직 모으는 중이라, 같은 학번 사람들로 찾았어요.`;
-  if (school) return `‘${e.institution_raw}’ 기록은 아직 모으는 중이라, 다른 학교의 같은 전공·같은 학번 사람들로 찾았어요.`;
-  if (major) return `‘${e.major_raw}’ 기록은 아직 모으는 중이라, 같은 학교·같은 학번 사람들로 찾았어요.`;
+/** Typed names the server could not match, with what was typed: said next to every result. */
+type Unl = { kinds: Unlisted; institution: string; major: string };
+function unlistedNote(u?: Unl): string | null {
+  if (!u) return null;
+  const school = u.kinds.includes("institution") && u.institution;
+  const major = u.kinds.includes("major") && u.major;
+  if (school && major) return `‘${u.institution}’, ‘${u.major}’ 기록은 아직 모으는 중이라 다른 학교·다른 전공 사람들까지 포함해서 찾았어요.`;
+  if (school) return `‘${u.institution}’ 기록은 아직 모으는 중이라 다른 학교 사람들까지 포함해서 찾았어요.`;
+  if (major) return `‘${u.major}’ 기록은 아직 모으는 중이라 다른 전공 사람들까지 포함해서 찾았어요.`;
   return null;
 }
 type Job = { organization_name: string; role_node_id: string; start_year: string; end_year: string };
@@ -76,14 +80,33 @@ function cellLabel(c: Cell, professional: boolean) {
 
 /** Korean particle 으로/로 by the last syllable (ㄹ or no final consonant -> 로). */
 export function ro(word: string): string {
-  const c = word.charCodeAt(word.length - 1) - 0xac00;
-  if (c < 0 || c > 11171) return `${word}(으)로`;
-  const jong = c % 28;
-  return `${word}${jong === 0 || jong === 8 ? "로" : "으로"}`;
+  const last = word.trim().slice(-1);
+  const c = last.charCodeAt(0) - 0xac00;
+  if (c >= 0 && c <= 11171) {
+    const jong = c % 28;
+    return `${word}${jong === 0 || jong === 8 ? "로" : "으로"}`;
+  }
+  // Read aloud: M/N (엠, 엔) and 0/3/6 (영, 삼, 육) end in a consonant other than ㄹ.
+  return `${word}${/[mn036]/i.test(last) ? "으로" : "로"}`;
 }
 
 function reasonText(reasons: string[]) {
-  return reasons.map((r) => REASONS[r] ?? r).join(" · ");
+  const has = new Set(reasons);
+  const shown = reasons.filter((r) =>
+    !(r === "WIDEN_GRADUATION_YEAR_2Y" && has.has("DROP_GRADUATION_YEAR")) &&
+    !(r === "WIDEN_ADMISSION_YEAR_2Y" && has.has("DROP_ADMISSION_YEAR")));
+  if (has.has("DROP_ADMISSION_YEAR") && has.has("DROP_GRADUATION_YEAR")) {
+    return shown.filter((r) => r !== "DROP_ADMISSION_YEAR" && r !== "DROP_GRADUATION_YEAR")
+      .map((r) => REASONS[r] ?? r).concat("학번 조건 제외").join(" · ");
+  }
+  return shown.map((r) => REASONS[r] ?? r).join(" · ");
+}
+
+/** "Widened to …" line; the exact-match count only when it is big enough to be told. */
+function widenedText(exactN: number | null | undefined, reasons: string[]): string {
+  const how = reasonText(reasons);
+  return exactN ? `딱 같은 사람은 ${exactN}명이라 ${how}까지 넓혀서 찾았어요`
+    : `딱 같은 조건의 사람이 적어서 ${how}까지 넓혀서 찾았어요`;
 }
 
 /** One sentence that says what the bars mean, leaning on how many paths there were. */
@@ -106,7 +129,7 @@ function conclusion(r: QueryResult & { n_directions?: number | null }, professio
 export default function AcquisitionFlow({ initial }: { initial?: Options }) {
   const [screen, setScreen] = useState<Screen>("start");
   const [userType, setUserType] = useState<UserType>("STUDENT");
-  const [institutions, setInstitutions] = useState<{ id: string; name: string }[]>(initial?.institutions ?? []);
+  const [institutions, setInstitutions] = useState<Institution[]>(initial?.institutions ?? []);
   const [majors, setMajors] = useState<Node[]>(initial?.majors ?? []);
   const [roles, setRoles] = useState<Node[]>(initial?.roles ?? []);
   const [middleRoles, setMiddleRoles] = useState<Node[]>(initial?.middleRoles ?? []);
@@ -123,12 +146,17 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
   const [me, setMe] = useState<MyResult>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const [unl, setUnl] = useState<Unl>();
+  const app = useMemo(() => (typeof window === "undefined" ? null : inAppBrowser()), []);
 
   const professional = userType === "PROFESSIONAL";
   const simulation = (me?.data_basis ?? base?.data_basis ?? teaser?.data_basis) === "SIMULATION";
 
   // Funnel: which result steps people reach and how long they stay on each (docs/10).
   const shownAt = useRef<{ screen: Screen; at: number } | null>(null);
+  const fromPop = useRef(false); // the screen change came from the browser's back button
+  const depth = useRef(0); // history entries this page pushed
+  const backRef = useRef<Partial<Record<Screen, Screen>>>({});
   useEffect(() => {
     const prev = shownAt.current;
     const now = Date.now();
@@ -138,9 +166,31 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
       track("result_step_viewed", { screen, user_type: userType, previous: prev?.screen ?? null,
                                     seconds_on_previous: seconds });
     }
-    if (screen === "s_edu" || screen === "p_now") track("career_input_started", { surface: "flow", user_type: userType });
+    // Every screen change is a step in the browser's history too, so the phone's back button
+    // walks back through the flow instead of leaving it (in-app browsers included).
+    if (prev && !fromPop.current && screen !== "finding") {
+      window.history.pushState({ nextpath: screen }, "");
+      depth.current += 1;
+    }
+    fromPop.current = false;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screen]);
+  useEffect(() => {
+    const onPop = () => {
+      depth.current = Math.max(0, depth.current - 1);
+      fromPop.current = true;
+      setScreen((cur) => backRef.current[cur] ?? cur);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+  const started = useRef(false);
+  const markStarted = () => {
+    if (started.current) return;
+    started.current = true;
+    track("career_input_started", { surface: "flow", user_type: userType });
+  };
+  const answer = (next: Edu) => { markStarted(); setEdu(next); };
   useEffect(() => {
     const leave = () => {
       const cur = shownAt.current;
@@ -182,14 +232,14 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
       return;
     }
     const type = params.get("type");
-    if (type === "pro") { setUserType("PROFESSIONAL"); setScreen("p_now"); }
+    // The landing passes what was already answered: never ask for it again.
+    const fromHero: Edu = {
+      institution_id: params.get("inst") ?? "", institution_raw: params.get("inst_raw") ?? "",
+      major_node_id: params.get("major") ?? "", major_raw: params.get("major_raw") ?? "",
+      admission_year: params.get("adm") ?? "", graduation_year: params.get("grad") ?? "",
+    };
+    if (type === "pro") { setUserType("PROFESSIONAL"); setEdu(fromHero); setScreen("p_now"); }
     if (type === "student") {
-      // The landing passes what was already answered: never ask for it again.
-      const fromHero: Edu = {
-        institution_id: params.get("inst") ?? "", institution_raw: params.get("inst_raw") ?? "",
-        major_node_id: params.get("major") ?? "", major_raw: params.get("major_raw") ?? "",
-        admission_year: params.get("adm") ?? "", graduation_year: params.get("grad") ?? "",
-      };
       setEdu(fromHero);
       if ((fromHero.institution_id || fromHero.institution_raw) && (fromHero.major_node_id || fromHero.major_raw)
           && fromHero.admission_year && fromHero.graduation_year) {
@@ -207,8 +257,12 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
       }
       setScreen("s_edu");
     }
-    // Already a member: continue where they are.
-    acq.me().then((m) => resumeMember(m)).catch(() => undefined);
+    // Already a member on this browser: continue where they are (anonymous visitors skip the call).
+    if (pending.member()) {
+      acq.me().then((m) => resumeMember(m)).catch((e) => {
+        if (e instanceof ApiError && (e.status === 401 || e.status === 404)) pending.member(null);
+      });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -239,14 +293,15 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
   async function toTeaser(e: Edu, type: UserType) {
     const d = await acq.saveDraft(payload(e, type), draftId);
     setDraftId(d.draft_id);
+    setUnl({ kinds: d.unlisted ?? [], institution: e.institution_raw, major: e.major_raw });
     track("career_input_completed", {
       user_type: type,
       institution_id: e.institution_id || null,
       institution_name: institutions.find((i) => i.id === e.institution_id)?.name ?? (e.institution_raw || null),
-      institution_listed: Boolean(e.institution_id),
+      institution_listed: Boolean(e.institution_id) || !(d.unlisted ?? []).includes("institution"),
       major_node_id: e.major_node_id || null,
       major_label: majors.find((m) => m.node_id === e.major_node_id)?.label ?? (e.major_raw || null),
-      major_listed: Boolean(e.major_node_id),
+      major_listed: Boolean(e.major_node_id) || !(d.unlisted ?? []).includes("major"),
       admission_year: Number(e.admission_year), graduation_year: Number(e.graduation_year),
       current_role_node_id: type === "PROFESSIONAL" ? current.role_node_id || null : null,
     });
@@ -259,6 +314,9 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
 
   async function resumeMember(m: MyResult) {
     setMe(m);
+    pending.member("1");
+    const pe = (m.profile.education ?? {}) as { institution_raw?: string | null; major_raw?: string | null };
+    setUnl({ kinds: m.unlisted ?? [], institution: pe.institution_raw ?? "", major: pe.major_raw ?? "" });
     const pro = m.profile.user_type === "PROFESSIONAL";
     setUserType(pro ? "PROFESSIONAL" : "STUDENT");
     if (m.intent) {
@@ -342,8 +400,8 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
     setScreen(professional ? "p_similar" : "s_intent");
   });
   const unlock = run(async () => {
-    await acq.unlock();
-    track("unlock_purchased", { insight: "PATH_DEEP_DIVE" });
+    const u = await acq.unlock();
+    if (u.unlocked) track("unlock_purchased", { insight: "PATH_DEEP_DIVE", charged: u.charged ?? null });
     setMe(await acq.me());
   });
 
@@ -351,13 +409,19 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
     s_edu: "start", p_now: "start", gate: professional ? "p_now" : "s_edu",
     s_intent: "s_result", p_first: "p_next", p_similar: "p_first",
   };
+  backRef.current = back;
+  const goBack = () => {
+    if (depth.current > 0) window.history.back(); // the popstate handler moves the screen
+    else setScreen(back[screen]!);
+  };
   const n = teaser?.base.effective_n ?? 0;
+  const note = unlistedNote(unl);
 
   return (
     <main className="app">
       <header className="top">
         {back[screen] ? (
-          <button className="link" onClick={() => setScreen(back[screen]!)} aria-label="뒤로">←</button>
+          <button className="link" onClick={goBack} aria-label="뒤로">←</button>
         ) : <a className="brand" href="/">nextpath</a>}
       </header>
       {error && <p className="error" role="alert">{error}</p>}
@@ -391,37 +455,38 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
           <h2>{professional ? "학교와 지금 하는 일을 알려주세요" : "학교와 전공을 알려주세요"}</h2>
           <Field label="학교">
             <SearchSelect ariaLabel="학교" noun="학교" placeholder="학교 검색 (예: 고려대, ㄱㄹㄷ)"
-                          items={institutions.map((i) => ({ id: i.id, label: i.name }))}
+                          items={institutions.map((i) => ({ id: i.id, label: i.name, keywords: i.aliases ?? [] }))}
                           value={edu.institution_id
                             ? { id: edu.institution_id, label: institutions.find((i) => i.id === edu.institution_id)?.name ?? "" }
                             : edu.institution_raw ? { id: null, label: edu.institution_raw } : null}
                           onChange={(v) => {
-                            setEdu({ ...edu, institution_id: v?.id ?? "", institution_raw: v && !v.id ? v.label : "" });
+                            answer({ ...edu, institution_id: v?.id ?? "", institution_raw: v && !v.id ? v.label : "" });
                             if (v && !v.id) track("school_requested", { kind: "school", name: v.label, surface: "flow" });
                           }} />
           </Field>
           <Field label="전공">
             <SearchSelect ariaLabel="전공" noun="전공" placeholder="전공 검색 (예: 경영, 컴퓨터)"
                           items={majors.map((n) => ({ id: n.node_id, label: n.label, group: n.parent_label,
-                                                      keywords: n.matched_alias ? [n.matched_alias] : [] }))}
+                                                      keywords: n.aliases ?? [] }))}
                           value={edu.major_node_id
                             ? { id: edu.major_node_id, label: majors.find((m) => m.node_id === edu.major_node_id)?.label ?? "" }
                             : edu.major_raw ? { id: null, label: edu.major_raw } : null}
                           onChange={(v) => {
-                            setEdu({ ...edu, major_node_id: v?.id ?? "", major_raw: v && !v.id ? v.label : "" });
+                            answer({ ...edu, major_node_id: v?.id ?? "", major_raw: v && !v.id ? v.label : "" });
                             if (v && !v.id) track("school_requested", { kind: "major", name: v.label, surface: "flow" });
                           }} />
           </Field>
           <div className="pair">
             <Field label="입학">
-              <YearSelect value={edu.admission_year} onChange={(v) => setEdu({ ...edu, admission_year: v })} />
+              <YearSelect value={edu.admission_year} onChange={(v) => answer({ ...edu, admission_year: v })} />
             </Field>
             <Field label="졸업 (예정)">
-              <YearSelect value={edu.graduation_year} onChange={(v) => setEdu({ ...edu, graduation_year: v })} />
+              <YearSelect value={edu.graduation_year} onChange={(v) => answer({ ...edu, graduation_year: v })} />
             </Field>
           </div>
           {professional && (
-            <JobFields job={current} roles={roles} onChange={setCurrent} labels={{ role: "지금 직무", start: "입사" }} />
+            <JobFields job={current} roles={roles} onChange={(j) => { markStarted(); setCurrent(j); }}
+                       labels={{ role: "지금 직무", start: "입사" }} />
           )}
           <p className="hint">입력한 내용은 나와 비슷한 사람을 찾는 데만 써요. 다른 사람에게 보이지 않아요.</p>
           <button className="cta" disabled={busy || !eduReady || (professional && !(current.role_node_id && current.start_year))}
@@ -433,10 +498,16 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
 
       {screen === "gate" && teaser && (
         <section className="screen">
-          {teaser.base.suppressed ? (
+          {teaser.base.suppressed || teaser.n_directions === 0 ? (
             <>
-              <h2>아직 나와 비슷한 사람이 적어요</h2>
-              <p className="sub">개인이 드러나지 않도록 {n}명 이하일 때는 결과를 만들지 않아요. 연도나 전공을 바꿔서 다시 찾아볼 수 있어요.</p>
+              <h2>{teaser.base.suppressed ? "아직 나와 비슷한 사람이 적어요" : "아직 이 조건으로 간 길 기록이 없어요"}</h2>
+              <p className="sub">
+                {teaser.base.suppressed
+                  ? "한 사람 한 사람이 드러나지 않도록, 비슷한 사람이 충분히 모이기 전에는 결과를 만들지 않아요."
+                  : "비슷한 사람은 찾았지만 첫 직장 기록이 아직 모이지 않았어요."}
+                {" "}연도나 전공을 바꿔서 다시 찾아볼 수 있어요.
+              </p>
+              {note && <p className="hint">{note}</p>}
               <button className="cta ghost" onClick={() => setScreen(professional ? "p_now" : "s_edu")}>조건 바꾸기</button>
             </>
           ) : (
@@ -446,15 +517,21 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
                 <span className="small">{professional ? "나와 같은 자리에 있었던 사람" : "나와 같은 출발점에서 시작한 사람"}</span>
                 <span className="lockbig">{n.toLocaleString()}명</span>
                 {teaser.n_directions != null && (
-                  <span className="small">이 사람들은 <b>{teaser.n_directions}가지 길</b>로 나뉘었어요</span>
+                  <span className="small">
+                    {professional
+                      ? <>지금 자리에 남거나 <b>{teaser.n_directions}가지 길</b>로 옮겼어요</>
+                      : teaser.n_directions > 1
+                        ? <>이 사람들은 <b>{teaser.n_directions}가지 길</b>로 나뉘었어요</>
+                        : <>이 사람들은 <b>한 가지 길</b>로 모였어요</>}
+                  </span>
                 )}
               </div>
-              {unlistedNote(edu) && <p className="hint">{unlistedNote(edu)}</p>}
-              {teaser.base.fallback_reason.length > 0 && !unlistedNote(edu) && (
-                <p className="hint">딱 같은 사람은 {teaser.base.exact_n}명이라, {reasonText(teaser.base.fallback_reason)}까지 넓혀서 찾았어요</p>
+              {note && <p className="hint">{note}</p>}
+              {teaser.base.fallback_reason.length > 0 && (
+                <p className="hint">{widenedText(teaser.base.exact_n, teaser.base.fallback_reason)}</p>
               )}
               <div className="blur" aria-hidden="true">
-                {[88, 64, 52, 40, 30].map((w, i) => (
+                {[88, 64, 52, 40, 30].slice(0, Math.max(2, Math.min(5, (teaser.n_directions ?? 4) + 1))).map((w, i) => (
                   <div key={i} className="bar"><span>●●●●</span><span className="track"><i className={i ? "m" : ""} style={{ width: `${w}%` }} /></span><b>●●%</b></div>
                 ))}
               </div>
@@ -465,6 +542,9 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
                 입력한 학교·경력 정보를 HMM 계정과 연결해 결과 제공과 익명 통계에 쓰는 것에 동의해요.
               </label>
               <button className="cta kakao" disabled={!consent || busy} onClick={kakao}>카카오로 3초 만에 보기</button>
+              {app && app !== "kakaotalk" && (
+                <p className="hint">로그인이 잘 안 되면 화면 위 ⋯ 메뉴에서 ‘외부 브라우저로 열기’를 눌러 주세요. 입력한 내용은 그대로 이어져요.</p>
+              )}
               {DEV_LOGIN && <button className="cta ghost" disabled={!consent || busy} onClick={devLogin}>개발용 로그인</button>}
             </>
           )}
@@ -473,9 +553,8 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
 
       {(screen === "s_result" || screen === "p_next") && base && (
         <section className="screen">
-          <ResultCount r={base.result}
+          <ResultCount r={base.result} note={note}
                        caption={professional ? "나와 같은 자리에 있었던 사람들이 고른 다음" : "나와 같은 출발점의 사람들이 처음 간 길"} />
-          {unlistedNote(edu) && <p className="hint">{unlistedNote(edu)}</p>}
           <Bars r={base.result} professional={professional} />
           {conclusion(base.result, professional) && <p className="conclusion">{conclusion(base.result, professional)}</p>}
           <Share r={base.result} professional={professional} />
@@ -516,7 +595,10 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
           <IntentChips middleRoles={middleRoles} top={(similar && !similar.result.suppressed ? similar : base)?.result}
                        value={intent} onChange={setIntent} />
           <button className="option muted" aria-pressed={intent === "UNDECIDED"}
-                  onClick={() => setIntent("UNDECIDED")}>아직 모르겠어요 (괜찮아요, 대학생 10명 중 7명이 그래요)</button>
+                  onClick={() => setIntent("UNDECIDED")}>
+            {professional ? "아직 모르겠어요 (괜찮아요, 많이 간 길부터 보여드릴게요)"
+              : "아직 모르겠어요 (괜찮아요, 대학생 10명 중 7명이 그래요)"}
+          </button>
           <button className="cta" disabled={busy || !intent} onClick={submitIntent}>
             {intent && intent !== "UNDECIDED"
               ? `${ro(middleRoles.find((r) => r.node_id === intent)?.label ?? "")} 간 길 보기`
@@ -526,7 +608,7 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
       )}
 
       {screen === "me" && me && <MyScreen me={me} busy={busy} onUnlock={unlock} onChangeIntent={changeIntent} />}
-      {simulation && RESULT_SCREENS.has(screen) && (
+      {simulation && (RESULT_SCREENS.has(screen) || screen === "gate") && (
         <p className="beta-note">베타 · 실제 기록이 모이기 전까지 결과는 예시 데이터로 계산돼요</p>
       )}
     </main>
@@ -611,15 +693,14 @@ function JobFields(props: {
   );
 }
 
-function ResultCount({ r, caption }: { r: QueryResult; caption: string }) {
+function ResultCount({ r, caption, note }: { r: QueryResult; caption: string; note?: string | null }) {
+  const told = r.exact_n >= (r.min_cell_n ?? 5) ? r.exact_n : null; // small exact groups untold
   return (
     <div className="count">
-      {r.fallback_reason.length > 0 && <span className="badge">{reasonText(r.fallback_reason)}</span>}
-      <div><span className="big">{r.effective_n.toLocaleString()}</span><b> 명</b></div>
+      {!r.suppressed && <div><span className="big">{r.effective_n.toLocaleString()}</span><b> 명</b></div>}
       <p className="sub">{caption}</p>
-      {r.fallback_reason.length > 0 && (
-        <p className="hint">딱 같은 사람은 {r.exact_n}명이라, {reasonText(r.fallback_reason)}까지 넓혀서 봤어요</p>
-      )}
+      {note && <p className="hint">{note}</p>}
+      {r.fallback_reason.length > 0 && <p className="hint">{widenedText(told, r.fallback_reason)}</p>}
     </div>
   );
 }
@@ -627,6 +708,9 @@ function ResultCount({ r, caption }: { r: QueryResult; caption: string }) {
 function Bars({ r, professional }: { r: QueryResult; professional: boolean }) {
   if (r.suppressed) {
     return <p className="empty">아직 비교할 수 있는 사람이 {r.threshold}명보다 적어요. 숫자는 보여드리지 않아요.</p>;
+  }
+  if (r.cells.length === 0) {
+    return <p className="empty">비슷한 사람은 찾았지만, 간 길 기록이 아직 모이지 않았어요.</p>;
   }
   const top = r.cells.slice(0, 5);
   const max = Math.max(...top.map((c) => c.share), 0.01);
@@ -696,7 +780,7 @@ function MyScreen({ me, busy, onUnlock, onChangeIntent }: {
     <section className="screen">
       <div className="row-between">
         <span className="badge">입력하신 내용을 이어왔어요</span>
-        <span className="tube">{me.balance_tube}</span>
+        <span className="tube" aria-label={`보유 튜브 ${me.balance_tube}개`}>{me.balance_tube} 튜브</span>
       </div>
       {!p || p.suppressed ? (
         <>

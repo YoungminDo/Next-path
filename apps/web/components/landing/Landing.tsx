@@ -38,7 +38,7 @@ export default function Landing({ options }: { options: Options }) {
         <div className="hero-copy">
           <p className="eyebrow">학교 · 전공 · 학번만 고르면</p>
           <h1>나와 같은 자리에 있었던 사람들은 <em>어디로</em> 갔을까?</h1>
-          <p className="lead">같은 학교, 같은 전공, 비슷한 시기에 시작한 사람들이 실제로 간 길을 보여드려요. 답답했던 내 방향, 이 중에 있을지도 몰라요.</p>
+          <p className="lead">같은 학교, 같은 전공, 비슷한 시기에 시작한 사람들이 간 길을 보여드려요. 답답했던 내 방향, 이 중에 있을지도 몰라요.</p>
           <ul className="reasons">
             <li>추천이 아니라, 같은 출발점의 사람들이 간 길이에요</li>
             <li>로그인은 카카오로 3초, 무료예요</li>

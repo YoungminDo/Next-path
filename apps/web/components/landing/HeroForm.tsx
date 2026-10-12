@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 
 import SearchSelect, { type Picked } from "@/components/SearchSelect";
-import { acq, type Node } from "@/lib/api";
+import { acq, type Institution, type Node } from "@/lib/api";
 import { track } from "@/lib/track";
 
 /* HeyDealer pattern: the answer starts inside the hero. Four answers, one button, and the flow
@@ -13,7 +13,7 @@ import { track } from "@/lib/track";
 const THIS_YEAR = new Date().getFullYear();
 const YEARS = Array.from({ length: 22 }, (_, i) => THIS_YEAR + 4 - i);
 
-export default function HeroForm(props: { institutions: { id: string; name: string }[]; majors: Node[] }) {
+export default function HeroForm(props: { institutions: Institution[]; majors: Node[] }) {
   const [institutions, setInstitutions] = useState(props.institutions);
   const [majors, setMajors] = useState<Node[]>(props.majors);
   const [inst, setInst] = useState<Picked | null>(null);
@@ -65,6 +65,12 @@ export default function HeroForm(props: { institutions: { id: string; name: stri
     params.set("grad", years.grad);
   }
   const href = `/start?${params.toString()}`;
+  // "지금 일하고 있어요" keeps whatever was already answered here.
+  const pro = new URLSearchParams({ type: "pro" });
+  if (inst) pro.set(inst.id ? "inst" : "inst_raw", inst.id ?? inst.label);
+  if (major) pro.set(major.id ? "major" : "major_raw", major.id ?? major.label);
+  if (years.adm) pro.set("adm", years.adm);
+  if (years.grad) pro.set("grad", years.grad);
 
   return (
     <form id="hero-form" className="heroform" onSubmit={(e) => {
@@ -78,11 +84,11 @@ export default function HeroForm(props: { institutions: { id: string; name: stri
     }}>
       <p className="heroform-title">무료로 내 진로 지도 받기</p>
       <SearchSelect inputId="hero-inst" ariaLabel="학교" noun="학교" placeholder="학교 검색 (예: 고려대, ㄱㄹㄷ)"
-                    items={institutions.map((i) => ({ id: i.id, label: i.name }))}
+                    items={institutions.map((i) => ({ id: i.id, label: i.name, keywords: i.aliases ?? [] }))}
                     value={inst} onChange={(v) => picked("school", v)} invalid={tried && !inst} />
       <SearchSelect inputId="hero-major" ariaLabel="전공" noun="전공" placeholder="전공 검색 (예: 경영, 컴퓨터)"
                     items={majors.map((n) => ({ id: n.node_id, label: n.label, group: n.parent_label,
-                                                keywords: n.matched_alias ? [n.matched_alias] : [] }))}
+                                                keywords: n.aliases ?? [] }))}
                     value={major} onChange={(v) => picked("major", v)} invalid={tried && !major} />
       <div className="pair">
         <select id="hero-adm" aria-label="입학 연도" value={years.adm} aria-invalid={tried && !years.adm}
@@ -96,6 +102,9 @@ export default function HeroForm(props: { institutions: { id: string; name: stri
           {YEARS.map((y) => <option key={y} value={y}>{y}</option>)}
         </select>
       </div>
+      {status === "error" && <p className="heroform-warn" role="status">서버에 연결하지 못했어요. 잠시 후 새로고침해 주세요.</p>}
+      {status === "empty" && <p className="heroform-warn" role="status">학교·전공 데이터를 준비하고 있어요. 잠시 후 다시 와주세요.</p>}
+      <button className="cta" type="submit">나와 같은 자리였던 사람들 보기</button>
       {tried && !ready && (
         <p className="heroform-warn" role="alert">
           {missing.length
@@ -103,11 +112,8 @@ export default function HeroForm(props: { institutions: { id: string; name: stri
             : "졸업 연도가 입학 연도보다 빨라요"}
         </p>
       )}
-      {status === "error" && <p className="heroform-warn" role="status">서버에 연결하지 못했어요. 잠시 후 새로고침해 주세요.</p>}
-      {status === "empty" && <p className="heroform-warn" role="status">학교·전공 데이터를 준비하고 있어요. 잠시 후 다시 와주세요.</p>}
-      <button className="cta" type="submit">나와 같은 자리였던 사람들 보기</button>
       <p className="heroform-note">카카오로 3초 · 무료</p>
-      <a className="heroform-alt" href="/start?type=pro">지금 일하고 있어요 →</a>
+      <a className="heroform-alt" href={`/start?${pro.toString()}`}>지금 일하고 있어요 →</a>
     </form>
   );
 }

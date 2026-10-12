@@ -10,6 +10,22 @@ export type FunnelEvent =
   | "intent_selected" | "unlock_purchased" | "school_requested";
 
 const TOUCH = "hellomyme.touch";
+
+/** The app whose built-in browser shows the page (a DM link opens inside Instagram), or null. */
+export function inAppBrowser(): string | null {
+  try {
+    const ua = navigator.userAgent;
+    if (/Instagram/i.test(ua)) return "instagram";
+    if (/Barcelona/i.test(ua)) return "threads";
+    if (/FBAN|FBAV|FB_IAB|FBIOS/i.test(ua)) return "facebook";
+    if (/KAKAOTALK/i.test(ua)) return "kakaotalk";
+    if (/NAVER\(inapp|whale\/[\d.]+ .*inapp/i.test(ua)) return "naver";
+    if (/ Line\//i.test(ua)) return "line";
+    return null;
+  } catch {
+    return null;
+  }
+}
 const INTERNAL = "hellomyme.internal";
 
 function store(key: string, value?: string): string | null {
@@ -38,6 +54,9 @@ function attribution(): Record<string, string> {
       const host = new URL(document.referrer).host;
       if (host && host !== window.location.host) touch.referrer = host;
     }
+    // In-app browsers often send no referrer: the app itself tells where the visit came from.
+    const app = inAppBrowser();
+    if (app) touch.in_app = app;
     store(TOUCH, JSON.stringify(touch));
     return touch;
   } catch {

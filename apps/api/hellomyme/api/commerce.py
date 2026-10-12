@@ -197,7 +197,8 @@ def track(body: AnalyticsEvent, conn: Conn, account_id: OptionalAccount):
         """INSERT INTO analytics.event (event_name, account_id, anonymous_session_id, properties,
                occurred_at)
            VALUES (:n, :a, :s, CAST(:p AS jsonb), :t)"""),
-        {"n": body.event_name, "a": account_id, "s": body.anonymous_session_id,
+        # Funnel events stay anonymous (docs/10): the account is never attached to them.
+        {"n": body.event_name, "a": None, "s": body.anonymous_session_id,
          "p": json.dumps(body.properties, default=str),
          "t": body.occurred_at})
     return {"accepted": True}

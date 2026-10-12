@@ -69,13 +69,13 @@ class DraftRequest(BaseModel):
 
 @router.post("/draft")
 def save_draft(body: DraftRequest, conn: Conn, settings: AppSettings, anon: AnonSession):
-    payload = body.payload.stamp_intents(datetime.now(UTC))
+    payload = _run(lambda: acq.resolve_names(conn, body.payload.stamp_intents(datetime.now(UTC))))
     try:
         saved = drafts.save_draft(conn, anon, payload, settings.anonymous_draft_ttl_hours,
                                   body.draft_id)
     except drafts.DraftNotFound as exc:
         raise HTTPException(404, "draft not found, expired or already claimed") from exc
-    return {**saved, "payload": payload.model_dump(mode="json")}
+    return {**saved, "payload": payload.model_dump(mode="json"), "unlisted": acq.unlisted(payload)}
 
 
 class ResultRequest(BaseModel):
@@ -94,7 +94,8 @@ def draft_result(draft_id: str, body: ResultRequest, conn: Conn, settings: AppSe
     payload = acq.AcquisitionPayload.model_validate(row.payload_json)
     out = _run(lambda: acq.result(conn, payload, body.step,
                                   layers=settings.career_map_data_layers, as_of=as_of))
-    return {**out, "data_basis": _basis(settings), "locked": True}
+    return {**out, "data_basis": _basis(settings), "locked": True,
+            "unlisted": acq.unlisted(payload)}
 
 
 # --- after login ----------------------------------------------------------------------------
@@ -132,6 +133,7 @@ def my_result(conn: Conn, settings: AppSettings, account_id: Account, as_of: AsO
                       "content": deep if unlocked else None},
         "balance_tube": ledger.balance(conn, account_id),
         "data_basis": _basis(settings),
+        "unlisted": acq.unlisted(payload),
     }
 
 
@@ -166,7 +168,7 @@ def my_step(step: MemberStep, conn: Conn, settings: AppSettings, account_id: Acc
     person_id, payload = _member(conn, account_id, as_of)
     out = _run(lambda: acq.result(conn, payload, step, layers=settings.career_map_data_layers,
                                   as_of=as_of, exclude=(person_id,)))
-    return {**out, "data_basis": _basis(settings)}
+    return {**out, "data_basis": _basis(settings), "unlisted": acq.unlisted(payload)}
 
 
 class JobRequest(BaseModel):

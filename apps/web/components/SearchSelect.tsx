@@ -20,13 +20,33 @@ function initials(s: string): string {
 }
 
 const norm = (s: string) => s.toLowerCase().replace(/[\s·・,./()\[\]_&+-]+/g, "");
+// How people write a name that the list keeps shorter: "경영학" + 과 / 학과 / 학부 / 전공.
+const SUFFIXES = ["과", "학과", "학부", "전공", "계열"];
 
-function matches(item: Item, q: string): boolean {
+/** Same entry, written as the list writes it, as one of its aliases, or the list name plus a
+ * usual suffix ("경영학과" for 경영학). */
+function same(item: Item, q: string): boolean {
   const query = norm(q);
-  if (!query) return true;
+  if (!query) return false;
+  return [item.label, ...(item.keywords ?? [])].map(norm).some(
+    (n) => n === query || (query.startsWith(n) && SUFFIXES.includes(query.slice(n.length))));
+}
+
+/** Lower is better; null = no match. Exact names first, then names that start with the query,
+ * then names that contain it, then aliases, then the group or initial consonants. */
+function rank(item: Item, q: string): number | null {
+  const query = norm(q);
+  if (!query) return 5;
+  if (same(item, q)) return 0;
+  const label = norm(item.label);
+  if (label.startsWith(query)) return 1;
+  if (label.includes(query)) return 2;
+  if ((item.keywords ?? []).map(norm).some((k) => k.includes(query) || (query.startsWith(k) &&
+      SUFFIXES.includes(query.slice(k.length))))) return 3;
   const hay = [item.label, item.group ?? "", ...(item.keywords ?? [])].map(norm);
-  if (hay.some((h) => h.includes(query))) return true;
-  return [...query].every((c) => CHO.includes(c)) && hay.some((h) => initials(h).includes(query));
+  if (hay.some((h) => h.includes(query))) return 4;
+  if ([...query].every((c) => CHO.includes(c)) && hay.some((h) => initials(h).includes(query))) return 4;
+  return null;
 }
 
 function optionBody(o: Item | { id: null; label: string }, noun: string) {
@@ -64,9 +84,14 @@ export default function SearchSelect(props: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value?.id, value?.label]);
 
-  const shown = useMemo(() => items.filter((i) => matches(i, query)).slice(0, 8), [items, query]);
+  const shown = useMemo(() => items
+    .map((item, i) => ({ item, i, r: rank(item, query) }))
+    .filter((x) => x.r !== null)
+    .sort((a, b) => (a.r! - b.r!) || (a.i - b.i))
+    .slice(0, 8)
+    .map((x) => x.item), [items, query]);
   const typed = query.trim();
-  const exact = items.find((i) => norm(i.label) === norm(typed));
+  const exact = items.find((i) => same(i, typed));
   // Only initial consonants ("ㄱㄹ") is a search, never a name to keep.
   const jamoOnly = [...norm(typed)].every((c) => CHO.includes(c));
   const options: (Item | { id: null; label: string })[] = [
@@ -88,7 +113,7 @@ export default function SearchSelect(props: {
       return;
     }
     if (value && norm(value.label) === norm(typed)) return;
-    const byName = items.filter((i) => norm(i.label).includes(norm(typed)));
+    const byName = items.filter((i) => [i.label, ...(i.keywords ?? [])].some((n) => norm(n).includes(norm(typed))));
     if (exact) pick(exact);
     else if (byName.length === 1) pick(byName[0]);
     else if (shown.length === 1) pick(shown[0]);

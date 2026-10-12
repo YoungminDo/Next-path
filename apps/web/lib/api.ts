@@ -33,7 +33,8 @@ export class ApiError extends Error {
   }
 }
 
-const KEYS = { anon: "hellomyme.anon", draft: "hellomyme.draft", consent: "hellomyme.consent" };
+const KEYS = { anon: "hellomyme.anon", draft: "hellomyme.draft", consent: "hellomyme.consent",
+  member: "hellomyme.member" };
 
 function local(key: string, value?: string | null): string | null {
   try {
@@ -52,6 +53,8 @@ export function anonymousSession(): string {
 export const pending = {
   draftId: (v?: string | null) => local(KEYS.draft, v),
   consentVersion: (v?: string | null) => local(KEYS.consent, v),
+  /** Set after a login on this browser: only then is the member's result looked up on load. */
+  member: (v?: string | null) => local(KEYS.member, v),
 };
 
 async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -70,13 +73,16 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
 // --- acquisition (v1.4) -------------------------------------------------------------------
 
 export type Node = { node_id: string; code: string; label: string; depth: number;
-  parent_label: string | null; matched_alias: string | null };
+  parent_label: string | null; matched_alias: string | null; aliases?: string[] };
+export type Institution = { id: string; name: string; region?: string | null; aliases?: string[] };
+/** Answers that were typed names the list does not know: that dimension was left out. */
+export type Unlisted = ("institution" | "major")[];
 export type Cell = { key: string; code: string; label: string | null; depth: number | null;
   n: number; share: number };
 export type QueryResult = {
   exact_n: number; effective_n: number; fallback_reason: string[]; suppressed: boolean;
   cells: Cell[]; other: { n: number | null; share: number | null; suppressed?: boolean } | null;
-  threshold: number; time_window: { start: string | null; end: string };
+  threshold: number; min_cell_n?: number; time_window: { start: string | null; end: string };
 };
 export type PathSummary = {
   target: { node_id: string; label: string }; from: { node_id: string; label: string } | null;
@@ -90,31 +96,34 @@ export type IntentResult = {
   base: { effective_n: number; fallback_reason: string[]; suppressed: boolean };
   paths: PathSummary | null; data_basis: "SIMULATION" | "OBSERVED";
 };
-export type StepResult = { step: string; result: QueryResult; data_basis: "SIMULATION" | "OBSERVED" };
+export type StepResult = { step: string; result: QueryResult; data_basis: "SIMULATION" | "OBSERVED";
+  unlisted?: Unlisted };
 export type DeepDiveItem = { key: string; label: string | null; n: number };
 export type MyResult = {
   profile: Record<string, unknown>; intent: { target_kind: string; target_node_id: string | null } | null;
   base: QueryResult; intent_paths: IntentResult;
   deep_dive: { unlocked: boolean; available: boolean; cost_tube: number | null;
     content: { company_size: DeepDiveItem[]; industry: DeepDiveItem[] } | null };
-  balance_tube: number; data_basis: "SIMULATION" | "OBSERVED";
+  balance_tube: number; data_basis: "SIMULATION" | "OBSERVED"; unlisted?: Unlisted;
 };
 export type AcqStep = "first_roles" | "next_roles" | "similar_paths";
 export type TeaserResult = {
   step: "teaser"; n_directions: number | null; data_basis: "SIMULATION" | "OBSERVED";
-  base: { effective_n: number; exact_n: number; fallback_reason: string[]; suppressed: boolean };
+  // Sizes are withheld (null) when the group is too small to describe.
+  base: { effective_n: number | null; exact_n: number | null; fallback_reason: string[]; suppressed: boolean };
+  unlisted?: Unlisted;
 };
 export type Intent = { surface: "STUDENT_FIRST_ROLE" | "PROFESSIONAL_NEXT_ROLE";
   target_kind: "ROLE" | "UNDECIDED"; target_node_id: string | null };
 
 export const acq = {
-  institutions: () => call<{ id: string; name: string; region: string | null }[]>("/acq/options/institutions"),
+  institutions: () => call<Institution[]>("/acq/options/institutions"),
   majors: (depth?: number) => call<Node[]>(`/acq/options/majors${depth ? `?depth=${depth}` : ""}`),
   roles: (depth?: number) => call<Node[]>(`/acq/options/roles${depth ? `?depth=${depth}` : ""}`),
   organizations: (q: string) =>
     call<{ id: string; name: string }[]>(`/acq/options/organizations?q=${encodeURIComponent(q)}`),
   saveDraft: (payload: unknown, draftId?: string) =>
-    call<{ draft_id: string }>("/acq/draft", {
+    call<{ draft_id: string; unlisted?: Unlisted }>("/acq/draft", {
       method: "POST",
       body: JSON.stringify({ draft_id: draftId ?? null, payload }),
     }),

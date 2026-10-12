@@ -8,8 +8,11 @@
    - 외부 점검 결과, 카카오 로그인 화면으로 넘어가는 단계까지는 정상이다.
    - 로그인 완료는 사람만 확인할 수 있다.
 2. 팀원 브라우저는 `https://nextpath.da-sh.io/?internal=1` 로 한 번 연다. 그 브라우저의 이벤트는 통계에서 빠진다(`?internal=0` 으로 해제).
-3. 채널별 링크에 utm 을 붙인다. 예: `https://nextpath.da-sh.io/?utm_source=insta&utm_campaign=1012`
-   (첫 방문 채널이 로그인 뒤까지 이어져 기록된다).
+3. 채널별 링크에 utm 을 붙인다. 예: `https://nextpath.da-sh.io/?utm_source=instagram&utm_medium=dm&utm_campaign=reels1012`
+   (첫 방문 채널이 로그인 뒤까지 이어져 기록된다). utm 이 없어도 인앱 브라우저(instagram, threads,
+   facebook, kakaotalk, naver, line)는 `in_app` 으로 따로 남는다. 인스타 앱 안에서는 로그인 화면에
+   "외부 브라우저로 열기" 안내가 뜬다.
+4. 링크 미리보기: `og.png`(1200×630)와 제목·설명이 DM·게시물 카드로 보인다.
 
 ## 무엇을 기록하나 (`analytics.event`, 익명 세션 단위, 이름·연락처 없음)
 | 이벤트 | 시점 |
@@ -24,6 +27,7 @@
 | `intent_selected` · `unlock_purchased` | 궁금한 길 선택 · 깊은 분석 열기 |
 
 ## 숫자 보는 법
+- 시각은 서버가 받은 시각(`received_at`) 기준이다. 사용자 기기의 시계가 틀려도 날짜가 밀리지 않는다.
 - **Supabase SQL Editor**에 `scripts/funnel.sql`을 붙여넣고 실행한다.
   - 결과: 퍼널, 채널별, 결과 화면 체류 시간, 입력된 학교·학과, 학교×학과 조합, 목록 밖 입력.
 - 사람 수는 단계별 고유 세션 수다. 각 단계를 따로 세기 때문에 직접 /start 로 들어온 사람은 랜딩을 거치지 않는다.

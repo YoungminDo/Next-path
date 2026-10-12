@@ -1,13 +1,13 @@
 import "server-only";
 
-import type { Node } from "@/lib/api";
+import type { Institution, Node } from "@/lib/api";
 import { serverConfig } from "@/lib/server/config";
 
 /** Pick lists rendered into the page HTML, so the dropdowns are filled on first paint.
  * Refreshed every 10 minutes (ISR). If the API cannot be reached the lists are empty and the
  * browser fetches them itself. */
 export type Options = {
-  institutions: { id: string; name: string; region: string | null }[];
+  institutions: Institution[];
   majors: Node[];
   roles: Node[];
   middleRoles: Node[];

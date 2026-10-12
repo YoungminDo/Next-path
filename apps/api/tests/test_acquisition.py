@@ -158,10 +158,11 @@ def test_invalid_input_is_rejected(client, ids):  # noqa: F811
     h = anon()
     bad = {**student(ids), "education": {**student(ids)["education"], "admission_year": 2021}}
     assert client.post("/acq/draft", headers=h, json={"payload": bad}).status_code == 422
-    draft = save(client, h, {**student(ids), "education": {
-        **student(ids)["education"], "major_node_id": str(uuid.uuid4())}})
-    r = client.post(f"/acq/draft/{draft}/result", headers=h, json={"step": "teaser"})
+    # An id that is not in the list is refused when the draft is saved.
+    r = client.post("/acq/draft", headers=h, json={"payload": {**student(ids), "education": {
+        **student(ids)["education"], "major_node_id": str(uuid.uuid4())}}})
     assert r.status_code == 422
+    draft = save(client, h, student(ids))
     other = anon()
     assert client.post(f"/acq/draft/{draft}/result", headers=other,
                        json={"step": "teaser"}).status_code == 404
@@ -198,3 +199,46 @@ def test_unlisted_school_or_major_is_typed_in_and_still_answered(client, engine,
     neither = {"user_type": "STUDENT", "education": {"admission_year": 2016, "graduation_year": 2020}}
     r = client.post("/acq/draft", headers=anon(), json={"draft_id": None, "payload": neither})
     assert r.status_code == 422
+
+
+def test_typed_names_the_list_knows_are_matched(client, ids):  # noqa: F811
+    """'경영학과' is how people write the major whose list name is 경영학 (an alias): it must
+    count as the listed major, not as an unknown one that drops the major from the cohort."""
+    h = anon()
+    r = client.post("/acq/draft", headers=h, json={"draft_id": None, "payload": {
+        "user_type": "STUDENT", "education": {
+            "institution_id": ids["inst"], "major_raw": "경영학과",
+            "admission_year": 2016, "graduation_year": 2020}}})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["payload"]["education"]["major_node_id"] == ids["M3"]
+    assert body["payload"]["education"]["major_raw"] == "경영학과"  # typed text kept
+    assert body["unlisted"] == []
+    t = step(client, h, body["draft_id"], "teaser")
+    listed = step(client, h, save(client, h, student(ids)), "teaser")  # picked from the list
+    assert t["base"] == listed["base"] and t["unlisted"] == []
+
+
+def test_bad_ids_are_refused_not_500(client, ids):  # noqa: F811
+    for edu in ({"institution_id": "x", "major_node_id": ids["M3"]},
+                {"institution_id": "00000000-0000-0000-0000-000000000000", "major_node_id": ids["M3"]},
+                {"institution_id": ids["inst"], "major_node_id": "", "major_raw": " "}):
+        r = client.post("/acq/draft", headers=anon(), json={"draft_id": None, "payload": {
+            "user_type": "STUDENT", "education": {**edu, "admission_year": 2016,
+                                                  "graduation_year": 2020}}})
+        assert r.status_code == 422, (edu, r.status_code, r.text)
+
+
+def test_unlock_key_unchanged_for_payloads_without_typed_school(ids):  # noqa: F811
+    """Entitlements bought before typed names existed must still match (no second charge)."""
+    import hashlib
+    import json
+
+    from hellomyme.domain.acquisition import AcquisitionPayload, insight_key
+    p = AcquisitionPayload.model_validate(student(ids))
+    old_basis = {"schema_version": "acq_v1", "user_type": "STUDENT", "education": {
+        "institution_id": ids["inst"], "major_node_id": ids["M3"], "major_raw": None,
+        "admission_year": 2016, "graduation_year": 2020}, "current_job": None, "first_job": None,
+        "first_job_is_current": False, "gender_code": None}
+    old = hashlib.sha256(json.dumps({"p": old_basis, "t": "T"}, sort_keys=True).encode()).hexdigest()
+    assert insight_key(p, "T") == old

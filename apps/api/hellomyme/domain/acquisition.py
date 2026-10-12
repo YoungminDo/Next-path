@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import statistics
 from collections import Counter, defaultdict
 from datetime import UTC, date, datetime
@@ -39,6 +40,9 @@ PATH_EVENT_EXCLUDED = ("STUDY", "MILITARY", "CAREER_BREAK")
 DISCLOSED_GENDERS = ("MALE", "FEMALE", "OTHER")
 
 
+UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+
+
 class AcqEducation(BaseModel):
     """A school or major that is not in the pick list comes as typed text (``*_raw`` without an
     id): the cohort then leaves that dimension out, and the name is kept and queued for
@@ -57,6 +61,11 @@ class AcqEducation(BaseModel):
         for raw in ("institution_raw", "major_raw"):
             if getattr(self, raw) is not None:
                 setattr(self, raw, getattr(self, raw).strip() or None)
+        for ref in ("institution_id", "major_node_id"):
+            value = (getattr(self, ref) or "").strip() or None
+            if value is not None and not UUID_RE.match(value):
+                raise ValueError(f"{ref} is not an id")
+            setattr(self, ref, value)
         if not (self.institution_id or self.institution_raw):
             raise ValueError("institution_id or institution_raw is required")
         if not (self.major_node_id or self.major_raw):
@@ -123,8 +132,11 @@ def is_acquisition_payload(payload: dict) -> bool:
 
 def institutions(conn: Connection) -> list[dict]:
     return [dict(r._mapping) for r in conn.execute(text(
-        "SELECT institution_id::text AS id, name, region FROM institution WHERE is_active "
-        "ORDER BY name"))]
+        """SELECT i.institution_id::text AS id, i.name, i.region,
+                  (SELECT coalesce(json_agg(a.alias_text ORDER BY a.alias_text), '[]'::json)
+                     FROM institution_alias a
+                    WHERE a.institution_id = i.institution_id AND a.status = 'ACTIVE') AS aliases
+           FROM institution i WHERE i.is_active ORDER BY i.name"""))]
 
 
 def taxonomy_options(conn: Connection, taxonomy_type: str, q: str | None, depth: int | None,
@@ -137,7 +149,10 @@ def taxonomy_options(conn: Connection, taxonomy_type: str, q: str | None, depth:
                     WHERE a.taxonomy_node_id = n.taxonomy_node_id AND a.status = 'ACTIVE'
                       AND CAST(:q AS text) IS NOT NULL
                       AND a.normalized_alias LIKE '%' || normalize_label(:q) || '%'
-                    ORDER BY length(a.alias_text) LIMIT 1) AS matched_alias
+                    ORDER BY length(a.alias_text) LIMIT 1) AS matched_alias,
+                  (SELECT coalesce(json_agg(a.alias_text ORDER BY a.alias_text), '[]'::json)
+                     FROM taxonomy_alias a
+                    WHERE a.taxonomy_node_id = n.taxonomy_node_id AND a.status = 'ACTIVE') AS aliases
            FROM taxonomy t JOIN taxonomy_node n USING (taxonomy_id)
            LEFT JOIN taxonomy_node p ON p.taxonomy_node_id = n.parent_node_id
            WHERE t.taxonomy_type = :t AND t.status = 'ACTIVE' AND n.status = 'ACTIVE'
@@ -389,12 +404,56 @@ def result(conn: Connection, p: AcquisitionPayload, step: str, *, layers, as_of,
 def _summary(out: dict) -> dict:
     keep = ("effective_n", "exact_n", "fallback_reason", "effective_filters", "suppressed",
             "time_window", "cohort_policy_version", "taxonomy_version")
-    return {k: out[k] for k in keep}
+    summary = {k: out[k] for k in keep}
+    # Small-cohort suppression: a group too small to show is not described by its size either,
+    # and the exact-match count is only told once it is large enough to stand on its own.
+    if summary["suppressed"]:
+        summary["effective_n"] = None
+    if summary["exact_n"] is not None and summary["exact_n"] < out.get("min_cell_n", 0):
+        summary["exact_n"] = None
+    return summary
+
+
+def resolve_names(conn: Connection, p: AcquisitionPayload) -> AcquisitionPayload:
+    """Typed school/major names that the list already knows (by name or alias, e.g. "경영학과"
+    → 경영학) get their id, keeping the typed text; unknown ids are refused. Names nobody knows
+    stay typed: that dimension is left out of the cohort."""
+    from hellomyme.ingest.pipeline import _lookup  # shared deterministic matcher
+
+    e = p.education
+    if e is None:
+        return p
+    inst, major = e.institution_id, e.major_node_id
+    if inst and not conn.execute(text(
+            "SELECT 1 FROM institution WHERE institution_id = CAST(:i AS uuid) AND is_active"),
+            {"i": inst}).first():
+        raise QueryInvalid("unknown institution")
+    if major and major not in load_taxonomy(conn, "MAJOR").nodes:
+        raise QueryInvalid("unknown major")
+    inst = inst or _lookup(conn, "INSTITUTION", e.institution_raw)
+    major = major or _lookup(conn, "MAJOR", e.major_raw)
+    if (inst, major) == (e.institution_id, e.major_node_id):
+        return p
+    return p.model_copy(update={"education": e.model_copy(
+        update={"institution_id": inst, "major_node_id": major})})
+
+
+def unlisted(p: AcquisitionPayload) -> list[str]:
+    """Which answers were typed names the list does not know (said next to the result)."""
+    e = p.education
+    if e is None:
+        return []
+    return [k for k, ref, raw in (("institution", e.institution_id, e.institution_raw),
+                                  ("major", e.major_node_id, e.major_raw)) if raw and not ref]
 
 
 def insight_key(p: AcquisitionPayload, target_node: str | None) -> str:
     """Entitlement key: the cohort inputs plus the target, independent of wording/order."""
     basis = p.model_dump(mode="json", exclude={"intents"})
+    # Keep keys of payloads from before typed school names existed unchanged (an unlock bought
+    # then must stay unlocked and never be charged again).
+    if basis.get("education") and basis["education"].get("institution_raw") is None:
+        basis["education"].pop("institution_raw", None)
     return hashlib.sha256(json.dumps({"p": basis, "t": target_node}, sort_keys=True)
                           .encode()).hexdigest()
 
