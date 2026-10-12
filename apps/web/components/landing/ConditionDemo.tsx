@@ -78,7 +78,7 @@ export default function ConditionDemo() {
       </div>
 
       <div className="demo-phone" aria-live="polite">
-        <span className="badge sim">예시 화면 · 실제 숫자 아님</span>
+        <span className="badge">화면 예시</span>
         <span className="badge">{d.reasons.join(" · ")}</span>
         <div><span className="big">{d.n}</span><b> 명</b></div>
         <p className="sub">나와 같은 출발점의 사람들이 처음 간 길</p>

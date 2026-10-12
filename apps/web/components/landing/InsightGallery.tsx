@@ -64,7 +64,7 @@ export default function InsightGallery() {
                     className={n === active ? "dot on" : "dot"} onClick={() => { setActive(n); setPaused(true); }} />
           ))}
         </div>
-        <p className="sub">아래 숫자는 예시예요. 내 학교 · 전공 · 학번을 넣으면 내 조건으로 다시 계산돼요.</p>
+        <p className="sub">내 학교 · 전공 · 학번을 넣으면 이런 그래프가 내 조건으로 계산돼요.</p>
       </div>
       <div className="ggrid" ref={strip} onPointerDown={() => setPaused(true)}
            onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)}>
@@ -76,7 +76,7 @@ export default function InsightGallery() {
             </header>
             <Chart kind={s.key} />
             <p className="takeaway">{s.takeaway}</p>
-            <footer><span>예시 데이터</span><a href="#hero-form">내 조건으로 보기 →</a></footer>
+            <footer><span>화면 예시</span><a href="#hero-form">내 조건으로 보기 →</a></footer>
           </article>
         ))}
       </div>

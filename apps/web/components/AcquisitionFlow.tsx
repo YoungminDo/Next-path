@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { Options } from "@/lib/server/options";
 import {
@@ -15,6 +15,8 @@ import {
   type StepResult,
   type TeaserResult,
 } from "@/lib/api";
+import SearchSelect, { type Picked } from "@/components/SearchSelect";
+import { track } from "@/lib/track";
 
 /* Order (product decision): input -> teaser (how many people, how many directions) -> login ->
    every distribution, intent and path. The server enforces the same gate: before login it only
@@ -25,6 +27,7 @@ type Screen =
 type UserType = "STUDENT" | "PROFESSIONAL";
 
 const DEV_LOGIN = process.env.NEXT_PUBLIC_ENABLE_DEV_LOGIN === "true";
+const RESULT_SCREENS = new Set<Screen>(["s_result", "s_intent", "p_next", "p_first", "p_similar", "me"]);
 const CONSENT_VERSION = process.env.NEXT_PUBLIC_CONSENT_POLICY_VERSION ?? "career_terms_v1";
 const THIS_YEAR = new Date().getFullYear();
 const YEARS = Array.from({ length: 30 }, (_, i) => THIS_YEAR + 4 - i);
@@ -48,7 +51,21 @@ const LOGIN_ERRORS: Record<string, string> = {
   hmm_token_rejected: "로그인이 만료됐어요. 다시 시도해 주세요.",
 };
 
-type Edu = { institution_id: string; major_node_id: string; admission_year: string; graduation_year: string };
+/** A school or major outside the pick list is kept as typed (`*_raw`, no id). */
+type Edu = { institution_id: string; institution_raw: string; major_node_id: string; major_raw: string;
+  admission_year: string; graduation_year: string };
+const EMPTY_EDU: Edu = { institution_id: "", institution_raw: "", major_node_id: "", major_raw: "",
+  admission_year: "", graduation_year: "" };
+
+/** Said wherever results are shown for a typed name: which comparison was used instead. */
+function unlistedNote(e: Edu): string | null {
+  const school = !e.institution_id && e.institution_raw;
+  const major = !e.major_node_id && e.major_raw;
+  if (school && major) return `‘${e.institution_raw}’ ‘${e.major_raw}’ 기록은 아직 모으는 중이라, 같은 학번 사람들로 찾았어요.`;
+  if (school) return `‘${e.institution_raw}’ 기록은 아직 모으는 중이라, 다른 학교의 같은 전공·같은 학번 사람들로 찾았어요.`;
+  if (major) return `‘${e.major_raw}’ 기록은 아직 모으는 중이라, 같은 학교·같은 학번 사람들로 찾았어요.`;
+  return null;
+}
 type Job = { organization_name: string; role_node_id: string; start_year: string; end_year: string };
 const emptyJob: Job = { organization_name: "", role_node_id: "", start_year: "", end_year: "" };
 
@@ -93,7 +110,7 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
   const [majors, setMajors] = useState<Node[]>(initial?.majors ?? []);
   const [roles, setRoles] = useState<Node[]>(initial?.roles ?? []);
   const [middleRoles, setMiddleRoles] = useState<Node[]>(initial?.middleRoles ?? []);
-  const [edu, setEdu] = useState<Edu>({ institution_id: "", major_node_id: "", admission_year: "", graduation_year: "" });
+  const [edu, setEdu] = useState<Edu>(EMPTY_EDU);
   const [current, setCurrent] = useState<Job>(emptyJob);
   const [first, setFirst] = useState<Job>(emptyJob);
   const [firstIsCurrent, setFirstIsCurrent] = useState(false);
@@ -109,6 +126,31 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
 
   const professional = userType === "PROFESSIONAL";
   const simulation = (me?.data_basis ?? base?.data_basis ?? teaser?.data_basis) === "SIMULATION";
+
+  // Funnel: which result steps people reach and how long they stay on each (docs/10).
+  const shownAt = useRef<{ screen: Screen; at: number } | null>(null);
+  useEffect(() => {
+    const prev = shownAt.current;
+    const now = Date.now();
+    shownAt.current = { screen, at: now };
+    const seconds = prev ? Math.round((now - prev.at) / 1000) : null;
+    if (RESULT_SCREENS.has(screen)) {
+      track("result_step_viewed", { screen, user_type: userType, previous: prev?.screen ?? null,
+                                    seconds_on_previous: seconds });
+    }
+    if (screen === "s_edu" || screen === "p_now") track("career_input_started", { surface: "flow", user_type: userType });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screen]);
+  useEffect(() => {
+    const leave = () => {
+      const cur = shownAt.current;
+      if (cur && RESULT_SCREENS.has(cur.screen)) {
+        track("result_left", { screen: cur.screen, seconds: Math.round((Date.now() - cur.at) / 1000) });
+      }
+    };
+    window.addEventListener("pagehide", leave);
+    return () => window.removeEventListener("pagehide", leave);
+  }, []);
 
   const run = (fn: () => Promise<void>) => () => {
     setError(undefined);
@@ -145,10 +187,12 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
       setScreen("s_edu");
       // The landing hero passes the four answers: go straight to the teaser.
       const fromHero: Edu = {
-        institution_id: params.get("inst") ?? "", major_node_id: params.get("major") ?? "",
+        institution_id: params.get("inst") ?? "", institution_raw: params.get("inst_raw") ?? "",
+        major_node_id: params.get("major") ?? "", major_raw: params.get("major_raw") ?? "",
         admission_year: params.get("adm") ?? "", graduation_year: params.get("grad") ?? "",
       };
-      if (Object.values(fromHero).every(Boolean)) {
+      if ((fromHero.institution_id || fromHero.institution_raw) && (fromHero.major_node_id || fromHero.major_raw)
+          && fromHero.admission_year && fromHero.graduation_year) {
         setEdu(fromHero);
         run(() => toTeaser(fromHero, "STUDENT"))();
         return;
@@ -169,8 +213,10 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
     return {
       user_type: type,
       education: {
-        institution_id: e.institution_id,
-        major_node_id: e.major_node_id,
+        institution_id: e.institution_id || null,
+        institution_raw: e.institution_id ? null : e.institution_raw || null,
+        major_node_id: e.major_node_id || null,
+        major_raw: e.major_node_id ? null : e.major_raw || null,
         admission_year: Number(e.admission_year),
         graduation_year: Number(e.graduation_year),
       },
@@ -184,7 +230,21 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
   async function toTeaser(e: Edu, type: UserType) {
     const d = await acq.saveDraft(payload(e, type), draftId);
     setDraftId(d.draft_id);
-    setTeaser(await acq.teaser(d.draft_id));
+    track("career_input_completed", {
+      user_type: type,
+      institution_id: e.institution_id || null,
+      institution_name: institutions.find((i) => i.id === e.institution_id)?.name ?? (e.institution_raw || null),
+      institution_listed: Boolean(e.institution_id),
+      major_node_id: e.major_node_id || null,
+      major_label: majors.find((m) => m.node_id === e.major_node_id)?.label ?? (e.major_raw || null),
+      major_listed: Boolean(e.major_node_id),
+      admission_year: Number(e.admission_year), graduation_year: Number(e.graduation_year),
+      current_role_node_id: type === "PROFESSIONAL" ? current.role_node_id || null : null,
+    });
+    const t = await acq.teaser(d.draft_id);
+    setTeaser(t);
+    track("login_wall_viewed", { user_type: type, effective_n: t.base.effective_n,
+                                 suppressed: t.base.suppressed, n_directions: t.n_directions });
     setScreen("gate");
   }
 
@@ -220,6 +280,7 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
       pending.draftId(null);
       pending.consentVersion(null);
     }
+    track("signup_completed", { merged_draft: Boolean(saved && version) });
     try {
       await resumeMember(await acq.me());
     } catch (e) {
@@ -230,11 +291,13 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
     }
   }
 
-  const eduReady = edu.institution_id && edu.major_node_id && edu.admission_year && edu.graduation_year &&
+  const eduReady = (edu.institution_id || edu.institution_raw) && (edu.major_node_id || edu.major_raw) &&
+    edu.admission_year && edu.graduation_year &&
     Number(edu.admission_year) <= Number(edu.graduation_year);
 
   const submitInput = run(() => toTeaser(edu, userType));
   const kakao = () => {
+    track("login_clicked", { user_type: userType, provider: "KAKAO" });
     rememberDraft();
     window.location.href = "/auth/hmm/start";
   };
@@ -254,6 +317,8 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
     setScreen("p_similar");
   });
   const submitIntent = run(async () => {
+    track("intent_selected", { user_type: userType, target_kind: intent === "UNDECIDED" ? "UNDECIDED" : "ROLE",
+                               target_node_id: intent === "UNDECIDED" ? null : intent });
     await acq.setIntent({
       surface: professional ? "PROFESSIONAL_NEXT_ROLE" : "STUDENT_FIRST_ROLE",
       target_kind: intent === "UNDECIDED" ? "UNDECIDED" : "ROLE",
@@ -269,6 +334,7 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
   });
   const unlock = run(async () => {
     await acq.unlock();
+    track("unlock_purchased", { insight: "PATH_DEEP_DIVE" });
     setMe(await acq.me());
   });
 
@@ -284,7 +350,6 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
         {back[screen] ? (
           <button className="link" onClick={() => setScreen(back[screen]!)} aria-label="뒤로">←</button>
         ) : <a className="brand" href="/">nextpath</a>}
-        {simulation && <span className="badge sim">SIMULATION · 테스트 데이터</span>}
       </header>
       {error && <p className="error" role="alert">{error}</p>}
 
@@ -308,13 +373,27 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
           <Progress value={0.33} />
           <h2>{professional ? "학교와 지금 하는 일을 알려주세요" : "학교와 전공을 알려주세요"}</h2>
           <Field label="학교">
-            <select value={edu.institution_id} onChange={(e) => setEdu({ ...edu, institution_id: e.target.value })}>
-              <option value="">선택</option>
-              {institutions.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
-            </select>
+            <SearchSelect ariaLabel="학교" noun="학교" placeholder="학교 검색 (예: 고려대, ㄱㄹㄷ)"
+                          items={institutions.map((i) => ({ id: i.id, label: i.name }))}
+                          value={edu.institution_id
+                            ? { id: edu.institution_id, label: institutions.find((i) => i.id === edu.institution_id)?.name ?? "" }
+                            : edu.institution_raw ? { id: null, label: edu.institution_raw } : null}
+                          onChange={(v) => {
+                            setEdu({ ...edu, institution_id: v?.id ?? "", institution_raw: v && !v.id ? v.label : "" });
+                            if (v && !v.id) track("school_requested", { kind: "school", name: v.label, surface: "flow" });
+                          }} />
           </Field>
           <Field label="전공">
-            <NodeSelect nodes={majors} value={edu.major_node_id} onChange={(v) => setEdu({ ...edu, major_node_id: v })} />
+            <SearchSelect ariaLabel="전공" noun="전공" placeholder="전공 검색 (예: 경영, 컴퓨터)"
+                          items={majors.map((n) => ({ id: n.node_id, label: n.label, group: n.parent_label,
+                                                      keywords: n.matched_alias ? [n.matched_alias] : [] }))}
+                          value={edu.major_node_id
+                            ? { id: edu.major_node_id, label: majors.find((m) => m.node_id === edu.major_node_id)?.label ?? "" }
+                            : edu.major_raw ? { id: null, label: edu.major_raw } : null}
+                          onChange={(v) => {
+                            setEdu({ ...edu, major_node_id: v?.id ?? "", major_raw: v && !v.id ? v.label : "" });
+                            if (v && !v.id) track("school_requested", { kind: "major", name: v.label, surface: "flow" });
+                          }} />
           </Field>
           <div className="pair">
             <Field label="입학">
@@ -353,7 +432,8 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
                   <span className="small">이 사람들은 <b>{teaser.n_directions}가지 길</b>로 나뉘었어요</span>
                 )}
               </div>
-              {teaser.base.fallback_reason.length > 0 && (
+              {unlistedNote(edu) && <p className="hint">{unlistedNote(edu)}</p>}
+              {teaser.base.fallback_reason.length > 0 && !unlistedNote(edu) && (
                 <p className="hint">딱 같은 사람은 {teaser.base.exact_n}명이라, {reasonText(teaser.base.fallback_reason)}까지 넓혀서 찾았어요</p>
               )}
               <div className="blur" aria-hidden="true">
@@ -378,6 +458,7 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
         <section className="screen">
           <ResultCount r={base.result}
                        caption={professional ? "나와 같은 자리에 있었던 사람들이 고른 다음" : "나와 같은 출발점의 사람들이 처음 간 길"} />
+          {unlistedNote(edu) && <p className="hint">{unlistedNote(edu)}</p>}
           <Bars r={base.result} professional={professional} />
           {conclusion(base.result, professional) && <p className="conclusion">{conclusion(base.result, professional)}</p>}
           <Share r={base.result} professional={professional} />
@@ -428,6 +509,9 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
       )}
 
       {screen === "me" && me && <MyScreen me={me} busy={busy} onUnlock={unlock} onChangeIntent={changeIntent} />}
+      {simulation && RESULT_SCREENS.has(screen) && (
+        <p className="beta-note">베타 · 실제 기록이 모이기 전까지 결과는 예시 데이터로 계산돼요</p>
+      )}
     </main>
   );
 }
@@ -645,7 +729,7 @@ function MyScreen({ me, busy, onUnlock, onChangeIntent }: {
           <button className="cta ghost" onClick={onChangeIntent}>다른 길도 보기</button>
         </>
       )}
-      <p className="hint">한 걸음 먼저 간 사람과의 연결은 실제 가입·인증한 사람만으로 준비 중이에요. 테스트 데이터는 사람으로 표시되지 않아요.</p>
+      <p className="hint">한 걸음 먼저 간 사람과의 연결은 가입하고 인증한 사람들로 준비 중이에요.</p>
     </section>
   );
 }

@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import text
 
 from hellomyme.api.deps import Account, AsOf, Conn, IdempotencyKey, OptionalAccount
@@ -170,6 +170,9 @@ EventName = Literal[
     "login_wall_viewed", "signup_completed", "career_map_viewed", "filter_applied",
     "unlock_viewed", "unlock_purchased", "credit_purchased", "mentor_viewed",
     "mentor_contact_clicked", "mentor_order_created", "career_updated", "career_reconfirmed",
+    # Acquisition demand test (migration 0024)
+    "landing_viewed", "login_clicked", "result_step_viewed", "result_left", "intent_selected",
+    "school_requested",
 ]
 
 
@@ -178,6 +181,14 @@ class AnalyticsEvent(BaseModel):
     occurred_at: datetime
     anonymous_session_id: str | None = Field(default=None, max_length=200)
     properties: dict = Field(default_factory=dict)
+
+    @field_validator("properties")
+    @classmethod
+    def small(cls, v: dict) -> dict:
+        # The endpoint is open to anonymous visitors: keep each event small.
+        if len(json.dumps(v, default=str)) > 4000:
+            raise ValueError("properties too large")
+        return v
 
 
 @router.post("/analytics/events", status_code=202)

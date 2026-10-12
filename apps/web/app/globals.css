@@ -301,3 +301,17 @@ body { word-break: keep-all; overflow-wrap: break-word; }
 @media (max-width: 720px) { .hero { grid-template-columns: 1fr; gap: 24px; } .reward { margin-top: -28px; } }
 .sticky-cta[hidden] { display: none !important; }
 .heroform-warn { margin: 0; background: var(--caution-bg); color: var(--caution); border-radius: 10px; padding: 10px 12px; font-size: 13px; }
+
+/* Searchable school / major picker (components/SearchSelect.tsx) */
+.search-select { position: relative; display: flex; flex-direction: column; gap: 4px; }
+.search-select input { width: 100%; box-sizing: border-box; }
+.search-select-list { position: absolute; top: 100%; left: 0; right: 0; z-index: 20; margin: 4px 0 0; padding: 4px; list-style: none; background: var(--card); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 8px 24px rgba(0, 0, 0, .12); max-height: 300px; overflow-y: auto; }
+.search-select-list li { padding: 10px 12px; border-radius: 8px; cursor: pointer; color: var(--ink); font-size: 15px; display: flex; justify-content: space-between; gap: 8px; }
+.search-select-list li small { color: var(--sub); font-size: 12px; }
+.search-select-list li.active { background: var(--mint-soft); }
+.search-select-list .typed { color: var(--mint-ink); font-weight: 700; display: flex; justify-content: space-between; width: 100%; gap: 8px; }
+.search-select-note { color: var(--sub); font-size: 12px; }
+.heroform .search-select input { padding: 14px; border-radius: 10px; border: 0; background: #fff; color: #141517; font-size: 15px; }
+.heroform .search-select-note { color: #c9cdd2; }
+/* Beta note under results while results are computed from example data */
+.beta-note { color: var(--sub); font-size: 12px; margin: 8px 0 0; text-align: center; }

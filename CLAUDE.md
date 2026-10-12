@@ -7,7 +7,8 @@ Will later merge into Hello My Me. Read `docs/` before large changes:
 (validation, migration list, decision log), `02_HMM_ID_INTEGRATION.md` (login),
 `03_DEPLOYMENT.md` (deploy status and steps), `07_SERVICE_DESIGN.html` (service design),
 `08_DATA_MOAT.md` (which source data is the moat; migration 0019), `09_INGESTION_PIPELINE.md`
-(capture → AI JSON → checks → field review → SEED; migration 0022).
+(capture → AI JSON → checks → field review → SEED; migration 0022), `10_DEMAND_TEST.md` (funnel
+events from `web/lib/track.ts`, migration 0024, `scripts/funnel.sql`).
 
 ## Layout & commands
 - `apps/api` — FastAPI + PostgreSQL 16, raw-SQL Alembic migrations (`migrations/versions`), pytest.
@@ -42,3 +43,6 @@ raw/source records append-only; unknown = NULL (never fabricate or repair data);
 credit ledger (corrections = REVERSAL); idempotent imports/rewards/unlocks/merges; small-cohort
 and small-cell suppression; ACCOUNT ≠ PERSON; PII separated; PRE_SEED never identity-matched or
 shown as a person/mentor; consent recorded before combining HMM identity with career data.
+While results come from PRE_SEED, result screens keep one small beta line (`data_basis ===
+"SIMULATION"`); test/SIMULATION banners are gone for the demand test, but simulated numbers are
+never presented as real people's outcomes.

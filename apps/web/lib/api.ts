@@ -45,7 +45,7 @@ function local(key: string, value?: string | null): string | null {
   }
 }
 
-function anonymousSession(): string {
+export function anonymousSession(): string {
   return local(KEYS.anon) ?? local(KEYS.anon, crypto.randomUUID().replace(/-/g, ""))!;
 }
 

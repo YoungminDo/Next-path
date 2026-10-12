@@ -40,8 +40,12 @@ DISCLOSED_GENDERS = ("MALE", "FEMALE", "OTHER")
 
 
 class AcqEducation(BaseModel):
-    institution_id: str
-    major_node_id: str
+    """A school or major that is not in the pick list comes as typed text (``*_raw`` without an
+    id): the cohort then leaves that dimension out, and the name is kept and queued for
+    standardisation."""
+    institution_id: str | None = None
+    institution_raw: str | None = Field(default=None, max_length=100)
+    major_node_id: str | None = None
     major_raw: str | None = Field(default=None, max_length=200)
     admission_year: int = Field(ge=1950, le=2100)
     graduation_year: int = Field(ge=1950, le=2100)
@@ -50,7 +54,18 @@ class AcqEducation(BaseModel):
     def _order(self):
         if self.admission_year > self.graduation_year:
             raise ValueError("admission_year must not be after graduation_year")
+        for raw in ("institution_raw", "major_raw"):
+            if getattr(self, raw) is not None:
+                setattr(self, raw, getattr(self, raw).strip() or None)
+        if not (self.institution_id or self.institution_raw):
+            raise ValueError("institution_id or institution_raw is required")
+        if not (self.major_node_id or self.major_raw):
+            raise ValueError("major_node_id or major_raw is required")
         return self
+
+    def cohort_filters(self) -> dict:
+        return {"institution_ids": (self.institution_id,) if self.institution_id else (),
+                "major_node_ids": (self.major_node_id,) if self.major_node_id else ()}
 
 
 class AcqJob(BaseModel):
@@ -168,7 +183,7 @@ def student_first_roles(conn, p: AcquisitionPayload, *, layers, as_of, exclude=(
     e = p.education
     return evaluate_with_filters(conn, CareerQuery(
         as_of_date=as_of, target_metric="FIRST_ROLE_DISTRIBUTION", surface_code=SURFACE,
-        institution_ids=(e.institution_id,), major_node_ids=(e.major_node_id,),
+        **e.cohort_filters(),
         admission_year_from=e.admission_year, admission_year_to=e.admission_year,
         graduation_year_from=e.graduation_year, graduation_year_to=e.graduation_year,
         gender_codes=_gender(p), exclude_person_ids=tuple(exclude)), layers=layers)
@@ -188,7 +203,7 @@ def professional_next_roles(conn, p: AcquisitionPayload, *, layers, as_of, exclu
     e = p.education
     return evaluate_with_filters(conn, CareerQuery(
         as_of_date=as_of, target_metric="NEXT_ROLE_DISTRIBUTION", surface_code=SURFACE,
-        institution_ids=(e.institution_id,), major_node_ids=(e.major_node_id,),
+        **e.cohort_filters(),
         graduation_year_from=e.graduation_year, graduation_year_to=e.graduation_year,
         gender_codes=_gender(p), from_role_node_ids=(current,), first_role_node_ids=first,
         exclude_person_ids=tuple(exclude)), layers=layers)
@@ -391,11 +406,12 @@ def member_payload(conn: Connection, person_id: str, as_of: date) -> Acquisition
         "SELECT declared_stage, gender_code FROM person WHERE person_id = :p"),
         {"p": person_id}).first()
     edu = conn.execute(text(
-        """SELECT institution_id::text, major_taxonomy_node_id::text AS major, major_raw,
-                  admission_year, graduation_year
-           FROM canonical_education WHERE person_id = :p AND major_taxonomy_node_id IS NOT NULL
-             AND institution_id IS NOT NULL AND admission_year IS NOT NULL
-             AND graduation_year IS NOT NULL
+        """SELECT institution_id::text, institution_raw, major_taxonomy_node_id::text AS major,
+                  major_raw, admission_year, graduation_year
+           FROM canonical_education WHERE person_id = :p
+             AND (major_taxonomy_node_id IS NOT NULL OR major_raw IS NOT NULL)
+             AND (institution_id IS NOT NULL OR institution_raw IS NOT NULL)
+             AND admission_year IS NOT NULL AND graduation_year IS NOT NULL
            ORDER BY graduation_year DESC LIMIT 1"""), {"p": person_id}).first()
     if person is None or edu is None:
         return None
@@ -429,8 +445,10 @@ def member_payload(conn: Connection, person_id: str, as_of: date) -> Acquisition
     stage = person.declared_stage or ("PROFESSIONAL" if current else "STUDENT")
     return AcquisitionPayload(
         user_type=stage,
-        education=AcqEducation(institution_id=edu.institution_id, major_node_id=edu.major,
-                               major_raw=edu.major_raw, admission_year=edu.admission_year,
+        education=AcqEducation(institution_id=edu.institution_id,
+                               institution_raw=None if edu.institution_id else edu.institution_raw,
+                               major_node_id=edu.major, major_raw=edu.major_raw,
+                               admission_year=edu.admission_year,
                                graduation_year=edu.graduation_year),
         current_job=job(current), first_job=job(first),
         first_job_is_current=bool(current and first and current.id == first.id),
@@ -474,11 +492,14 @@ def write_acquisition_profile(conn: Connection, account_id: str, p: AcquisitionP
 
     if p.education:
         e = p.education
-        if e.major_node_id not in majors.nodes:
+        if e.major_node_id and e.major_node_id not in majors.nodes:
             raise QueryInvalid(f"unknown major node {e.major_node_id}")
-        inst_name = conn.execute(text(
+        inst_name = e.institution_id and conn.execute(text(
             "SELECT name FROM institution WHERE institution_id::text = :i"),
             {"i": e.institution_id}).scalar()
+        inst_id = e.institution_id if inst_name else None
+        major_raw = e.major_raw or (majors.nodes[e.major_node_id]["label"] if e.major_node_id else None)
+        mapped = [bool(inst_id), bool(e.major_node_id)]
         out["education_id"] = conn.execute(text(
             """INSERT INTO education (person_id, institution_raw, institution_id, major_raw,
                    major_taxonomy_node_id, admission_year, admission_date_precision,
@@ -487,10 +508,19 @@ def write_acquisition_profile(conn: Connection, account_id: str, p: AcquisitionP
                VALUES (:p, :ir, CAST(:iid AS uuid), :mr, CAST(:m AS uuid), :ay, 'YEAR', :gy,
                        'YEAR', 'VERIFIED', 'SELF_REPORTED', :ns, now())
                RETURNING education_id::text"""),
-            {"p": person_id, "ir": inst_name, "iid": e.institution_id if inst_name else None,
-             "mr": e.major_raw or majors.nodes[e.major_node_id]["label"], "m": e.major_node_id,
+            {"p": person_id, "ir": inst_name or e.institution_raw, "iid": inst_id,
+             "mr": major_raw, "m": e.major_node_id,
              "ay": e.admission_year, "gy": e.graduation_year,
-             "ns": "MAPPED" if inst_name else "PARTIAL"}).scalar_one()
+             "ns": "MAPPED" if all(mapped) else ("PARTIAL" if any(mapped) else "UNMAPPED")}).scalar_one()
+        # Typed names nobody has standardised yet wait in the mapping queue (raw stays as typed).
+        for kind, raw, known in (("INSTITUTION", e.institution_raw, inst_id),
+                                 ("MAJOR", e.major_raw, e.major_node_id)):
+            if raw and not known:
+                conn.execute(text(
+                    """INSERT INTO mapping_queue (entity_kind, raw_value) VALUES (:k, :r)
+                       ON CONFLICT (entity_kind, normalized_key)
+                       DO UPDATE SET occurrences = mapping_queue.occurrences + 1"""),
+                    {"k": kind, "r": raw})
         fields = ["institution", "major", "admission_year", "graduation_year"]
         conn.execute(text(
             """INSERT INTO education_source (education_id, source_id, supported_fields, is_primary)

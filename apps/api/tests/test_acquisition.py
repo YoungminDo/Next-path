@@ -165,3 +165,36 @@ def test_invalid_input_is_rejected(client, ids):  # noqa: F811
     other = anon()
     assert client.post(f"/acq/draft/{draft}/result", headers=other,
                        json={"step": "teaser"}).status_code == 404
+
+
+def test_unlisted_school_or_major_is_typed_in_and_still_answered(client, engine, ids):  # noqa: F811
+    """Not in the pick list: the typed name is accepted, the cohort leaves that dimension out,
+    the name is kept as typed and queued for standardisation."""
+    h = anon()
+    payload = {"user_type": "STUDENT", "education": {
+        "institution_raw": "  목록밖대학교 ", "major_node_id": ids["M3"],
+        "admission_year": 2016, "graduation_year": 2020}}
+    draft = save(client, h, payload)
+    t = step(client, h, draft, "teaser")
+    assert t["base"]["effective_n"] >= 45  # every school with that major and those years
+    auth, person_id = merge(client, h, draft, "acq-unlisted")
+    with engine.begin() as conn:
+        edu = conn.execute(text(
+            """SELECT institution_raw, institution_id, major_taxonomy_node_id IS NOT NULL AS major,
+                      normalization_status FROM education WHERE person_id = :p"""),
+            {"p": person_id}).one()
+        assert tuple(edu) == ("목록밖대학교", None, True, "PARTIAL")
+        assert conn.execute(text(
+            "SELECT occurrences FROM mapping_queue WHERE raw_value = '목록밖대학교'")).scalar() >= 1
+    me = client.get("/acq/me", headers=auth)
+    assert me.status_code == 200, me.text
+    assert client.get("/acq/me/step/first_roles", headers=auth).status_code == 200
+
+    both = {"user_type": "STUDENT", "education": {
+        "institution_raw": "목록밖대학교", "major_raw": "목록밖학과",
+        "admission_year": 2016, "graduation_year": 2020}}
+    h2 = anon()
+    assert step(client, h2, save(client, h2, both), "teaser")["locked"]
+    neither = {"user_type": "STUDENT", "education": {"admission_year": 2016, "graduation_year": 2020}}
+    r = client.post("/acq/draft", headers=anon(), json={"draft_id": None, "payload": neither})
+    assert r.status_code == 422

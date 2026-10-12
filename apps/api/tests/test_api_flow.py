@@ -256,6 +256,15 @@ def test_analytics_events_are_separate_from_career_data(client, engine):
         assert conn.execute(text(
             "SELECT properties->>'step' FROM analytics.event WHERE event_name = 'login_wall_viewed'"
         )).scalar() == "teaser"
+    # Demand-test funnel events (0024); oversized properties are refused.
+    for name in ("landing_viewed", "login_clicked", "result_step_viewed", "result_left",
+                 "intent_selected", "school_requested"):
+        assert client.post("/analytics/events", json={
+            "event_name": name, "occurred_at": datetime.now(UTC).isoformat(),
+            "anonymous_session_id": "abc"}).status_code == 202
+    assert client.post("/analytics/events", json={
+        "event_name": "landing_viewed", "occurred_at": datetime.now(UTC).isoformat(),
+        "properties": {"x": "y" * 5000}}).status_code == 422
 
 
 def test_suppressed_insight_is_never_charged(client):
