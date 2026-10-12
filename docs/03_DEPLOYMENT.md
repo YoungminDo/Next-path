@@ -87,6 +87,10 @@ HELLOMYME_DATABASE_URL='<위 URL>' uv run hellomyme-import-preseed /path/to/HELL
 4. 로그아웃 후 재로그인 → 입력 없이 바로 Career Map
 5. hmm-id 어드민 `/admin/audit` 에 `nextpath.da-sh.io` 의 oauth_start / callback_success 기록
 
+## 팀 대시보드 권한
+- `/admin` 은 `HELLOMYME_ADMIN_ACCOUNT_IDS`(API, JSON 목록)에 있는 계정만 볼 수 있습니다. 로그인한 사람이 목록에 없으면
+  자기 계정 번호가 보이니, 그 번호를 이 환경변수에 추가합니다(docs/10 §팀 대시보드).
+
 ## 정식 출시로 전환할 때
 
 - API: `HELLOMYME_ENV=production`, `HELLOMYME_CAREER_MAP_DATA_LAYERS=["SEED","VERIFIED"]`

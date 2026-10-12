@@ -26,6 +26,14 @@
 | `result_step_viewed` / `result_left` | 결과 화면별 진입과 머문 시간 |
 | `intent_selected` · `unlock_purchased` | 궁금한 길 선택 · 깊은 분석 열기 |
 
+## 팀 대시보드 (/admin)
+- 주소: `https://nextpath.da-sh.io/admin` → 카카오로 로그인. 처음에는 "볼 수 없는 계정"과 함께 **계정 번호**가 보인다.
+- 권한 주기: Render → nextpath-api → Environment 에 `HELLOMYME_ADMIN_ACCOUNT_IDS` 를 JSON 목록으로 넣고 저장한다.
+  예: `["<내 계정 번호>", "<다른 팀원 계정 번호>"]`. 저장하면 다시 배포되고(수 분), 그 뒤 새로고침하면 보인다.
+- 보이는 것: 기간(오늘/7일/30일/전체)·팀 기록 포함 여부, 핵심 숫자, 퍼널, 날짜별 추이, 입력한 학교·전공·조합,
+  희망 직무, 채널, 결과 화면 체류 시간, 표준화 대기 이름, 인터뷰 신청 수. 숫자만 보여 주고 전화번호·세션 id는 내보내지 않는다.
+- 차트마다 "표로 보기"가 있다. 정의는 아래 `funnel.sql`과 같다(서버 `domain/admin_stats.py`).
+
 ## 숫자 보는 법
 - 시각은 서버가 받은 시각(`received_at`) 기준이다. 사용자 기기의 시계가 틀려도 날짜가 밀리지 않는다.
 - **Supabase SQL Editor**에 `scripts/funnel.sql`을 붙여넣고 실행한다.

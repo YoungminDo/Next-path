@@ -17,6 +17,9 @@ export const serverConfig = {
 export const SESSION_COOKIE = "hmc_session";
 /** Set by HMM ID on the shared .da-sh.io domain after Kakao login. */
 export const HMM_ID_COOKIE = "dash-access-token";
+/** Where to land after login when it is not the flow (only these paths are honoured). */
+export const NEXT_COOKIE = "np_next";
+export const NEXT_PATHS = ["/admin"];
 
 export function sessionCookieOptions(expiresAt?: string) {
   return {

@@ -9,7 +9,8 @@ Will later merge into Hello My Me. Read `docs/` before large changes:
 `08_DATA_MOAT.md` (which source data is the moat; migration 0019), `09_INGESTION_PIPELINE.md`
 (capture → AI JSON → checks → field review → SEED; migration 0022), `10_DEMAND_TEST.md` (funnel
 events from `web/lib/track.ts`, migration 0024, `scripts/funnel.sql`; inputs as data + desired roles 0026,
-interview phone opt-in 0027). Migration 0025 closes the Supabase Data API: every new table enables RLS
+interview phone opt-in 0027). Team dashboard `/admin` (`api/admin.py`, `domain/admin_stats.py`, web `components/admin/`) is for
+accounts in `HELLOMYME_ADMIN_ACCOUNT_IDS`, counts only. Migration 0025 closes the Supabase Data API: every new table enables RLS
 (`tests/test_data_api_lock.py`).
 
 ## Layout & commands

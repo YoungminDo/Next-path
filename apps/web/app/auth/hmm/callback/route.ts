@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 
 import {
   HMM_ID_COOKIE,
+  NEXT_COOKIE,
+  NEXT_PATHS,
   SESSION_COOKIE,
   appOrigin,
   serverConfig,
@@ -16,11 +18,14 @@ import {
  * our own opaque session cookie. On failure HMM ID appends `?error=<reason>`.
  */
 export async function GET(req: NextRequest) {
-  const home = new URL("/start", appOrigin(req.nextUrl.origin));
+  const next = req.cookies.get(NEXT_COOKIE)?.value;
+  const toNext = next !== undefined && NEXT_PATHS.includes(next);
+  const home = new URL(toNext ? next : "/start", appOrigin(req.nextUrl.origin));
   const fail = (reason: string) => {
     home.searchParams.set("login_error", reason);
     const res = NextResponse.redirect(home);
     res.cookies.delete(SESSION_COOKIE);
+    res.cookies.delete(NEXT_COOKIE);
     return res;
   };
 
@@ -45,8 +50,9 @@ export async function GET(req: NextRequest) {
   if (!login.ok) return fail("login_unavailable");
 
   const session = (await login.json()) as { session_token: string; expires_at: string };
-  home.searchParams.set("login", "success");
+  if (!toNext) home.searchParams.set("login", "success");
   const res = NextResponse.redirect(home);
   res.cookies.set(SESSION_COOKIE, session.session_token, sessionCookieOptions(session.expires_at));
+  res.cookies.delete(NEXT_COOKIE);
   return res;
 }

@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from hellomyme.api import acquisition, auth, career, commerce
+from hellomyme.api import acquisition, admin, auth, career, commerce
 from hellomyme.config import get_settings
 
 
@@ -18,6 +18,7 @@ def create_app() -> FastAPI:
     app.include_router(acquisition.router)
     app.include_router(career.router)
     app.include_router(commerce.router)
+    app.include_router(admin.router)
 
     @app.get("/health")
     def health():

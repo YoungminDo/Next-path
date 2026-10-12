@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     # them in process this long instead of re-reading them on every request (0 disables).
     reference_cache_seconds: int = 60
 
+    # Team dashboard (/admin): account ids allowed to see the aggregate numbers, e.g.
+    # HELLOMYME_ADMIN_ACCOUNT_IDS='["3f0c…-…"]'. A member who is not listed sees their own id.
+    admin_account_ids: list[str] = []
+
     # User-interview opt-in (phone). "none": the number is kept unverified (no SMS sent);
     # "solapi": a 6-digit code is sent and must be entered; "log": development only, the code is
     # written to the server log instead of being sent.
