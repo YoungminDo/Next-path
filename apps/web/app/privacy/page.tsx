@@ -1,5 +1,7 @@
 import Link from "next/link";
 
+import BusinessInfo from "@/components/BusinessInfo";
+
 /* Privacy policy for nextpath (개인정보 보호법 §30). Every item, period and processor here is what
    the service actually does (docs/10, docs/03); change this page in the same commit as the code. */
 export const metadata = { title: "nextpath · 개인정보처리방침" };
@@ -51,6 +53,11 @@ export default function Privacy() {
             <td>인터뷰 참여 연락. 홍보 문자는 보내지 않습니다.</td>
           </tr>
           <tr>
+            <td>유료 카드 결제</td>
+            <td>주문번호, 결제 금액, 결제 수단, 승인 시각, 영수증 링크. 카드 번호 등 결제 정보는 토스페이먼츠가 처리하며 회사는 받지 않습니다.</td>
+            <td>결제 확인, 튜브 지급, 환불·분쟁 처리</td>
+          </tr>
+          <tr>
             <td>서비스 이용 중 자동 생성</td>
             <td>익명 세션 식별자, 화면 진입·버튼 이용 기록, 접속 IP를 하루 단위로 변환한 값(원래 IP로 되돌릴 수 없음), 튜브 적립·사용 내역</td>
             <td>이용 흐름 통계, 파일 읽기 횟수 제한(부정 이용 방지), 튜브 관리</td>
@@ -70,6 +77,7 @@ export default function Privacy() {
         <li>읽은 내용의 익명 통계 이용분: 읽은 날부터 3년</li>
         <li>진로 인터뷰 휴대전화번호: 동의일부터 1년. 철회하면 즉시 삭제</li>
         <li>휴대전화 인증 기록: 1일</li>
+        <li>결제·환불 기록: 5년 (「전자상거래 등에서의 소비자보호에 관한 법률」)</li>
       </ul>
       <p>기간이 지나거나 목적을 이룬 정보는 데이터베이스에서 지체 없이 삭제하며, 되살릴 수 없는 방법으로 지웁니다.</p>
 
@@ -104,6 +112,12 @@ export default function Privacy() {
             <td>웹사이트 호스팅 · 접속 요청</td>
             <td>사이트에 접속할 때, 암호화된 통신</td>
             <td>요청을 처리하는 동안만</td>
+          </tr>
+          <tr>
+            <td>(주)비바리퍼블리카 토스페이먼츠 (대한민국)</td>
+            <td>유료 카드 결제 처리 · 결제 수단 정보, 주문번호, 금액</td>
+            <td>결제할 때</td>
+            <td>관련 법령에 따른 기간</td>
           </tr>
           <tr>
             <td>솔라피 (대한민국)</td>
@@ -155,10 +169,7 @@ export default function Privacy() {
       <p>내용이 바뀌면 시행 7일 전부터 이 페이지에 알립니다. 이용자 권리에 중요한 변경은 30일 전부터 알립니다.</p>
       <p className="meta">변경 이력: {EFFECTIVE} 최초 시행</p>
 
-      <footer>
-        주식회사 대시(DA-SH) · 대표 도영민 · 사업자등록번호 340-87-03755<br />
-        서울특별시 중구 세종대로 136, 3층 에스3097호(무교동, 파이낸스빌딩)
-      </footer>
+      <footer><BusinessInfo /></footer>
     </main>
   );
 }

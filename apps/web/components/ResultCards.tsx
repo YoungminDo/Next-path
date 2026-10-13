@@ -73,11 +73,44 @@ function Paired({ data }: { data: { key: string; label: string; own: number | nu
   );
 }
 
-export default function ResultCards({ base, compare, professional, school, major, label, takeaway, busy, onUnlockCompare }: {
+/** Before a payment (전자상거래법 §17②5): a digital card opens at once, so it cannot be
+ *  withdrawn after; the free card is the preview. */
+export function PayNote() {
+  return (
+    <p className="paynote">
+      결제하면 바로 열리는 디지털 콘텐츠라 결제 후에는 청약철회가 제한돼요. 무료 카드로 먼저 확인할 수 있어요.{" "}
+      <a href="/terms" target="_blank" rel="noreferrer">이용약관</a>
+    </p>
+  );
+}
+
+/** Open with a 튜브 when there is one; otherwise buy it (990원) when payments are on. */
+export function OpenButton({ cost, balance, payments, busy, onTube, onBuy }: {
+  cost: number | null; balance: number; payments: { enabled: boolean; price_krw: number | null };
+  busy: boolean; onTube: () => void; onBuy: () => void;
+}) {
+  if (balance >= (cost ?? 1)) {
+    return <button className="cta" disabled={busy} onClick={onTube}>{cost} 튜브로 열기</button>;
+  }
+  if (payments.enabled && payments.price_krw) {
+    return (
+      <>
+        <button className="cta" disabled={busy} onClick={onBuy}>{payments.price_krw.toLocaleString()}원으로 열기</button>
+        <PayNote />
+      </>
+    );
+  }
+  return <button className="cta" disabled>튜브가 부족해요</button>;
+}
+
+export default function ResultCards({ base, compare, professional, school, major, label, takeaway, busy,
+  balance, payments, onUnlockCompare, onBuyCompare }: {
   base: QueryResult;
   compare: { available: boolean; unlocked: boolean; cost_tube: number | null; result: QueryResult | null };
   professional: boolean; school: string | null; major: string | null;
-  label: (c: Cell) => string; takeaway: string | null; busy: boolean; onUnlockCompare: () => void;
+  label: (c: Cell) => string; takeaway: string | null; busy: boolean;
+  balance: number; payments: { enabled: boolean; price_krw: number | null };
+  onUnlockCompare: () => void; onBuyCompare: () => void;
 }) {
   if (base.suppressed) return null;
   const mine = rows(base, label);
@@ -134,8 +167,11 @@ export default function ResultCards({ base, compare, professional, school, major
                 ))}
               </div>
               <p className="takeaway">우리 학교와 다른 학교, 같은 과의 길을 나란히 비교해요.</p>
-              <button className="cta" disabled={busy} onClick={onUnlockCompare}>{compare.cost_tube} 튜브로 열기</button>
-              <footer><span>다른 학교 기록이 적으면 튜브를 쓰지 않아요</span><span /></footer>
+              <OpenButton cost={compare.cost_tube} balance={balance} payments={payments} busy={busy}
+                          onTube={onUnlockCompare} onBuy={onBuyCompare} />
+              <footer>
+                <span>{balance >= (compare.cost_tube ?? 1) ? "가입 선물 튜브로 열 수 있어요" : "다른 학교 기록이 적으면 튜브를 쓰지 않아요"}</span><span />
+              </footer>
             </>
           )}
         </article>

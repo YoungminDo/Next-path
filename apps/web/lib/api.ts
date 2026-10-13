@@ -116,6 +116,8 @@ export type MyResult = {
     content: { company_size: DeepDiveItem[]; industry: DeepDiveItem[] } | null };
   /** Other schools, same major: a 튜브 product; the result only once opened. */
   compare: { available: boolean; unlocked: boolean; cost_tube: number | null; result: QueryResult | null };
+  /** Paid cards: with no 튜브 left a card opens for price_krw (Toss Payments). */
+  payments: { enabled: boolean; price_krw: number | null };
   balance_tube: number; data_basis: "SIMULATION" | "OBSERVED"; unlisted?: Unlisted;
 };
 export type AcqStep = "first_roles" | "next_roles" | "similar_paths";
@@ -127,6 +129,8 @@ export type TeaserResult = {
   unlisted?: Unlisted;
 };
 export type DesiredRole = { role_node_id: string | null; role_raw: string | null };
+/** Cards that can be bought (one 튜브 each, 990원 when no 튜브 is left). */
+export type PayableInsight = "SCHOOL_COMPARE" | "PATH_DEEP_DIVE";
 /** What a returning member's new answers would change in their profile (labels for display). */
 export type ProfileChange = { field: "user_type" | "education" | "current_job"; before: string | null; after: string | null };
 export type DesiredStatus = "CHOSEN" | "NONE" | "UNSURE" | "KEEP_CURRENT";
@@ -195,6 +199,13 @@ export const acq = {
       method: "POST",
       headers: { "Idempotency-Key": crypto.randomUUID() },
     }),
+  createOrder: (insightType: PayableInsight, internal: boolean) =>
+    call<{ order_id: string; amount: number; order_name: string; customer_key: string; insight_type: PayableInsight }>(
+      "/acq/me/payments", { method: "POST", body: JSON.stringify({ insight_type: insightType, internal }) }),
+  confirmPayment: (orderId: string, paymentKey: string, amount: number) =>
+    call<{ paid: boolean; opened: boolean; insight_type: PayableInsight; balance_tube: number }>(
+      "/acq/me/payments/confirm", { method: "POST",
+        body: JSON.stringify({ order_id: orderId, payment_key: paymentKey, amount }) }),
   unlockCompare: () =>
     call<{ unlocked: boolean; charged?: boolean; balance_tube?: number; result?: QueryResult }>(
       "/acq/me/unlock/compare", { method: "POST", headers: { "Idempotency-Key": crypto.randomUUID() } }),

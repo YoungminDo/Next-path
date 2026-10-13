@@ -20,6 +20,7 @@ import {
   type MyResult,
   type Node,
   type PastJob,
+  type PayableInsight,
   type ProfileChange,
   type QueryResult,
   type StepResult,
@@ -30,7 +31,9 @@ import { ImportedJobs, ImportEntry, importRows, ImportReview, ImportUpload, toPa
 import NodeSelect from "@/components/NodeSelect";
 import SearchSelect, { type Picked } from "@/components/SearchSelect";
 import { inAppBrowser, isInternal, track } from "@/lib/track";
-import ResultCards from "@/components/ResultCards";
+import BusinessInfo from "@/components/BusinessInfo";
+import ResultCards, { OpenButton } from "@/components/ResultCards";
+import { buyCard } from "@/lib/pay";
 import { YEARS } from "@/lib/years";
 
 /* Order (product decision): input -> teaser (how many people, how many directions) -> login ->
@@ -670,6 +673,19 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
     if (u.unlocked) track("unlock_purchased", { insight: "PATH_DEEP_DIVE", charged: u.charged ?? null });
     setMe(await acq.me());
   });
+  // No 튜브 left: the card is bought (990원) in the Toss Payments window; /pay/success opens it.
+  const buy = (insight: PayableInsight) => run(async () => {
+    try {
+      await buyCard(insight, isInternal());
+    } catch (e) {
+      const code = (e as { code?: string } | null)?.code;
+      if (code === "USER_CANCEL" || code === "PAY_PROCESS_CANCELED") {
+        track("payment_failed", { stage: "window", code });
+        return;
+      }
+      throw e;
+    }
+  })();
   const unlockCompare = run(async () => {
     const u = await acq.unlockCompare();
     if (u.unlocked) track("unlock_purchased", { insight: "SCHOOL_COMPARE", charged: u.charged ?? null });
@@ -949,9 +965,10 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
       )}
 
       {screen === "me" && me && <MyScreen me={me} busy={busy} onUnlock={unlock} onUnlockCompare={unlockCompare}
+                                          onBuy={buy}
                                           names={meNames} onChangeIntent={changeIntent}
                                           onInterview={openInterview} onImport={openImport} />}
-      <p className="policy-link"><a href="/privacy">개인정보처리방침</a></p>
+      <BusinessInfo />
     </main>
   );
 }
@@ -1102,8 +1119,9 @@ function months(m: number) {
   return `${(m / 12).toFixed(1)}년`;
 }
 
-function MyScreen({ me, busy, onUnlock, onUnlockCompare, names, onChangeIntent, onInterview, onImport }: {
+function MyScreen({ me, busy, onUnlock, onUnlockCompare, onBuy, names, onChangeIntent, onInterview, onImport }: {
   me: MyResult; busy: boolean; onUnlock: () => void; onUnlockCompare: () => void;
+  onBuy: (insight: PayableInsight) => void;
   names: { school: string | null; major: string | null }; onChangeIntent: () => void; onInterview: () => void;
   onImport: () => void;
 }) {
@@ -1117,7 +1135,9 @@ function MyScreen({ me, busy, onUnlock, onUnlockCompare, names, onChangeIntent, 
       </div>
       <ResultCards base={me.base} compare={me.compare} professional={professional} school={names.school}
                    major={names.major} label={(c) => cellLabel(c, professional)}
-                   takeaway={conclusion(me.base, professional)} busy={busy} onUnlockCompare={onUnlockCompare} />
+                   takeaway={conclusion(me.base, professional)} busy={busy} balance={me.balance_tube}
+                   payments={me.payments} onUnlockCompare={onUnlockCompare}
+                   onBuyCompare={() => onBuy("SCHOOL_COMPARE")} />
       {!p || p.suppressed ? (
         <>
           <h2>이 길로 간 사람은 아직 적어요</h2>
@@ -1156,7 +1176,8 @@ function MyScreen({ me, busy, onUnlock, onUnlockCompare, names, onChangeIntent, 
             ) : me.deep_dive.available ? (
               <>
                 <p className="sub">이 길에 도착한 회사 규모와 산업을 열어볼 수 있어요.</p>
-                <button className="cta" disabled={busy} onClick={onUnlock}>{me.deep_dive.cost_tube} 튜브로 열기</button>
+                <OpenButton cost={me.deep_dive.cost_tube} balance={me.balance_tube} payments={me.payments}
+                            busy={busy} onTube={onUnlock} onBuy={() => onBuy("PATH_DEEP_DIVE")} />
               </>
             ) : (
               <p className="sub">이 결과는 깊은 분석을 하기엔 인원이 적어요.</p>

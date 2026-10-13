@@ -52,6 +52,12 @@ class Settings(BaseSettings):
                                                     "HELLOMYME_ANTHROPIC_WORKSPACE_ID",
                                                     "anthropic_workspace_id"))
     career_import_model: str = "claude-opus-5-5"
+    # Toss Payments (paid cards, migration 0037). Without the secret key paid cards are off.
+    # The client key is public and lives in the web app (NEXT_PUBLIC_TOSS_CLIENT_KEY).
+    toss_secret_key: SecretStr | None = Field(
+        default=None, validation_alias=AliasChoices("TOSS_SECRET_KEY", "HELLOMYME_TOSS_SECRET_KEY",
+                                                    "toss_secret_key"))
+    toss_api_base: str = "https://api.tosspayments.com"
     career_import_daily_limit: int = 10  # per account
     career_import_session_limit: int = 3  # per anonymous session
     career_import_client_limit: int = 20  # per client address before login (shared Wi-Fi allowed)

@@ -131,7 +131,7 @@ def test_professional_flow_after_login(client, ids):  # noqa: F811
            "end_year": 2020}
     key = {**auth, "Idempotency-Key": uuid.uuid4().hex}
     added = client.post("/acq/me/jobs", headers=key, json={"job": job}).json()
-    assert added["work_event_id"] and added["reward"]
+    assert added["work_event_id"] and added["reward"] is None  # reward_v2: only sign-up pays
     assert client.post("/acq/me/jobs", headers=key, json={"job": job}).json()["replayed"] is True
     similar = client.get("/acq/me/step/similar_paths", headers=auth).json()["result"]
     assert similar["suppressed"]  # nobody went data -> marketing in this cohort

@@ -178,6 +178,8 @@ EventName = Literal[
     "interview_submitted", "interview_withdrawn",
     # Resume / capture import (migration 0030)
     "import_viewed", "import_uploaded", "import_parsed", "import_confirmed",
+    # Paid cards (migration 0037); a paid order is "credit_purchased"
+    "payment_started", "payment_failed",
 ]
 
 

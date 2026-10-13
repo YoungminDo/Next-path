@@ -73,7 +73,9 @@ def test_anonymous_teaser_has_no_distributions(client):
 def test_login_wall_merge_is_idempotent_and_rewards_once(client, engine):
     auth, anon, draft_id, first = onboard(client, "merge-user")
     assert first["merged"] is True
-    assert sum(r["amount"] for r in first["rewards"]) > 0
+    # reward_v2 (0037): the profile itself earns no 튜브; the sign-up gift is the only reward.
+    assert first["rewards"] == []
+    assert client.get("/credits", headers=auth).json()["balance_tube"] == 1
     again = client.post("/auth/merge-draft",
                         json={"draft_id": draft_id, "consent_policy_version": "career_terms_v1"},
                         headers={**auth, **anon, "Idempotency-Key": uuid.uuid4().hex}).json()
@@ -106,15 +108,15 @@ def test_login_wall_merge_is_idempotent_and_rewards_once(client, engine):
     assert events[1].organization_raw == "아직 없는 회사"
     assert "end_date" not in events[1].supported_fields
     assert {e.source_type for e in events} == {"MANUAL_INPUT"}
-    # SIGNUP + EDUCATION + CURRENT_ROLE + PREVIOUS_CAREER, each exactly once.
-    assert rewards == 4
+    # reward_v2 (0037): the sign-up gift only, exactly once (merging twice adds nothing).
+    assert rewards == 1
 
     # A second login does not pay SIGNUP again.
     login(client, "merge-user")
     with engine.begin() as conn:
         assert conn.execute(text(
             "SELECT count(*) FROM credit_ledger l JOIN account_identity i USING (account_id) "
-            "WHERE i.provider_subject = 'merge-user' AND l.reason_type = 'REWARD'")).scalar() == 4
+            "WHERE i.provider_subject = 'merge-user' AND l.reason_type = 'REWARD'")).scalar() == 1
 
 
 def test_career_map_unlock_flow(client, engine):
@@ -193,6 +195,12 @@ def test_ledger_is_immutable_and_corrected_by_reversal(engine, client):
 
 
 def test_reconfirm_reward_respects_cooldown(client, engine):
+    """The cooldown mechanism, under a test-only active policy (reward_v2 pays no reconfirm)."""
+    with engine.begin() as conn:
+        conn.execute(text(
+            """INSERT INTO reward_policy (action_type, reward_tube, max_occurrences, cooldown_seconds,
+                   version, status) VALUES ('CAREER_RECONFIRMED', 1, NULL, 7776000, 'reward_test', 'ACTIVE')
+               ON CONFLICT DO NOTHING"""))
     auth, *_ = onboard(client, "reconfirm-user")
     with engine.begin() as conn:
         weid = conn.execute(text(
@@ -207,6 +215,8 @@ def test_reconfirm_reward_respects_cooldown(client, engine):
             "SELECT action FROM verification_log WHERE entity_id = :w ORDER BY created_at"),
             {"w": weid}).scalars().all()
     assert levels == ["SELF_REPORTED", "SELF_RECONFIRMED", "SELF_RECONFIRMED"]
+    with engine.begin() as conn:
+        conn.execute(text("UPDATE reward_policy SET status = 'RETIRED' WHERE version = 'reward_test'"))
 
 
 def test_mentor_opt_in_matching_and_order(client, engine):

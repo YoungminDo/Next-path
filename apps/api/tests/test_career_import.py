@@ -202,7 +202,7 @@ def test_a_member_adds_the_jobs_they_tick_once(engine, ids):  # noqa: F811
     confirm = {"import_attempt_id": read["import_attempt_id"], "jobs": jobs}
     done = c.post("/acq/me/import/confirm", headers=key, json=confirm).json()
     assert (done["added"], done["skipped"], done["replayed"]) == (1, 1, False)
-    assert done["rewards"]
+    assert done["rewards"] == []  # reward_v2 (0037): contributions earn no 튜브, sign-up gives 1
     assert c.post("/acq/me/import/confirm", headers=key, json=confirm).json()["replayed"] is True
 
     stranger = {**login(c, "import-stranger"), "Idempotency-Key": uuid.uuid4().hex}

@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Response
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from hellomyme.api.deps import (
@@ -17,7 +18,7 @@ from hellomyme.api.deps import (
 )
 from hellomyme.db import get_engine
 from hellomyme.domain import acquisition as acq
-from hellomyme.domain import career_import, drafts, interview, ledger
+from hellomyme.domain import career_import, drafts, interview, ledger, payments
 from hellomyme.domain.career_input import member_person_id
 from hellomyme.domain.career_query import QueryInvalid
 from hellomyme.domain.policies import PolicyMissing, active_unlock_policy
@@ -146,6 +147,7 @@ def my_result(conn: Conn, settings: AppSettings, account_id: Account, as_of: AsO
     policy = active_unlock_policy(conn, DEEP_DIVE)
     # Other schools, same major: offered when their own school is listed; computed once opened.
     compare_policy = active_unlock_policy(conn, SCHOOL_COMPARE)
+    price = payments.price(conn)
     compare_key = acq.insight_key(payload, COMPARE_TARGET)
     compare_open = ledger.has_entitlement(conn, account_id, SCHOOL_COMPARE, compare_key)
     compare = None
@@ -165,15 +167,31 @@ def my_result(conn: Conn, settings: AppSettings, account_id: Account, as_of: AsO
                      "unlocked": compare_open, "cost_tube": compare_policy and compare_policy.cost_tube,
                      "result": compare},
         "balance_tube": ledger.balance(conn, account_id),
+        # Paid cards: with no 튜브 left, a card opens for this price (Toss Payments).
+        "payments": {"enabled": bool(settings.toss_secret_key) and price is not None,
+                     "price_krw": price and price.amount_krw},
         "data_basis": _basis(settings),
         "unlisted": acq.unlisted(payload),
     }
+
+
+def _unlock_error(exc: Exception):
+    if isinstance(exc, ledger.InsufficientCredit):
+        return HTTPException(402, {"message": "튜브가 부족해요", "balance": exc.balance,
+                                   "required": exc.required})
+    if isinstance(exc, ledger.IdempotencyConflict):
+        return HTTPException(422, "Idempotency-Key reused for a different unlock")
+    return HTTPException(503, "unlock is not available right now")
 
 
 @router.post("/me/unlock")
 def unlock_deep_dive(conn: Conn, settings: AppSettings, account_id: Account,
                      key: IdempotencyKey, as_of: AsOf):
     person_id, payload = _member(conn, account_id, as_of)
+    return _open_deep_dive(conn, settings, account_id, person_id, payload, as_of, key)
+
+
+def _open_deep_dive(conn, settings, account_id, person_id, payload, as_of, key) -> dict:
     paths = _run(lambda: acq.result(conn, payload, "intent_paths",
                                     layers=settings.career_map_data_layers, as_of=as_of,
                                     exclude=(person_id,), full=True))
@@ -185,13 +203,9 @@ def unlock_deep_dive(conn: Conn, settings: AppSettings, account_id: Account,
     try:
         grant = ledger.unlock(conn, account_id, DEEP_DIVE, ikey,
                               {"target": p["target"], "cohort": paths["base"]}, key)
-    except ledger.InsufficientCredit as exc:
-        raise HTTPException(402, {"message": "튜브가 부족해요", "balance": exc.balance,
-                                  "required": exc.required}) from exc
-    except ledger.IdempotencyConflict as exc:
-        raise HTTPException(422, "Idempotency-Key reused for a different unlock") from exc
-    except ledger.PolicyUnavailable as exc:
-        raise HTTPException(503, "unlock is not available right now") from exc
+    except (ledger.InsufficientCredit, ledger.IdempotencyConflict,
+            ledger.PolicyUnavailable) as exc:
+        raise _unlock_error(exc) from exc
     return {"unlocked": True, **grant, "content": p["deep_dive"],
             "balance_tube": ledger.balance(conn, account_id), "data_basis": _basis(settings)}
 
@@ -201,6 +215,10 @@ def unlock_compare(conn: Conn, settings: AppSettings, account_id: Account,
                    key: IdempotencyKey, as_of: AsOf):
     """Open "다른 학교, 같은 과" with 튜브. Never charged when the other schools are too few."""
     person_id, payload = _member(conn, account_id, as_of)
+    return _open_compare(conn, settings, account_id, person_id, payload, as_of, key)
+
+
+def _open_compare(conn, settings, account_id, person_id, payload, as_of, key) -> dict:
     out = _run(lambda: acq.result(conn, payload, "other_schools",
                                   layers=settings.career_map_data_layers, as_of=as_of,
                                   exclude=(person_id,)))["result"]
@@ -211,15 +229,73 @@ def unlock_compare(conn: Conn, settings: AppSettings, account_id: Account,
                               acq.insight_key(payload, COMPARE_TARGET),
                               {"effective_n": out["effective_n"],
                                "fallback_reason": out["fallback_reason"]}, key)
-    except ledger.InsufficientCredit as exc:
-        raise HTTPException(402, {"message": "튜브가 부족해요", "balance": exc.balance,
-                                  "required": exc.required}) from exc
-    except ledger.IdempotencyConflict as exc:
-        raise HTTPException(422, "Idempotency-Key reused for a different unlock") from exc
-    except ledger.PolicyUnavailable as exc:
-        raise HTTPException(503, "unlock is not available right now") from exc
+    except (ledger.InsufficientCredit, ledger.IdempotencyConflict,
+            ledger.PolicyUnavailable) as exc:
+        raise _unlock_error(exc) from exc
     return {"unlocked": True, **grant, "result": out,
             "balance_tube": ledger.balance(conn, account_id), "data_basis": _basis(settings)}
+
+
+# --- paid cards: 튜브 bought through Toss Payments (migration 0037) ---------------------------
+
+def payment_provider(settings: AppSettings) -> payments.PaymentProvider | None:
+    return payments.get_provider(settings)
+
+
+Provider = Annotated[payments.PaymentProvider | None, Depends(payment_provider)]
+OPENERS = {SCHOOL_COMPARE: _open_compare, DEEP_DIVE: _open_deep_dive}
+
+
+class OrderRequest(BaseModel):
+    insight_type: Literal["SCHOOL_COMPARE", "PATH_DEEP_DIVE"]
+    internal: bool = False
+
+
+@router.post("/me/payments")
+def create_order(body: OrderRequest, conn: Conn, account_id: Account, provider: Provider,
+                 as_of: AsOf):
+    """The checkout for one card: price and 튜브 come from the active pricing_policy."""
+    _member(conn, account_id, as_of)
+    if provider is None:
+        raise HTTPException(409, {"message": "지금은 결제할 수 없어요"})
+    try:
+        return payments.create_order(conn, account_id, body.insight_type, body.internal)
+    except payments.PaymentFailed as exc:
+        raise HTTPException(exc.status, {"message": exc.message}) from exc
+
+
+class ConfirmRequest(BaseModel):
+    order_id: str = Field(min_length=6, max_length=64)
+    payment_key: str = Field(min_length=1, max_length=200)
+    amount: int = Field(gt=0)
+
+
+@router.post("/me/payments/confirm")
+def confirm_payment(body: ConfirmRequest, conn: Conn, settings: AppSettings, account_id: Account,
+                    provider: Provider, as_of: AsOf):
+    """After the payment window: confirm with Toss, credit the 튜브, then open the card it was
+    bought for (a card the sample cannot support keeps the 튜브 in the balance)."""
+    if provider is None:
+        raise HTTPException(409, {"message": "지금은 결제할 수 없어요"})
+    try:
+        out = payments.confirm(conn, account_id, body.order_id, body.payment_key, body.amount,
+                               provider)
+    except payments.PaymentFailed as exc:
+        raise HTTPException(exc.status, {"message": exc.message}) from exc
+    if not out["paid"]:
+        # Kept: the failure is recorded with this request (no exception, so it commits).
+        return JSONResponse(status_code=402, content={"detail": {"message": out["message"]}})
+    opened = False
+    opener = OPENERS.get(out["insight_type"])
+    if opener:
+        person_id, payload = _member(conn, account_id, as_of)
+        try:
+            opened = bool(opener(conn, settings, account_id, person_id, payload, as_of,
+                                 f"order-{body.order_id}").get("unlocked"))
+        except HTTPException:
+            opened = False
+    return {"paid": True, "opened": opened, "insight_type": out["insight_type"],
+            "balance_tube": ledger.balance(conn, account_id)}
 
 
 @router.get("/me/step/{step}")

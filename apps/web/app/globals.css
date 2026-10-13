@@ -454,3 +454,10 @@ body { word-break: keep-all; overflow-wrap: break-word; }
 .locked-chart .lrow { display: grid; gap: 4px; }
 .locked-chart i { display: block; height: 10px; border-radius: 3px; background: var(--s1); }
 .locked-chart i.o { background: var(--s2); }
+.paynote { margin: 6px 0 0; color: var(--sub); font-size: 12px; line-height: 1.5; }
+.paynote a { color: var(--mint-ink); }
+/* Seller information (전자상거래법): small, at the bottom of every page that sells. */
+.bizinfo { margin: 24px 0 0; color: var(--sub); font-size: 11.5px; line-height: 1.7; text-align: center; }
+.bizinfo p { margin: 0; }
+.bizinfo a { color: inherit; }
+.lfoot .bizinfo { flex-basis: 100%; text-align: left; margin-top: 8px; }

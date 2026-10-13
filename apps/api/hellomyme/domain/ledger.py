@@ -104,6 +104,16 @@ def grant_reward(conn: Connection, account_id: str, action_type: str, reference_
                    policy_version=policy.version)
 
 
+def purchase(conn: Connection, account_id: str, amount: int, order_id: str, *,
+             policy_id: str | None = None, policy_version: str | None = None) -> LedgerEntry:
+    """튜브 bought with money (a confirmed payment_order). Once per order."""
+    lock_account(conn, account_id)
+    return _insert(conn, account_id=account_id, amount=amount, direction="CREDIT",
+                   reason_type="PURCHASE", reference_type="PAYMENT_ORDER", reference_id=order_id,
+                   key=f"purchase:{order_id}", policy_type="PRICING_POLICY", policy_id=policy_id,
+                   policy_version=policy_version)
+
+
 def spend(conn: Connection, account_id: str, amount: int, *, reason_type: str,
           reference_type: str, reference_id: str, key: str, policy_type=None, policy_id=None,
           policy_version=None) -> LedgerEntry:
