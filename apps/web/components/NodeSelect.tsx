@@ -5,8 +5,9 @@ import { useMemo } from "react";
 import type { Node } from "@/lib/api";
 
 /** A role (or major) pick list grouped by parent. */
-export default function NodeSelect({ nodes, value, onChange, empty = "선택", ariaLabel }: {
+export default function NodeSelect({ nodes, value, onChange, empty = "선택", ariaLabel, id, invalid }: {
   nodes: Node[]; value: string; onChange: (v: string) => void; empty?: string; ariaLabel?: string;
+  id?: string; invalid?: boolean;
 }) {
   const groups = useMemo(() => {
     const g = new Map<string, Node[]>();
@@ -14,7 +15,8 @@ export default function NodeSelect({ nodes, value, onChange, empty = "선택", a
     return [...g.entries()];
   }, [nodes]);
   return (
-    <select value={value} aria-label={ariaLabel} onChange={(e) => onChange(e.target.value)}>
+    <select id={id} value={value} aria-label={ariaLabel} aria-invalid={invalid || undefined}
+            onChange={(e) => onChange(e.target.value)}>
       <option value="">{empty}</option>
       {groups.map(([parent, list]) => (
         <optgroup key={parent} label={parent}>

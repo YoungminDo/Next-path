@@ -435,3 +435,8 @@ body { word-break: keep-all; overflow-wrap: break-word; }
 .changes li { display: grid; gap: 2px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
 .changes .before { color: var(--sub); font-size: 13px; text-decoration: line-through; }
 .changes .after { font-weight: 600; }
+/* Landing form tabs: who is answering (student / working), chosen before the questions. */
+.herotabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; background: #24272b; border-radius: 12px; }
+.herotabs button { border: 0; border-radius: 9px; padding: 10px 6px; background: transparent; color: #c9cdd2; font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; }
+.herotabs button[aria-selected="true"] { background: #fff; color: #141517; }
+.check a, .consent-more a { color: var(--mint-ink); }

@@ -301,7 +301,28 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
       major_node_id: params.get("major") ?? "", major_raw: params.get("major_raw") ?? "",
       admission_year: params.get("adm") ?? "", graduation_year: params.get("grad") ?? "",
     };
-    if (type === "pro") { setUserType("PROFESSIONAL"); setEdu(fromHero); setScreen("p_now"); }
+    const eduDone = (fromHero.institution_id || fromHero.institution_raw) && (fromHero.major_node_id || fromHero.major_raw)
+      && fromHero.admission_year && fromHero.graduation_year;
+    if (type === "pro") {
+      setUserType("PROFESSIONAL");
+      setEdu(fromHero);
+      const heroJob: Job = { ...emptyJob, role_node_id: params.get("role") ?? "", start_year: params.get("start") ?? "" };
+      setCurrent(heroJob);
+      if (eduDone && heroJob.role_node_id && heroJob.start_year) {
+        // Everything answered on the landing (현직자 tab): straight to the result preview.
+        setScreen("finding");
+        run(async () => {
+          try {
+            await toTeaser(fromHero, "PROFESSIONAL", heroJob);
+          } catch (e) {
+            setScreen("p_now"); // answers stay filled in; the error says what to change
+            throw e;
+          }
+        })();
+        return;
+      }
+      setScreen("p_now");
+    }
     if (type === "upload" || startOn === "upload") {
       // A member opening the upload link fills in their own profile instead (straight away, so a
       // quick upload never takes the before-login path).
@@ -321,8 +342,7 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
     }
     if (type === "student") {
       setEdu(fromHero);
-      if ((fromHero.institution_id || fromHero.institution_raw) && (fromHero.major_node_id || fromHero.major_raw)
-          && fromHero.admission_year && fromHero.graduation_year) {
+      if (eduDone) {
         // All four answers: straight to the result preview, with a "finding" screen meanwhile.
         setScreen("finding");
         run(async () => {
@@ -364,7 +384,7 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
     };
   }
 
-  function payload(e: Edu, type: UserType) {
+  function payload(e: Edu, type: UserType, cur: Job = current) {
     const job = (j: Job) => ({
       organization_id: j.organization_id ?? null,
       organization_name: j.organization_name || null,
@@ -387,7 +407,7 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
         admission_year: Number(e.admission_year),
         graduation_year: Number(e.graduation_year),
       },
-      current_job: type === "PROFESSIONAL" && current.role_node_id ? job(current) : null,
+      current_job: type === "PROFESSIONAL" && cur.role_node_id ? job(cur) : null,
       first_job: file?.first_job ? { ...file.first_job, role_node_id: file.first_job.role_node_id! } : null,
       first_job_is_current: file?.first_job_is_current ?? false,
       other_jobs: file?.other_jobs ?? [],
@@ -426,8 +446,8 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
   const settle = (p: Promise<unknown>, ms: number) =>
     Promise.race([p, new Promise((done) => setTimeout(done, ms))]);
 
-  async function toTeaser(e: Edu, type: UserType) {
-    const d = await acq.saveDraft(payload(e, type), draftId, isInternal());
+  async function toTeaser(e: Edu, type: UserType, cur: Job = current) {
+    const d = await acq.saveDraft(payload(e, type, cur), draftId, isInternal());
     setDraftId(d.draft_id);
     setUnl({ kinds: d.unlisted ?? [], institution: e.institution_raw, major: e.major_raw });
     track("career_input_completed", {
@@ -439,7 +459,7 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
       major_label: majors.find((m) => m.node_id === e.major_node_id)?.label ?? (e.major_raw || null),
       major_listed: Boolean(e.major_node_id) || !(d.unlisted ?? []).includes("major"),
       admission_year: Number(e.admission_year), graduation_year: Number(e.graduation_year),
-      current_role_node_id: type === "PROFESSIONAL" ? current.role_node_id || null : null,
+      current_role_node_id: type === "PROFESSIONAL" ? cur.role_node_id || null : null,
       from_file: Boolean(importId),
     });
     if (importId) {
@@ -819,8 +839,10 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
                              value={desired} onChange={changeDesired} />
               <label className="check">
                 <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
-                입력한 학교·경력 정보를 HMM 계정과 연결해 결과 제공과 익명 통계에 쓰는 것에 동의해요.
-                {" "}<a href="/privacy" target="_blank" rel="noreferrer">개인정보처리방침</a>
+                <span>
+                  입력한 학교·경력 정보를 HMM 계정과 연결해 결과 제공과 익명 통계에 쓰는 것에 동의해요.
+                  {" "}<a href="/privacy" target="_blank" rel="noreferrer">개인정보처리방침</a>
+                </span>
               </label>
               <button className="cta kakao" disabled={!consent || busy} onClick={() => void kakao()}>카카오로 3초 만에 보기</button>
               {app && app !== "kakaotalk" && (

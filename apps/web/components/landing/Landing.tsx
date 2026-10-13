@@ -44,7 +44,7 @@ export default function Landing({ options }: { options: Options }) {
             <li>로그인은 카카오로 3초, 무료예요</li>
           </ul>
         </div>
-        <HeroForm institutions={options.institutions} majors={options.majors} />
+        <HeroForm institutions={options.institutions} majors={options.majors} roles={options.roles} />
       </header>
 
       <a className="reward" href="#hero-form">
