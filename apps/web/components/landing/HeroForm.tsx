@@ -5,13 +5,12 @@ import { useEffect, useState } from "react";
 import SearchSelect, { type Picked } from "@/components/SearchSelect";
 import { acq, type Institution, type Node } from "@/lib/api";
 import { track } from "@/lib/track";
+import { YEARS } from "@/lib/years";
 
 /* HeyDealer pattern: the answer starts inside the hero. Four answers, one button, and the flow
    opens directly on the teaser and the free login. School and major are searchable; a name that
    is not in the list is accepted as typed. If the API is unreachable the button still opens the flow. */
 
-const THIS_YEAR = new Date().getFullYear();
-const YEARS = Array.from({ length: 22 }, (_, i) => THIS_YEAR + 4 - i);
 
 export default function HeroForm(props: { institutions: Institution[]; majors: Node[] }) {
   const [institutions, setInstitutions] = useState(props.institutions);

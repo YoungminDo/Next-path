@@ -30,6 +30,7 @@ import { ImportedJobs, ImportEntry, importRows, ImportReview, ImportUpload, toPa
 import NodeSelect from "@/components/NodeSelect";
 import SearchSelect, { type Picked } from "@/components/SearchSelect";
 import { inAppBrowser, isInternal, track } from "@/lib/track";
+import { YEARS } from "@/lib/years";
 
 /* Order (product decision): input -> teaser (how many people, how many directions) -> login ->
    every distribution, intent and path. The server enforces the same gate: before login it only
@@ -43,8 +44,6 @@ type UserType = "STUDENT" | "PROFESSIONAL";
 const DEV_LOGIN = process.env.NEXT_PUBLIC_ENABLE_DEV_LOGIN === "true";
 const RESULT_SCREENS = new Set<Screen>(["s_result", "s_intent", "p_next", "p_first", "p_similar", "me"]);
 const CONSENT_VERSION = process.env.NEXT_PUBLIC_CONSENT_POLICY_VERSION ?? "career_terms_v1";
-const THIS_YEAR = new Date().getFullYear();
-const YEARS = Array.from({ length: 30 }, (_, i) => THIS_YEAR + 4 - i);
 
 const INTERVIEW_SKIPPED = "hellomyme.interview_skipped";
 // The version of the interview consent wording shown in InterviewStep; change both together.
