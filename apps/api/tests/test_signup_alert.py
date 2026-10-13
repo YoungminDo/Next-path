@@ -56,7 +56,7 @@ def test_a_new_member_is_announced_once_with_the_channel_only(ids):  # noqa: F81
     msg = slack.messages[0]
     assert msg.startswith(":tada: *nextpath 회원가입* — 학생")
     # Visitor-supplied text is inert: no mention, link or bold can be injected.
-    assert "유입 `insta channel`" in msg and "캠페인 `fall promo`" in msg
+    assert "유입 `insta !channel`" in msg and "캠페인 `fall_*promo*`" in msg
     assert "<!channel>" not in msg and "오늘 " in msg and "누적 " in msg
     assert msg.endswith("<https://nextpath.da-sh.io/admin|대시보드에서 보기>")
     assert draft not in msg and "고려" not in msg  # no ids, no school

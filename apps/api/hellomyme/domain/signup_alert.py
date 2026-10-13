@@ -45,10 +45,11 @@ def get_notifier(settings: Settings) -> Notifier | None:
 
 
 def _plain(value: object, limit: int = 40) -> str | None:
-    """A visitor-supplied value (utm, referrer) as inert text: no Slack markup, links or mentions."""
+    """A visitor-supplied value (utm, referrer) as inert text inside a code span: without < > &
+    no link or mention can form, without a backtick it cannot leave the span."""
     if not isinstance(value, str):
         return None
-    cleaned = re.sub(r"[<>&*_~`|@!\s]+", " ", value).strip()[:limit]
+    cleaned = re.sub(r"[<>&`\s]+", " ", value).strip()[:limit]
     return cleaned or None
 
 
