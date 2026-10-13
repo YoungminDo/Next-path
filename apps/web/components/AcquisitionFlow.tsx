@@ -124,9 +124,11 @@ export function basisText(f: CohortFilters | undefined, reasons: string[],
                           professional: boolean): string | null {
   if (!f) return null;
   const parts = professional ? ["같은 직무"] : [];
-  parts.push(f.institution_ids?.length ? "같은 학교" : "여러 학교");
-  parts.push(f.majors?.length
-    ? (reasons.includes("BROADEN_MAJOR_1_LEVEL") ? "비슷한 전공 계열" : "같은 전공") : "여러 전공");
+  const sim = f.similar ?? {};
+  parts.push(sim.region ? `${sim.region} 지역 학교` : f.institution_ids?.length ? "같은 학교" : "여러 학교");
+  const family = reasons.includes("BROADEN_MAJOR_1_LEVEL") || sim.major === "FAMILY";
+  parts.push(!f.majors?.length ? "여러 전공"
+    : family ? "비슷한 전공 계열" : sim.major ? "비슷한 전공" : "같은 전공");
   const g = spread(f.graduation_year, Number(years.graduation_year));
   const a = professional ? null : spread(f.admission_year, Number(years.admission_year));
   if (g === null && a === null) parts.push("모든 학번");
@@ -199,7 +201,6 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
   const [notice, setNotice] = useState<{ screen: Screen; text: string }>();
 
   const professional = userType === "PROFESSIONAL";
-  const simulation = (me?.data_basis ?? base?.data_basis ?? teaser?.data_basis) === "SIMULATION";
 
   // Funnel: which result steps people reach and how long they stay on each (docs/10).
   const shownAt = useRef<{ screen: Screen; at: number } | null>(null);
@@ -647,7 +648,8 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
   const teaserBasis = teaser && basisText(teaser.base.effective_filters, teaser.base.fallback_reason, years, professional);
   const startCaption = (f?: CohortFilters) =>
     professional ? "나와 같은 자리에 있었던 사람"
-      : f && !f.institution_ids?.length && !f.majors?.length ? "나와 학번이 비슷한 사람" : "나와 같은 출발점에서 시작한 사람";
+      : f && !f.institution_ids?.length && !f.majors?.length ? "나와 학번이 비슷한 사람"
+        : f?.similar ? "나와 비슷한 출발점에서 시작한 사람" : "나와 같은 출발점에서 시작한 사람";
 
   return (
     <main className="app">
@@ -872,9 +874,6 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
 
       {screen === "me" && me && <MyScreen me={me} busy={busy} onUnlock={unlock} onChangeIntent={changeIntent}
                                           onInterview={openInterview} onImport={openImport} />}
-      {simulation && (RESULT_SCREENS.has(screen) || screen === "gate") && (
-        <p className="beta-note">베타 · 실제 기록이 모이기 전까지 결과는 예시 데이터로 계산돼요</p>
-      )}
     </main>
   );
 }

@@ -326,8 +326,6 @@ body { word-break: keep-all; overflow-wrap: break-word; }
 .hint .link { font-size: inherit; padding: 0; }
 .desired .search-select input { color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 12px; font-size: 15px; }
 .search-select.invalid input, .heroform select[aria-invalid="true"] { outline: 2px solid var(--danger); outline-offset: 1px; }
-/* Beta note under results while results are computed from example data */
-.beta-note { color: var(--sub); font-size: 12px; margin: 8px 0 0; text-align: center; }
 
 /* Team dashboard (/admin). Series colors from the dataviz reference palette, validated for both
    modes (scripts/validate_palette.js: light #2a78d6,#eb6834,#1baf7a; dark #3987e5,#d95926,#199e70).

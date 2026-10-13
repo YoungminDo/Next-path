@@ -54,6 +54,7 @@ Interview phone numbers: own consent (INTERVIEW_CONTACT), optional, never logged
 Uploaded resumes/captures are never stored; overseas-transfer consent is recorded before the read; read rows
 become career records only as the person confirmed them (before login: through the draft and the login merge);
 the raw read is kept for statistics only with its own optional consent (0031, 3 years).
-While results come from PRE_SEED, result screens keep one small beta line (`data_basis ===
-"SIMULATION"`); test/SIMULATION banners are gone for the demand test, but simulated numbers are
-never presented as real people's outcomes.
+Preview/result screens carry no beta or example-data line (owner decision 2026-10-13); the landing FAQ
+and landing footer still say results are computed from example data while records are collected.
+Typed names the list does not know count the nearest group (`cohort_inputs`: region, similar majors), never
+everyone of that year when the name gives a clue (docs/10 §숫자 아래 기준 표시).

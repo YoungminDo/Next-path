@@ -216,8 +216,12 @@ def addon_sql(plan: dict, *, version: str = "v1.4", base_version: str = "v1.3",
     def q(v: str) -> str:
         return "'" + v.replace("'", "''") + "'"
 
-    rows = ",\n".join(f"({i}, {q(c['school']['name'])}, {q(c['node'])}, {int(c['n'])})"
-                      for i, c in enumerate(plan["cells"], start=1))
+    # One line per school ("code:n code:n ..."), unfolded in SQL: a third of the size.
+    by_school: dict[str, list[str]] = {}
+    for c in plan["cells"]:
+        by_school.setdefault(c["school"]["name"], []).append(f"{c['node']}:{int(c['n'])}")
+    rows = ",\n".join(f"({i}, {q(name)}, {q(' '.join(cells))})"
+                       for i, (name, cells) in enumerate(by_school.items(), start=1))
     digest = hashlib.sha256(f"{version}:{base_version}:{seed}:{rows}".encode()).hexdigest()
     system, base_system = f"PRESEED_{version}", f"PRESEED_{base_version}"
     prefix = f"PS{version.lstrip('v').replace('.', '')}_K"
@@ -247,8 +251,12 @@ BEGIN
     RETURNING import_batch_id INTO b;
 
     CREATE TEMP TABLE np_plan (k int, school text, major_code text, n int) ON COMMIT DROP;
-    INSERT INTO np_plan VALUES
-{rows};
+    INSERT INTO np_plan
+    SELECT row_number() OVER (ORDER BY s.ord, u.ord), s.school, split_part(u.cell, ':', 1),
+           split_part(u.cell, ':', 2)::int
+      FROM (VALUES
+{rows}) AS s(ord, school, cells)
+     CROSS JOIN LATERAL unnest(string_to_array(s.cells, ' ')) WITH ORDINALITY AS u(cell, ord);
 
     SELECT count(*) INTO missing FROM np_plan pl
      WHERE NOT EXISTS (SELECT 1 FROM institution i WHERE i.name = pl.school AND i.is_active);

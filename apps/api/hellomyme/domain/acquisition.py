@@ -279,16 +279,129 @@ def _require(p: AcquisitionPayload, *parts: str) -> None:
         raise QueryInvalid(f"missing input: {', '.join(missing)}")
 
 
+# --- unlisted names: the nearest group ----------------------------------------------------
+# A typed name the list does not know still tells something: 경영정보학과 is close to 경영학과,
+# 데이터사이언스학과 belongs to 수학·통계·데이터, a school named after 부산 is a 부산 school. The
+# cohort starts from those, with the same years and the same widening ladder as a listed answer,
+# so an unlisted answer lands on a group of the same size, never on everyone of that year. A name
+# that tells nothing leaves the dimension out, as before.
+
+# How people write a name beyond the list's own (the web's SearchSelect uses the same list).
+NAME_SUFFIXES = ("학과", "학부", "전공", "계열", "과")
+# Region words in school names, as institution.region writes them (cities name their province).
+REGION_WORDS = {
+    **{r: r for r in ("서울", "부산", "대구", "인천", "광주", "대전", "울산", "세종", "경기", "강원",
+                      "충북", "충남", "전북", "전남", "경북", "경남", "제주")},
+    "충청북": "충북", "충청남": "충남", "전라북": "전북", "전라남": "전남", "경상북": "경북",
+    "경상남": "경남", "수원": "경기", "용인": "경기", "성남": "경기", "안산": "경기", "안양": "경기",
+    "평택": "경기", "의정부": "경기", "춘천": "강원", "원주": "강원", "강릉": "강원", "청주": "충북",
+    "충주": "충북", "천안": "충남", "아산": "충남", "전주": "전북", "군산": "전북", "익산": "전북",
+    "목포": "전남", "순천": "전남", "여수": "전남", "포항": "경북", "경주": "경북", "안동": "경북",
+    "경산": "경북", "창원": "경남", "진주": "경남", "김해": "경남",
+}
+
+
+def _norm_name(s: str) -> str:
+    return re.sub(r"[\s·・,./()\[\]_&+-]+", "", s.lower())
+
+
+def _name_base(s: str) -> str:
+    """The name without the usual suffix (경영학과 -> 경영, 생명과학과 -> 생명과)."""
+    n = _norm_name(s)
+    for suffix in sorted(NAME_SUFFIXES, key=len, reverse=True):
+        if n.endswith(suffix) and len(n) > len(suffix) + 1:
+            n = n[: -len(suffix)]
+            break
+    return n[:-1] if n.endswith("학") and len(n) > 2 else n
+
+
+def similar_majors(majors: Taxonomy, typed: str) -> tuple[tuple[str, ...], str | None]:
+    """Listed majors close to a typed major: listed names inside it (글로벌경영학부 -> 경영학과),
+    else the family it names (데이터사이언스학과 -> 수학·통계·데이터), else listed names that
+    start the same way (국어교육과 -> 국어국문학과). Returns (node ids, SIMILAR | FAMILY)."""
+    parents = {n["parent"] for n in majors.nodes.values() if n["parent"]}
+    leaves = sorted(i for i in majors.nodes if i not in parents)
+    full, base = _norm_name(typed), _name_base(typed)
+    bases = {i: _name_base(majors.nodes[i]["label"]) for i in leaves}
+    inside = sorted((i for i in leaves if len(bases[i]) >= 2 and bases[i] in base),
+                    key=lambda i: (-len(bases[i]), i))
+    if inside:
+        return tuple(inside[:3]), "SIMILAR"
+    families = sorted({majors.nodes[i]["parent"] for i in leaves if majors.nodes[i]["parent"]})
+    named = [f for f in families
+             if any(len(t) >= 2 and t in full
+                    for t in (_name_base(w) for w in majors.nodes[f]["label"].split("·")))]
+    if named:
+        return tuple(named[:3]), "FAMILY"
+
+    def shared(a: str, b: str) -> int:
+        k = 0
+        while k < min(len(a), len(b)) and a[k] == b[k]:
+            k += 1
+        return k
+    best = max((shared(base, bases[i]) for i in leaves), default=0)
+    if best >= 2:
+        return tuple([i for i in leaves if shared(base, bases[i]) == best][:3]), "SIMILAR"
+    return (), None
+
+
+def similar_region(typed: str) -> str | None:
+    """The province a typed school name names (부산○○대학교 -> 부산), if any."""
+    n = _norm_name(typed)
+    for word in sorted(REGION_WORDS, key=len, reverse=True):
+        if word in n:
+            return REGION_WORDS[word]
+    return None
+
+
+def _region_institutions(conn: Connection, region: str) -> tuple[str, ...]:
+    names = [region] + [w for w, r in REGION_WORDS.items() if r == region and w != region]
+    return tuple(conn.execute(text(
+        """SELECT institution_id::text FROM institution
+           WHERE is_active AND string_to_array(region, '/') && CAST(:names AS text[])
+           ORDER BY institution_id"""), {"names": names}).scalars())
+
+
+def cohort_inputs(conn: Connection, e: AcqEducation) -> tuple[dict, dict]:
+    """Cohort filters for the education answer, and what stood in for an unlisted name."""
+    filters, similar = e.cohort_filters(), {}
+    if not e.institution_id and e.institution_raw:
+        region = similar_region(e.institution_raw)
+        ids = _region_institutions(conn, region) if region else ()
+        if ids:
+            filters["institution_ids"], similar["region"] = ids, region
+    if not e.major_node_id and e.major_raw:
+        ids, kind = similar_majors(load_taxonomy(conn, "MAJOR"), e.major_raw)
+        if ids:
+            filters["major_node_ids"], similar["major"] = ids, kind
+    return filters, similar
+
+
+def _say_similar(result: tuple[dict, Filters], e: AcqEducation,
+                 similar: dict) -> tuple[dict, Filters]:
+    """Mark what stood in for an unlisted name, while the widened group still uses it. Nobody on
+    record has exactly an unlisted name, so the exact-match count is 0."""
+    out, eff = result
+    kept = {k: v for k, v in similar.items()
+            if (eff.institution_ids if k == "region" else eff.major_node_ids)}
+    if kept:
+        out["effective_filters"]["similar"] = kept
+    if (e.institution_raw and not e.institution_id) or (e.major_raw and not e.major_node_id):
+        out["exact_n"] = 0
+    return out, eff
+
+
 def student_first_roles(conn, p: AcquisitionPayload, *, layers, as_of, exclude=()):
     """S2: what similar seniors did first (FIRST_ROLE at the surface depth)."""
     _require(p, "education")
     e = p.education
-    return evaluate_with_filters(conn, CareerQuery(
+    filters, similar = cohort_inputs(conn, e)
+    return _say_similar(evaluate_with_filters(conn, CareerQuery(
         as_of_date=as_of, target_metric="FIRST_ROLE_DISTRIBUTION", surface_code=SURFACE,
-        **e.cohort_filters(),
+        **filters,
         admission_year_from=e.admission_year, admission_year_to=e.admission_year,
         graduation_year_from=e.graduation_year, graduation_year_to=e.graduation_year,
-        gender_codes=_gender(p), exclude_person_ids=tuple(exclude)), layers=layers)
+        gender_codes=_gender(p), exclude_person_ids=tuple(exclude)), layers=layers), e, similar)
 
 
 def professional_next_roles(conn, p: AcquisitionPayload, *, layers, as_of, exclude=(),
@@ -303,12 +416,13 @@ def professional_next_roles(conn, p: AcquisitionPayload, *, layers, as_of, exclu
             raise QueryInvalid("first job is needed for similar paths")
         first = (_surface_node(conn, roles, p.first_job.role_node_id),)
     e = p.education
-    return evaluate_with_filters(conn, CareerQuery(
+    filters, similar = cohort_inputs(conn, e)
+    return _say_similar(evaluate_with_filters(conn, CareerQuery(
         as_of_date=as_of, target_metric="NEXT_ROLE_DISTRIBUTION", surface_code=SURFACE,
-        **e.cohort_filters(),
+        **filters,
         graduation_year_from=e.graduation_year, graduation_year_to=e.graduation_year,
         gender_codes=_gender(p), from_role_node_ids=(current,), first_role_node_ids=first,
-        exclude_person_ids=tuple(exclude)), layers=layers)
+        exclude_person_ids=tuple(exclude)), layers=layers), e, similar)
 
 
 def _months(a: date, b: date) -> int:

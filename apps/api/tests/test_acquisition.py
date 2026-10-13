@@ -201,6 +201,59 @@ def test_unlisted_school_or_major_is_typed_in_and_still_answered(client, engine,
     assert r.status_code == 422
 
 
+def test_unlisted_names_compare_with_the_nearest_group(client, ids):  # noqa: F811
+    """A typed name the list does not know still says something: 경영정보 is close to 경영학, a
+    school named after 서울 is a 서울 school. The group is then the one a listed answer gets
+    (same size, same widening), not everyone of those years; for students and professionals."""
+    h = anon()
+    years = {"admission_year": 2016, "graduation_year": 2020}
+    listed = step(client, h, save(client, h, student(ids)), "teaser")["base"]
+    pro_job = {"current_job": {"organization_name": "어딘가", "role_node_id": ids["R3"],
+                               "start_year": 2021}}
+    listed_pro = step(client, h, save(client, h, {**student(ids), "user_type": "PROFESSIONAL",
+                                                  **pro_job}), "teaser")["base"]
+    for edu, similar in (
+            ({"institution_id": ids["inst"], "major_raw": "글로벌경영정보학부"}, {"major": "SIMILAR"}),
+            ({"institution_raw": "서울목록밖대학교", "major_node_id": ids["M3"]}, {"region": "서울"}),
+            ({"institution_raw": "서울목록밖대학교", "major_raw": "경영정보학과"},
+             {"region": "서울", "major": "SIMILAR"})):
+        for payload, want in (({"user_type": "STUDENT"}, listed),
+                              ({"user_type": "PROFESSIONAL", **pro_job}, listed_pro)):
+            t = step(client, h, save(client, h, {**payload, "education": {**edu, **years}}),
+                     "teaser")
+            base = t["base"]
+            assert (base["effective_n"], base["fallback_reason"]) == (
+                want["effective_n"], want["fallback_reason"]), (edu, payload["user_type"])
+            assert base["effective_filters"]["similar"] == similar
+            assert base["exact_n"] == 0  # nobody on record has exactly the typed name
+            assert t["unlisted"]
+
+
+def test_similar_major_and_region_rules():
+    from hellomyme.domain.acquisition import similar_majors, similar_region
+    from hellomyme.domain.career_query import Taxonomy
+
+    def node(label, depth, parent=None):
+        return {"code": label, "label": label, "depth": depth, "parent": parent}
+    majors = Taxonomy("MAJOR", "t", {
+        "F0": node("사회과학", 1), "F1": node("경영·경제", 2, "F0"),
+        "F2": node("수학·통계·데이터", 2, "F0"), "F3": node("언어·문학", 2, "F0"),
+        "L1": node("경영학과", 3, "F1"), "L2": node("경제학과", 3, "F1"),
+        "L3": node("통계학과", 3, "F2"), "L4": node("수학과", 3, "F2"),
+        "L5": node("국어국문학과", 3, "F3")})
+    assert similar_majors(majors, "글로벌경영학부") == (("L1",), "SIMILAR")
+    assert similar_majors(majors, "경영정보학과") == (("L1",), "SIMILAR")
+    assert similar_majors(majors, "수학교육과") == (("L4",), "SIMILAR")
+    assert similar_majors(majors, "데이터사이언스학과") == (("F2",), "FAMILY")
+    assert similar_majors(majors, "독어독문학과") == (("F3",), "FAMILY")
+    assert similar_majors(majors, "국어교육과") == (("L5",), "SIMILAR")  # starts the same way
+    assert similar_majors(majors, "QA테스트학과") == ((), None)
+    assert similar_region("부산목록밖대학교") == "부산"
+    assert similar_region("충청남도 목록밖대학") == "충남"
+    assert similar_region("수원목록밖대") == "경기"
+    assert similar_region("QA테스트대학교") is None
+
+
 def test_typed_names_the_list_knows_are_matched(client, ids):  # noqa: F811
     """'경영학과' is how people write the major whose list name is 경영학 (an alias): it must
     count as the listed major, not as an unknown one that drops the major from the cohort."""

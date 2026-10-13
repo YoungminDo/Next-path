@@ -84,6 +84,9 @@ export type CohortFilters = {
   institution_ids?: string[]; majors?: { node_id: string; code: string; label: string }[];
   admission_year?: { from: number | null; to: number | null } | null;
   graduation_year?: { from: number | null; to: number | null } | null;
+  /** What stood in for a typed name the list does not know: its region, or listed majors close
+   * to it (SIMILAR) or the family it names (FAMILY). */
+  similar?: { region?: string; major?: "SIMILAR" | "FAMILY" };
 };
 export type QueryResult = {
   exact_n: number; effective_n: number; fallback_reason: string[]; suppressed: boolean;
