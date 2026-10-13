@@ -139,7 +139,7 @@
 - 학교 목록에 있어도 그 학교 경력 데이터가 없으면, 결과는 학교 조건을 넓혀서 계산되고 숫자 아래 기준 표시("여러 학교 · …")로 그렇게 말한다.
 
 ## PRE_SEED v1.4 (4년제 전체, 추가분)
-- **무엇:** v1.3(24개 학교 × 20개 전공, 2만 명)에 더해, 학과 정보가 공개된 4년제(대학교·산업대학) 137곳 정도에
+- **무엇:** v1.3(24개 학교 × 20개 전공, 2만 명)에 더해, 학과 정보가 공개되고 20개 전공 중 하나라도 있는 4년제 119곳에
   예시 인물을 만든다. 시뮬레이션 데이터이며 실제 사람이 아니다(결과 화면 베타 문구 유지, 사람으로 보여주지 않음).
 - **만드는 방법(`hellomyme-make-preseed`, `importer/generate.py`):**
   - 학교: `reference/kr_institutions.csv`의 4년제 중 v1.3에 없고 `reference/kr_school_departments.csv`에 학과가 공개된 곳.
@@ -149,10 +149,13 @@
     나오는 최소 인원(`cohort_policy.min_exact_n`)이다.
   - 사람: v1.3의 같은 전공 사람을 통째로 복사한다(학번·경력 이벤트·근거 그대로, 수도권/비수도권 학교끼리).
     바뀌는 것은 id·근거 번호·학교뿐이다. 같은 v1.3 파일과 seed면 항상 같은 결과가 나온다.
-- **넣기:** PC의 PowerShell에서 `irm https://raw.githubusercontent.com/YoungminDo/Next-path/main/scripts/add-preseed-schools.ps1 | iex`
+- **넣기 (DB에 v1.3이 있으면):** `generate.addon_sql(plan_cells(...))`가 만든 SQL 한 덩어리(DO 블록, 한 트랜잭션)를
+  DB에서 실행한다. DB 안의 v1.3 사람을 같은 규칙으로 골라 importer와 같은 형태(근거 기록·키 매핑·import 배치)로 쓰므로
+  `--retire v1.4`로 그대로 빠진다. 두 번 실행하면 거부하고, 확인이 하나라도 틀리면 전부 되돌린다.
+- **넣기 (엑셀로):** PC의 PowerShell에서 `irm https://raw.githubusercontent.com/YoungminDo/Next-path/main/scripts/add-preseed-schools.ps1 | iex`
   (v1.3 엑셀을 다운로드 폴더에서 찾고, 만들고, DB 연결 문자열을 물은 뒤 v1.3 옆에 import). v1.3은 그대로 남는다.
 - **빼기:** v1.3 import를 `--retire v1.4`로 다시 실행하면 추가분만 지워진다.
-- **크기:** 약 3.8만 명 추가(137곳 × 개설 전공 949칸) → DB 약 400MB 예상(Supabase Pro, 8GB 포함).
+- **크기:** 약 3.8만 명 추가(119곳 × 개설 전공 949칸) → DB 약 400MB 예상(Supabase Pro, 8GB 포함).
 - **빼는 시간:** 0033(외래키 인덱스) 이후 약 2분(그 전에는 사람 삭제가 연쇄 삭제마다 표 전체를 읽어 수십 분).
 - **속도:** 첫 직장 계산을 코호트 사람에게만 하도록 바꿔(0034 `first_employment_for`) 5만 명 기준 미리보기 0.03~0.2초,
   비슷한 경로 0.2~0.3초(로컬 측정, 바꾸기 전 1.2~3초).

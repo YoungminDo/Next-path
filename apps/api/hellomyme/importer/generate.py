@@ -74,6 +74,43 @@ def _cell_size(rank: float, key: str, low: int, high: int) -> int:
     return max(low, min(high, round(low + (high - low) * rank) + spread))
 
 
+def plan_cells(base_names: set[str], leaves: dict[str, str], *, seed: int = 14, low: int = 30,
+               high: int = 45, institutions: Path | None = None,
+               departments: Path | None = None) -> dict:
+    """Which schools get people, for which majors (leaf key -> display name), and how many.
+    Shared by the workbook add-on and the SQL add-on, so both make the same cohorts."""
+    institutions = institutions or REFERENCE / "kr_institutions.csv"
+    departments = departments or REFERENCE / "kr_school_departments.csv"
+    rules = {node: rule for node, name in leaves.items() if (rule := _rule(name))}
+    depts = defaultdict(list)
+    with open(departments, encoding="utf-8") as f:
+        for r in csv.DictReader(f):
+            depts[r["school"]].append(r["department"])
+    with open(institutions, encoding="utf-8") as f:
+        schools = [r for r in csv.DictReader(f) if r["school_level"] == "UNIVERSITY"
+                   and r["school_kind"] in KINDS and r["name"] not in base_names]
+    with_depts = sorted((s for s in schools if depts.get(s["name"])), key=lambda s: s["name"])
+    sizes = sorted(len(depts[s["name"]]) for s in with_depts)
+
+    def rank(n: int) -> float:
+        return sum(1 for x in sizes if x < n) / max(len(sizes) - 1, 1)
+
+    cells = []
+    for school in with_depts:
+        r = rank(len(depts[school["name"]]))
+        for node, rule in sorted(rules.items()):
+            if any(rule.search(d) for d in depts[school["name"]]):
+                cells.append({"school": school, "node": node,
+                              "n": _cell_size(r, f"{seed}:{school['name']}:{node}", low, high)})
+    used = {c["school"]["name"] for c in cells}
+    return {"schools": [s for s in with_depts if s["name"] in used], "cells": cells,
+            "schools_without_departments": sorted(s["name"] for s in schools
+                                                  if not depts.get(s["name"])),
+            # Departments published, but none of them is one of the base majors.
+            "schools_without_majors": sorted(s["name"] for s in with_depts
+                                             if s["name"] not in used)}
+
+
 def generate(base: Path, out: Path, *, version: str = "v1.4", seed: int = 14, low: int = 30,
              high: int = 45, institutions: Path | None = None,
              departments: Path | None = None) -> dict:
@@ -100,8 +137,6 @@ def generate(base: Path, out: Path, *, version: str = "v1.4", seed: int = 14, lo
     tax_type.update({t["taxonomy_type"]: t["taxonomy_type"] for t in sheets["taxonomies"]})
     leaves = {n["taxonomy_node_id"]: n.get("display_name") or n["canonical_name"] for n in nodes
               if tax_type.get(n.get("taxonomy_id")) == "MAJOR" and n["taxonomy_node_id"] not in parents}
-    rules = {node: rule for node, name in leaves.items() if (rule := _rule(name))}
-
     edus_by_person = defaultdict(list)
     for e in sheets["educations"]:
         edus_by_person[e["person_id"]].append(e)
@@ -121,66 +156,224 @@ def generate(base: Path, out: Path, *, version: str = "v1.4", seed: int = 14, lo
         donors[(node, area)].append(p)
         donors[(node, None)].append(p)
 
-    # New schools and the majors they publish.
-    depts = defaultdict(list)
-    with open(departments, encoding="utf-8") as f:
-        for r in csv.DictReader(f):
-            depts[r["school"]].append(r["department"])
-    with open(institutions, encoding="utf-8") as f:
-        schools = [r for r in csv.DictReader(f) if r["school_level"] == "UNIVERSITY"
-                   and r["school_kind"] in KINDS and r["name"] not in base_names]
-    with_depts = sorted((s for s in schools if depts.get(s["name"])), key=lambda s: s["name"])
-    sizes = sorted(len(depts[s["name"]]) for s in with_depts)
-
-    def rank(n: int) -> float:
-        return sum(1 for x in sizes if x < n) / max(len(sizes) - 1, 1)
-
+    plan = plan_cells(base_names, leaves, seed=seed, low=low, high=high,
+                      institutions=institutions, departments=departments)
+    inst_ids = {}
     out_rows: dict[str, list[dict]] = defaultdict(list)
-    cells, k = [], 0
-    for i, school in enumerate(with_depts, start=1):
-        inst_id = f"KR{i:04d}"
-        out_rows["institutions"].append({"institution_id": inst_id, "institution_name": school["name"],
+    for i, school in enumerate(plan["schools"], start=1):
+        inst_ids[school["name"]] = f"KR{i:04d}"
+        out_rows["institutions"].append({"institution_id": inst_ids[school["name"]],
+                                         "institution_name": school["name"],
                                          "region": school["region"],
                                          "institution_type": school["institution_type"]})
-        area = _capital(school["region"])
-        r = rank(len(depts[school["name"]]))
-        for node, rule in sorted(rules.items()):
-            if not any(rule.search(d) for d in depts[school["name"]]):
-                continue
-            pool = donors.get((node, area)) or donors.get((node, None)) or []
-            if not pool:
-                continue
-            n = _cell_size(r, f"{seed}:{school['name']}:{node}", low, high)
-            rng = random.Random(f"{seed}:{school['name']}:{node}")
-            picked = rng.sample(pool, n) if len(pool) >= n else [rng.choice(pool) for _ in range(n)]
-            cells.append({"school": school["name"], "major": leaves[node], "n": n})
-            for donor in picked:
-                k += 1
-                pid, ref = f"K{k:06d}", f"PS{version.lstrip('v').replace('.', '')}_K{k:06d}"
-                out_rows["persons"].append({**donor, "person_id": pid, "source_ref": ref})
-                for j, e in enumerate(edus_by_person[donor["person_id"]], start=1):
-                    out_rows["educations"].append({**e, "education_id": f"{pid}_E{j}", "person_id": pid,
-                                                   "institution_id": inst_id, "source_ref": ref})
-                for j, w in enumerate(events_by_person[donor["person_id"]], start=1):
-                    wid = f"{pid}_W{j}"
-                    out_rows["work_events"].append({**w, "work_event_id": wid, "person_id": pid,
-                                                    "source_ref": ref})
-                    for m, s in enumerate(sources_by_event[w["work_event_id"]], start=1):
-                        out_rows["work_event_sources"].append(
-                            {**s, "work_event_source_id": f"{wid}_S{m}", "work_event_id": wid,
-                             "source_ref": ref})
+    cells, k = [], 0
+    for cell in plan["cells"]:
+        school, node, n = cell["school"], cell["node"], cell["n"]
+        pool = donors.get((node, _capital(school["region"]))) or donors.get((node, None)) or []
+        if not pool:
+            continue
+        rng = random.Random(f"{seed}:{school['name']}:{node}")
+        picked = rng.sample(pool, n) if len(pool) >= n else [rng.choice(pool) for _ in range(n)]
+        cells.append({"school": school["name"], "major": leaves[node], "n": n})
+        inst_id = inst_ids[school["name"]]
+        for donor in picked:
+            k += 1
+            pid, ref = f"K{k:06d}", f"PS{version.lstrip('v').replace('.', '')}_K{k:06d}"
+            out_rows["persons"].append({**donor, "person_id": pid, "source_ref": ref})
+            for j, e in enumerate(edus_by_person[donor["person_id"]], start=1):
+                out_rows["educations"].append({**e, "education_id": f"{pid}_E{j}", "person_id": pid,
+                                               "institution_id": inst_id, "source_ref": ref})
+            for j, w in enumerate(events_by_person[donor["person_id"]], start=1):
+                wid = f"{pid}_W{j}"
+                out_rows["work_events"].append({**w, "work_event_id": wid, "person_id": pid,
+                                                "source_ref": ref})
+                for m, src in enumerate(sources_by_event[w["work_event_id"]], start=1):
+                    out_rows["work_event_sources"].append(
+                        {**src, "work_event_source_id": f"{wid}_S{m}", "work_event_id": wid,
+                         "source_ref": ref})
 
     summary = {
         "dataset": f"HELLOMYME PRE_SEED {version}", "base": readme.get("Dataset", ""),
         "base_sha256": hashlib.sha256(Path(base).read_bytes()).hexdigest(), "seed": seed,
         "schools": len(out_rows["institutions"]), "cells": len(cells), "persons": k,
         "work_events": len(out_rows["work_events"]),
-        "schools_without_departments": sorted(s["name"] for s in schools if not depts.get(s["name"])),
+        "schools_without_departments": plan["schools_without_departments"],
+        "schools_without_majors": plan["schools_without_majors"],
         "cell_size": {"min": min((c["n"] for c in cells), default=0),
                       "max": max((c["n"] for c in cells), default=0)},
     }
     _write(out, headers, sheets, out_rows, readme, version, summary)
     return summary
+
+
+def addon_sql(plan: dict, *, version: str = "v1.4", base_version: str = "v1.3",
+              seed: int = 14) -> str:
+    """The same add-on, written straight into a database that already holds the base version:
+    one DO block (one transaction), donors drawn from the base's people in the database by the
+    same rules (same major, same area first, a fixed hash order), rows written as the importer
+    writes them (source record per person, key map, import batch) so retiring the version removes
+    exactly this. It refuses to run twice and rolls back if any check fails."""
+    def q(v: str) -> str:
+        return "'" + v.replace("'", "''") + "'"
+
+    rows = ",\n".join(f"({i}, {q(c['school']['name'])}, {q(c['node'])}, {int(c['n'])})"
+                      for i, c in enumerate(plan["cells"], start=1))
+    digest = hashlib.sha256(f"{version}:{base_version}:{seed}:{rows}".encode()).hexdigest()
+    system, base_system = f"PRESEED_{version}", f"PRESEED_{base_version}"
+    prefix = f"PS{version.lstrip('v').replace('.', '')}_K"
+    capital = "(" + "|".join(CAPITAL) + ")"
+    return f"""-- PRE_SEED {version} add-on (simulation data) from {base_version} in the database.
+-- {len(plan['cells'])} school x major cells, {sum(c['n'] for c in plan['cells'])} people. Generated by
+-- hellomyme.importer.generate.addon_sql (seed {seed}); remove with the importer's --retire {version}.
+DO $addon$
+DECLARE
+    b uuid;
+    missing int;
+BEGIN
+    IF EXISTS (SELECT 1 FROM import_batch
+                WHERE source_system = {q(system)} AND status = 'COMPLETED') THEN
+        RAISE EXCEPTION 'PRE_SEED {version} is already imported';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM import_batch
+                    WHERE source_system = {q(base_system)} AND status = 'COMPLETED') THEN
+        RAISE EXCEPTION 'PRE_SEED {base_version} is not in this database';
+    END IF;
+    INSERT INTO import_batch (dataset_name, dataset_version, source_system, source_type, data_layer,
+                              file_manifest, manifest_sha256, validation_rule_version, status)
+    VALUES ('HELLOMYME_PRESEED', {q(version)}, {q(system)}, 'PRE_SEED_FILE', 'PRE_SEED',
+            jsonb_build_object('generated_from', {q(base_version)}, 'seed', {seed},
+                               'plan_sha256', {q(digest)}),
+            {q(digest)}, 'preseed_generated_v1', 'RUNNING')
+    RETURNING import_batch_id INTO b;
+
+    CREATE TEMP TABLE np_plan (k int, school text, major_code text, n int) ON COMMIT DROP;
+    INSERT INTO np_plan VALUES
+{rows};
+
+    SELECT count(*) INTO missing FROM np_plan pl
+     WHERE NOT EXISTS (SELECT 1 FROM institution i WHERE i.name = pl.school AND i.is_active);
+    IF missing > 0 THEN RAISE EXCEPTION '% planned schools are not in the institution list', missing; END IF;
+
+    CREATE TEMP TABLE np_donor ON COMMIT DROP AS
+    SELECT p.person_id, e.major_taxonomy_node_id AS major,
+           coalesce(i.region, '') ~ {q(capital)} AS capital
+      FROM entity_key_map k
+      JOIN person p ON p.person_id = k.entity_id AND p.origin_layer = 'PRE_SEED' AND p.deleted_at IS NULL
+      JOIN education e ON e.person_id = p.person_id
+      LEFT JOIN institution i ON i.institution_id = e.institution_id
+     WHERE k.source_system = {q(base_system)} AND k.entity_type = 'PERSON'
+       AND (SELECT count(*) FROM education e2 WHERE e2.person_id = p.person_id) = 1;
+
+    CREATE TEMP TABLE np_pick ON COMMIT DROP AS
+    SELECT row_number() OVER (ORDER BY pl.k, d.ord) AS seq, pl.k, inst.institution_id AS inst_id,
+           inst.name AS inst_name, d.person_id AS donor,
+           gen_random_uuid() AS person_id, gen_random_uuid() AS source_id
+      FROM np_plan pl
+      JOIN institution inst ON inst.name = pl.school
+      JOIN taxonomy_node mn ON mn.code = pl.major_code
+      JOIN taxonomy mt ON mt.taxonomy_id = mn.taxonomy_id AND mt.taxonomy_type = 'MAJOR'
+                       AND mt.status = 'ACTIVE'
+      CROSS JOIN LATERAL (
+          SELECT x.person_id, row_number() OVER () AS ord FROM (
+              SELECT dn.person_id FROM np_donor dn
+               WHERE dn.major = mn.taxonomy_node_id
+               ORDER BY (dn.capital = (coalesce(inst.region, '') ~ {q(capital)})) DESC,
+                        md5({q(str(seed))} || ':' || pl.school || ':' || pl.major_code
+                            || ':' || dn.person_id::text)
+               LIMIT pl.n) x) d;
+
+    SELECT count(*) INTO missing FROM np_plan pl
+     WHERE pl.n > (SELECT count(*) FROM np_pick pk WHERE pk.k = pl.k);
+    IF missing > 0 THEN RAISE EXCEPTION '% cells could not be filled from {base_version}', missing; END IF;
+
+    INSERT INTO source_record (source_id, source_type, data_layer, source_system, source_key,
+                               import_batch_id, raw_payload, metadata, legal_basis)
+    SELECT pk.source_id, 'PRE_SEED_FILE', 'PRE_SEED', {q(system)},
+           {q(prefix)} || lpad(pk.seq::text, 6, '0'), b,
+           jsonb_build_object('copied_from', ds.source_key, 'institution', pk.inst_name,
+                              'donor', ds.raw_payload),
+           jsonb_build_object('dataset_version', {q(version)}, 'generated_from', {q(base_version)},
+                              'seed', {seed}),
+           'GENERATED_DATASET'
+      FROM np_pick pk JOIN person dp ON dp.person_id = pk.donor
+      LEFT JOIN source_record ds ON ds.source_id = dp.primary_source_id;
+
+    INSERT INTO person (person_id, origin_layer, declared_stage, primary_source_id, gender_code,
+                        gender_source_id)
+    SELECT pk.person_id, 'PRE_SEED', dp.declared_stage, pk.source_id, dp.gender_code,
+           CASE WHEN dp.gender_source_id IS NULL THEN NULL ELSE pk.source_id END
+      FROM np_pick pk JOIN person dp ON dp.person_id = pk.donor;
+    INSERT INTO entity_key_map (source_system, entity_type, source_key, entity_id, import_batch_id)
+    SELECT {q(system)}, 'PERSON', 'K' || lpad(seq::text, 6, '0'), person_id, b FROM np_pick;
+
+    CREATE TEMP TABLE np_edu ON COMMIT DROP AS
+    SELECT pk.seq, e.education_id AS old_id, gen_random_uuid() AS new_id, pk.person_id, pk.source_id,
+           pk.inst_id, pk.inst_name, row_number() OVER (PARTITION BY pk.seq ORDER BY e.education_id) AS j
+      FROM np_pick pk JOIN education e ON e.person_id = pk.donor;
+    INSERT INTO education (education_id, person_id, institution_raw, institution_id, major_raw, major_id,
+                           degree_type, graduation_year, admission_year, admission_date_precision,
+                           graduation_date_precision, major_taxonomy_node_id, data_layer,
+                           verification_level, normalization_status, normalization_confidence)
+    SELECT ne.new_id, ne.person_id, ne.inst_name, ne.inst_id, e.major_raw, e.major_id, e.degree_type,
+           e.graduation_year, e.admission_year, e.admission_date_precision, e.graduation_date_precision,
+           e.major_taxonomy_node_id, 'PRE_SEED', 'UNVERIFIED', 'MAPPED', 1.0
+      FROM np_edu ne JOIN education e ON e.education_id = ne.old_id;
+    INSERT INTO education_source (education_source_id, education_id, source_id, supported_fields, is_primary)
+    SELECT gen_random_uuid(), ne.new_id, ne.source_id,
+           coalesce((SELECT es.supported_fields FROM education_source es
+                      WHERE es.education_id = ne.old_id ORDER BY es.is_primary DESC LIMIT 1),
+                    ARRAY['institution', 'major']), true
+      FROM np_edu ne;
+    INSERT INTO entity_key_map (source_system, entity_type, source_key, entity_id, import_batch_id)
+    SELECT {q(system)}, 'EDUCATION', 'K' || lpad(seq::text, 6, '0') || '_E' || j, new_id, b FROM np_edu;
+
+    CREATE TEMP TABLE np_we ON COMMIT DROP AS
+    SELECT pk.seq, w.work_event_id AS old_id, gen_random_uuid() AS new_id, pk.person_id, pk.source_id,
+           row_number() OVER (PARTITION BY pk.seq ORDER BY w.start_date, w.work_event_id) AS j
+      FROM np_pick pk JOIN work_event w ON w.person_id = pk.donor AND w.retracted_at IS NULL;
+    INSERT INTO work_event (work_event_id, person_id, event_type, organization_raw, organization_id,
+                            role_raw, role_id, start_date, start_date_precision, end_date,
+                            end_date_precision, is_current, role_taxonomy_node_id, employment_type,
+                            data_layer, verification_level, normalization_status,
+                            normalization_confidence)
+    SELECT nw.new_id, nw.person_id, w.event_type, w.organization_raw, w.organization_id, w.role_raw,
+           w.role_id, w.start_date, w.start_date_precision, w.end_date, w.end_date_precision,
+           w.is_current, w.role_taxonomy_node_id, w.employment_type, 'PRE_SEED', 'UNVERIFIED',
+           'MAPPED', 1.0
+      FROM np_we nw JOIN work_event w ON w.work_event_id = nw.old_id;
+    CREATE TEMP TABLE np_wes ON COMMIT DROP AS
+    SELECT DISTINCT ON (nw.new_id) nw.seq, nw.j, gen_random_uuid() AS new_id, nw.new_id AS work_event_id,
+           nw.source_id, s.supported_fields, s.evidence_confidence, s.is_primary
+      FROM np_we nw JOIN work_event_source s ON s.work_event_id = nw.old_id
+     ORDER BY nw.new_id, s.is_primary DESC;
+    INSERT INTO work_event_source (work_event_source_id, work_event_id, source_id, supported_fields,
+                                   evidence_confidence, is_primary)
+    SELECT new_id, work_event_id, source_id, supported_fields, evidence_confidence, true FROM np_wes;
+    INSERT INTO entity_key_map (source_system, entity_type, source_key, entity_id, import_batch_id)
+    SELECT {q(system)}, 'WORK_EVENT', 'K' || lpad(seq::text, 6, '0') || '_W' || j, new_id, b FROM np_we
+    UNION ALL
+    SELECT {q(system)}, 'WORK_EVENT_SOURCE', 'K' || lpad(seq::text, 6, '0') || '_W' || j || '_S1', new_id, b
+      FROM np_wes;
+
+    -- The importer's integrity checks, on what was just written.
+    SELECT count(*) INTO missing FROM np_we nw
+     WHERE NOT EXISTS (SELECT 1 FROM work_event_source s WHERE s.work_event_id = nw.new_id);
+    IF missing > 0 THEN RAISE EXCEPTION '% work events without evidence', missing; END IF;
+    SELECT count(*) INTO missing FROM np_pick pk JOIN person p ON p.person_id = pk.person_id
+     WHERE p.account_id IS NOT NULL;
+    IF missing > 0 THEN RAISE EXCEPTION 'pre-seed people linked to accounts'; END IF;
+
+    UPDATE import_batch SET status = 'COMPLETED', finished_at = now(), report = jsonb_build_object(
+        'status', 'COMPLETED', 'import_batch_id', b, 'generated', true,
+        'imported', jsonb_build_object(
+            'persons', (SELECT count(*) FROM np_pick), 'education_records', (SELECT count(*) FROM np_edu),
+            'work_events', (SELECT count(*) FROM np_we), 'work_event_sources', (SELECT count(*) FROM np_wes),
+            'source_records', (SELECT count(*) FROM np_pick)),
+        'schools', (SELECT count(DISTINCT school) FROM np_plan), 'cells', (SELECT count(*) FROM np_plan))
+     WHERE import_batch_id = b;
+END
+$addon$;
+"""
 
 
 def _write(out: Path, headers: dict, sheets: dict, rows: dict, readme: dict, version: str,
