@@ -43,6 +43,12 @@ class Settings(BaseSettings):
     anthropic_api_key: SecretStr | None = Field(
         default=None, validation_alias=AliasChoices("ANTHROPIC_API_KEY", "HELLOMYME_ANTHROPIC_API_KEY",
                                                     "anthropic_api_key"))
+    # A key that is not scoped to one workspace must name it on every request (the API refuses
+    # it otherwise); a workspace-scoped key needs nothing here.
+    anthropic_workspace_id: str | None = Field(
+        default=None, validation_alias=AliasChoices("ANTHROPIC_WORKSPACE_ID",
+                                                    "HELLOMYME_ANTHROPIC_WORKSPACE_ID",
+                                                    "anthropic_workspace_id"))
     career_import_model: str = "claude-opus-5-5"
     career_import_daily_limit: int = 10  # per account
     career_import_session_limit: int = 3  # per anonymous session

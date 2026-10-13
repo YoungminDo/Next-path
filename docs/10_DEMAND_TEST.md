@@ -130,6 +130,9 @@
 - **실패 이유 (migration 0035):** 읽기가 실패하면 사람에게는 같은 안내 한 줄만 보이고, `import_attempt.failure_reason`에
   이유가 남는다(API 상태·오류 종류·메시지, 또는 내부 오류 이름, 300자 이내, 파일 내용 없음).
   `SELECT created_at, outcome, failure_reason FROM import_attempt ORDER BY created_at DESC LIMIT 20;`
+- **API 키와 워크스페이스:** 워크스페이스에 묶이지 않은 키는 요청마다 워크스페이스를 밝혀야 한다(안 하면 400
+  "This API key is not scoped to a workspace"). Render에 `ANTHROPIC_WORKSPACE_ID`(wrkspc_…)를 넣거나,
+  워크스페이스 안에서 만든 키를 쓴다(2026-10-13 첫 실사용 실패 원인).
 - **저장 위치:** `import_attempt`(읽기 1회 = 1행, 결과·토큰·출처 종류), 통계 동의 시 `import_experience`/`import_education`, 확인된 경력은 `work_event` +
   `source_record`(`LINKEDIN_USER_UPLOAD` 또는 `CAREER_DOCUMENT`), 초안은 `anonymous_draft.payload_json.other_jobs`.
 - **이벤트:** `import_viewed` → `import_uploaded` → `import_parsed` → `import_confirmed`(member true/false).

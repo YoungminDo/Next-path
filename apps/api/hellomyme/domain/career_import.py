@@ -130,7 +130,10 @@ class ClaudeExtractor:
         self.model = settings.career_import_model
         self.client = client or anthropic.Anthropic(
             # Inside the web proxy's 60 s: one try, then the person can retry or type it in.
-            api_key=settings.anthropic_api_key.get_secret_value(), timeout=50.0, max_retries=0)
+            api_key=settings.anthropic_api_key.get_secret_value(), timeout=50.0, max_retries=0,
+            default_headers=({"anthropic-workspace-id": workspace.strip()}
+                             if (workspace := getattr(settings, "anthropic_workspace_id", None))
+                             and workspace.strip() else None))
 
     def extract(self, files: list[tuple[str, str]]) -> tuple[Extraction | None, str, Usage]:
         import anthropic
@@ -178,7 +181,8 @@ def get_extractor(settings: Settings) -> Extractor | None:
     """None without an API key: the feature is off."""
     if not settings.anthropic_api_key:
         return None
-    key = (settings.anthropic_api_key.get_secret_value(), settings.career_import_model)
+    key = (settings.anthropic_api_key.get_secret_value(), settings.career_import_model,
+           settings.anthropic_workspace_id)
     if key not in _EXTRACTORS:
         _EXTRACTORS[key] = ClaudeExtractor(settings)
     return _EXTRACTORS[key]

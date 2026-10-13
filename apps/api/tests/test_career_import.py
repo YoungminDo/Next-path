@@ -409,9 +409,12 @@ def test_why_a_read_failed_is_kept_for_the_team(engine, ids):  # noqa: F811
 
     from hellomyme.domain.career_import import ClaudeExtractor
 
+    workspaces = []
+
     class Refuse(BaseHTTPRequestHandler):
         def do_POST(self):
             self.rfile.read(int(self.headers.get("content-length", 0)))
+            workspaces.append(self.headers.get("anthropic-workspace-id"))
             self.send_response(400)
             self.send_header("content-type", "application/json")
             self.send_header("request-id", "req_test")
@@ -434,6 +437,16 @@ def test_why_a_read_failed_is_kept_for_the_team(engine, ids):  # noqa: F811
         r = c.post("/acq/import/parse", headers={**anon(), **login(c, "import-why")}, json=body())
         assert r.status_code == 502
         assert r.json()["detail"]["message"].startswith("파일을 읽지 못했어요")
+        # A key that is not scoped to a workspace names it on every request when configured.
+        import os
+        os.environ["ANTHROPIC_BASE_URL"] = f"http://127.0.0.1:{server.server_port}"
+        try:
+            scoped = ClaudeExtractor(Settings(env="test", anthropic_api_key="x",
+                                              anthropic_workspace_id=" wrkspc_test "))
+            assert scoped.extract([("image/png", PNG)])[1] == "FAILED"
+        finally:
+            del os.environ["ANTHROPIC_BASE_URL"]
+        assert workspaces == [None, "wrkspc_test"]
     finally:
         server.shutdown()
     with engine.begin() as conn:
