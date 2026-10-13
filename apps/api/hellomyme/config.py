@@ -58,6 +58,13 @@ class Settings(BaseSettings):
         default=None, validation_alias=AliasChoices("TOSS_SECRET_KEY", "HELLOMYME_TOSS_SECRET_KEY",
                                                     "toss_secret_key"))
     toss_api_base: str = "https://api.tosspayments.com"
+    # Team alert in Slack (#marketing_alert) when a new member signs up: a Slack Incoming Webhook
+    # URL, set on the server only (it lets anyone post to the channel). Unset = no alerts.
+    slack_signup_webhook_url: SecretStr | None = Field(
+        default=None, validation_alias=AliasChoices("SLACK_SIGNUP_WEBHOOK_URL",
+                                                    "HELLOMYME_SLACK_SIGNUP_WEBHOOK_URL",
+                                                    "slack_signup_webhook_url"))
+    public_web_url: str = "https://nextpath.da-sh.io"
     career_import_daily_limit: int = 10  # per account
     career_import_session_limit: int = 3  # per anonymous session
     career_import_client_limit: int = 20  # per client address before login (shared Wi-Fi allowed)

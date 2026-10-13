@@ -180,6 +180,8 @@ EventName = Literal[
     "import_viewed", "import_uploaded", "import_parsed", "import_confirmed",
     # Paid cards (migration 0037); a paid order is "credit_purchased"
     "payment_started", "payment_failed",
+    # The payment-intent test checkout (migration 0038)
+    "checkout_viewed", "checkout_completed", "checkout_cancelled",
 ]
 
 

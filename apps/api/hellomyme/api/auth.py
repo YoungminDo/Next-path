@@ -1,12 +1,12 @@
-from typing import Literal
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from hellomyme.api.deps import Account, AnonSession, AppSettings, AsOf, Conn, IdempotencyKey
 from hellomyme.auth import sessions
 from hellomyme.auth.providers import AuthError, AuthUnavailable, get_provider
-from hellomyme.domain import drafts
+from hellomyme.domain import drafts, signup_alert
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -39,14 +39,28 @@ class MergeDraftRequest(BaseModel):
     consent_policy_version: str = Field(min_length=1, max_length=64)
 
 
+def signup_notifier(settings: AppSettings) -> signup_alert.Notifier | None:
+    return signup_alert.get_notifier(settings)
+
+
+Notifier = Annotated[signup_alert.Notifier | None, Depends(signup_notifier)]
+
+
 @router.post("/merge-draft")
-def merge_draft(body: MergeDraftRequest, conn: Conn, account_id: Account,
-                anon: AnonSession, _key: IdempotencyKey, as_of: AsOf):
+def merge_draft(body: MergeDraftRequest, conn: Conn, settings: AppSettings, account_id: Account,
+                anon: AnonSession, _key: IdempotencyKey, as_of: AsOf, background: BackgroundTasks,
+                notifier: Notifier):
     # Idempotency comes from the draft itself: a claimed draft returns its first result.
     try:
-        return drafts.merge_draft(conn, account_id, body.draft_id, anon,
-                                  body.consent_policy_version, as_of=as_of)
+        out = drafts.merge_draft(conn, account_id, body.draft_id, anon,
+                                 body.consent_policy_version, as_of=as_of)
     except drafts.DraftNotFound as exc:
         raise HTTPException(404, "draft not found or expired") from exc
     except drafts.DraftConflict as exc:
         raise HTTPException(409, str(exc)) from exc
+    # A new member (their first profile, written once): tell the team, after the response.
+    if out["merged"] and notifier is not None:
+        message = signup_alert.safe_message(conn, body.draft_id, anon, settings.public_web_url)
+        if message:
+            background.add_task(notifier.post, message)
+    return out

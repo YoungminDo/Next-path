@@ -98,6 +98,12 @@ HELLOMYME_DATABASE_URL='<위 URL>' uv run hellomyme-import-preseed /path/to/HELL
   `HELLOMYME_CAREER_IMPORT_MODEL`(기본 claude-opus-5-5). 자세한 내용은 docs/10 §이력서·캡처로 시작.
 - 웹(Vercel): 프록시 함수 `maxDuration = 60`(읽기에 10~30초 걸림).
 
+## 가입 알림 (Slack #marketing_alert)
+- Slack에서 Incoming Webhook을 만든다: api.slack.com/apps → 앱 만들기(From scratch) → Incoming Webhooks 켜기 →
+  Add New Webhook to Workspace → `#marketing_alert` 선택 → 나온 URL 복사.
+- API(Render): `SLACK_SIGNUP_WEBHOOK_URL` 에 그 URL을 넣고 재배포. URL만 있으면 누구나 채널에 글을 쓸 수 있으므로
+  Render 환경변수에만 둔다(채팅·저장소 금지). 없으면 알림이 꺼진다. 내용은 docs/10 §가입 알림.
+
 ## 정식 출시로 전환할 때
 
 - API: `HELLOMYME_ENV=production`, `HELLOMYME_CAREER_MAP_DATA_LAYERS=["SEED","VERIFIED"]`
