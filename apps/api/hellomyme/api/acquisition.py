@@ -93,6 +93,7 @@ def save_draft(body: DraftRequest, conn: Conn, settings: AppSettings, anon: Anon
                                   body.draft_id, internal=body.internal)
     except drafts.DraftNotFound as exc:
         raise HTTPException(404, "draft not found, expired or already claimed") from exc
+    drafts.purge_expired(conn.engine, settings.unclaimed_input_retention_days)
     return {**saved, "payload": payload.model_dump(mode="json"), "unlisted": acq.unlisted(payload)}
 
 

@@ -140,6 +140,7 @@ export function ImportUpload({ member, onRead, onManual }: {
               <li>이용 목적: 경력·학력 항목을 읽어 입력칸 채우기</li>
               <li>보유 기간: nextpath는 파일을 저장하지 않아요. Anthropic은 이 내용을 AI 학습에 쓰지 않고, 정해진 보관 기간이 지나면 지워요.</li>
               <li>동의하지 않아도 돼요. 동의하지 않으면 직접 입력으로 같은 결과를 볼 수 있어요.</li>
+              <li><a href="/privacy" target="_blank" rel="noreferrer">개인정보처리방침 전문</a></li>
             </ul>
           </details>
           <label className="check consent-detail">

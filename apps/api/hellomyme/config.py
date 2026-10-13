@@ -30,6 +30,8 @@ class Settings(BaseSettings):
 
     session_ttl_hours: int = 24 * 30
     anonymous_draft_ttl_hours: int = 24 * 7
+    # Input that never became a member's, and usage events, leave after this (privacy policy §2).
+    unclaimed_input_retention_days: int = 365 * 3
 
     # Taxonomy/policy rows change only through migrations and imports, so the query engine keeps
     # them in process this long instead of re-reading them on every request (0 disables).

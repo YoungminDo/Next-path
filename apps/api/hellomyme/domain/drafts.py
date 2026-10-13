@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
+import time
 from datetime import timedelta
 
 from pydantic import BaseModel
@@ -149,3 +151,30 @@ def _claim(conn: Connection, draft_id: str, account_id: str, person_id: str) -> 
         """UPDATE anonymous_draft SET claimed_account_id = :a, claimed_person_id = :p,
                claimed_at = now() WHERE draft_id = CAST(:d AS uuid)"""),
         {"a": account_id, "p": person_id, "d": draft_id})
+
+
+_PURGE_LOCK = threading.Lock()
+_PURGED_AT: float | None = None
+
+
+def purge_expired(engine, days: int, *, force: bool = False) -> None:
+    """Input that never became a member's and usage events leave after the period the privacy
+    policy states (web /privacy §2). At most once a day per process, in its own transaction."""
+    global _PURGED_AT
+    with _PURGE_LOCK:
+        if not force and _PURGED_AT is not None and time.monotonic() - _PURGED_AT < 86400:
+            return
+        _PURGED_AT = time.monotonic()
+    old = "created_at < now() - make_interval(days => :d)"
+    with engine.begin() as conn:
+        conn.execute(text("SET LOCAL hellomyme.erasure = 'on'"))  # the revisions are append-only
+        gone = f"""SELECT d.draft_id FROM anonymous_draft d
+                   WHERE d.claimed_at IS NULL AND d.{old}
+                     AND NOT EXISTS (SELECT 1 FROM desired_role r
+                                     WHERE r.anonymous_draft_id = d.draft_id)"""
+        conn.execute(text(f"DELETE FROM anonymous_draft_revision WHERE draft_id IN ({gone})"),
+                     {"d": days})
+        conn.execute(text(f"DELETE FROM anonymous_draft WHERE draft_id IN ({gone})"), {"d": days})
+        conn.execute(text(
+            "DELETE FROM analytics.event WHERE occurred_at < now() - make_interval(days => :d)"),
+            {"d": days})

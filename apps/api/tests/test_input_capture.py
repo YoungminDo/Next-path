@@ -145,3 +145,30 @@ def test_team_sessions_are_internal_even_without_the_draft_flag(client, engine, 
         stored = conn.execute(text("SELECT internal FROM anonymous_draft WHERE draft_id = :d"),
                               {"d": draft}).scalar()
     assert stored is False  # the stored row is left as it was
+
+
+def test_unclaimed_input_and_events_leave_after_the_retention_period(engine):
+    """Privacy policy §2: input that never became a member's, and usage events, go after 3 years;
+    members' drafts stay."""
+    from hellomyme.domain.drafts import purge_expired
+
+    with engine.begin() as conn:
+        old = conn.execute(text(
+            """INSERT INTO anonymous_draft (session_id, user_type, payload_json, expires_at, created_at)
+               VALUES ('purge-test', 'STUDENT', '{}', now() - interval '3 years',
+                       now() - interval '4 years') RETURNING draft_id::text""")).scalar_one()
+        conn.execute(text("INSERT INTO anonymous_draft_revision (draft_id, revision, payload_json) "
+                          "VALUES (CAST(:d AS uuid), 1, '{}')"), {"d": old})
+        fresh = conn.execute(text(
+            """INSERT INTO anonymous_draft (session_id, user_type, payload_json, expires_at)
+               VALUES ('purge-test', 'STUDENT', '{}', now()) RETURNING draft_id::text""")).scalar_one()
+        conn.execute(text(
+            """INSERT INTO analytics.event (event_name, anonymous_session_id, properties, occurred_at)
+               VALUES ('landing_viewed', 'purge-test', '{}', now() - interval '4 years')"""))
+    purge_expired(engine, 365 * 3, force=True)
+    with engine.begin() as conn:
+        left = set(conn.execute(text(
+            "SELECT draft_id::text FROM anonymous_draft WHERE session_id = 'purge-test'")).scalars())
+        events = conn.execute(text(
+            "SELECT count(*) FROM analytics.event WHERE anonymous_session_id = 'purge-test'")).scalar_one()
+    assert left == {fresh} and old not in left and events == 0

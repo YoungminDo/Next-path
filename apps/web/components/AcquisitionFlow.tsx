@@ -799,6 +799,7 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
               <label className="check">
                 <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
                 입력한 학교·경력 정보를 HMM 계정과 연결해 결과 제공과 익명 통계에 쓰는 것에 동의해요.
+                {" "}<a href="/privacy" target="_blank" rel="noreferrer">개인정보처리방침</a>
               </label>
               <button className="cta kakao" disabled={!consent || busy} onClick={() => void kakao()}>카카오로 3초 만에 보기</button>
               {app && app !== "kakaotalk" && (
@@ -874,6 +875,7 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
 
       {screen === "me" && me && <MyScreen me={me} busy={busy} onUnlock={unlock} onChangeIntent={changeIntent}
                                           onInterview={openInterview} onImport={openImport} />}
+      <p className="policy-link"><a href="/privacy">개인정보처리방침</a></p>
     </main>
   );
 }

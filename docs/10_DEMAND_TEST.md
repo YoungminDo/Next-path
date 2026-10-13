@@ -137,6 +137,14 @@
   `source_record`(`LINKEDIN_USER_UPLOAD` 또는 `CAREER_DOCUMENT`), 초안은 `anonymous_draft.payload_json.other_jobs`.
 - **이벤트:** `import_viewed` → `import_uploaded` → `import_parsed` → `import_confirmed`(member true/false).
 
+## 개인정보처리방침 (web `/privacy`)
+- 개인정보 보호법 §30. 랜딩 하단, 업로드 동의(자세히 보기), 로그인 동의, 입력·결과 화면 하단에서 링크한다.
+- 처리 항목·기간·위탁(Anthropic 미국, Render 싱가포르, Supabase 서울, Vercel, 솔라피)은 실제 동작과 같아야 한다.
+  수집 항목, 보관 기간, 업체가 바뀌면 같은 커밋에서 페이지도 고친다.
+- 보관 기간: 가입하지 않은 입력(`anonymous_draft`·수정 이력)과 이용 기록(`analytics.event`)은 3년
+  (`HELLOMYME_UNCLAIMED_INPUT_RETENTION_DAYS`, 기본 1095일). 초안 저장 API가 하루 한 번 지운다(`drafts.purge_expired`).
+  회원의 입력은 탈퇴까지, 파일은 저장하지 않음, 읽은 내용의 통계 이용분 3년, 인터뷰 번호 1년.
+
 ## 학교 목록 (migration 0032)
 - 4년제·전문대 418곳(같은 이름의 캠퍼스는 하나로, 고려대학교(세종)처럼 이름이 다른 캠퍼스는 따로)을 고를 수 있다.
   - 출처: 공공데이터포털 「전국대학및전문대학정보표준데이터」(교육부·대학알리미, 2026-05-21 수집, Hello My Me `public/data/schools-info.json`).

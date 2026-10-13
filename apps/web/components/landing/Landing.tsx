@@ -139,7 +139,7 @@ export default function Landing({ options }: { options: Options }) {
       <StickyCta />
 
       <footer className="lfoot">
-        <span>nextpath · Hello My Me</span>
+        <span>nextpath · Hello My Me · <a href="/privacy">개인정보처리방침</a></span>
         <span>베타 · 이 페이지의 그래프는 화면 예시예요.</span>
       </footer>
     </div>
