@@ -651,9 +651,8 @@ def member_payload(conn: Connection, person_id: str, as_of: date) -> Acquisition
              AND w.role_taxonomy_node_id IS NOT NULL
             ORDER BY w.start_date DESC LIMIT 1"""), {"p": person_id, "d": as_of}).first()
     first = conn.execute(text(
-        f"""SELECT {cols} FROM first_employment_all(:r, :d) fe
-            JOIN work_event w ON w.work_event_id = fe.work_event_id
-            WHERE fe.person_id = :p"""),
+        f"""SELECT {cols} FROM first_employment_for(:r, :d, ARRAY[CAST(:p AS uuid)]) fe
+            JOIN work_event w ON w.work_event_id = fe.work_event_id"""),
         {"p": person_id, "d": as_of, "r": FIRST_EMPLOYMENT_RULE}).first()
     if first is not None and first.role is None:
         # The first job is on record without a role (a title from a resume nobody has mapped

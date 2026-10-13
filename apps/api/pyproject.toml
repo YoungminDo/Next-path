@@ -26,6 +26,7 @@ dev = [
 
 [project.scripts]
 hellomyme-import-preseed = "hellomyme.importer.cli:main"
+hellomyme-make-preseed = "hellomyme.importer.generate:main"
 hellomyme-ingest = "hellomyme.ingest.cli:main"
 
 [build-system]

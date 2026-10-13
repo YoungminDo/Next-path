@@ -303,13 +303,18 @@ def cohort_sql(f: Filters, majors: Taxonomy, roles: Taxonomy) -> tuple[str, dict
                            AND w.start_date <= :as_of
                            AND (w.end_date IS NULL OR w.end_date > :as_of))""")
         params["cur_roles"] = roles.subtree(f.current_role_node_ids)
-    if f.first_role_node_ids:
-        where.append("""EXISTS (SELECT 1 FROM first_employment_all(:fe_rule, :as_of) fe
-                         JOIN work_event w ON w.work_event_id = fe.work_event_id
-                         WHERE fe.person_id = p.person_id
-                           AND w.role_taxonomy_node_id = ANY(CAST(:first_roles AS uuid[])))""")
-        params["first_roles"] = roles.subtree(f.first_role_node_ids)
-    return "SELECT p.person_id FROM person p WHERE " + " AND ".join(where), params
+    base = "SELECT p.person_id FROM person p WHERE " + " AND ".join(where)
+    if not f.first_role_node_ids:
+        return base, params
+    # First job: computed once, only for the people the other filters keep.
+    params["first_roles"] = roles.subtree(f.first_role_node_ids)
+    return f"""WITH fe_base AS ({base})
+        SELECT b.person_id FROM fe_base b
+        WHERE EXISTS (SELECT 1 FROM first_employment_for(:fe_rule, :as_of,
+                                     (SELECT array_agg(person_id) FROM fe_base)) fe
+                      JOIN work_event w ON w.work_event_id = fe.work_event_id
+                      WHERE fe.person_id = b.person_id
+                        AND w.role_taxonomy_node_id = ANY(CAST(:first_roles AS uuid[])))""", params
 
 
 def _window_clause(col: str, start: date | None) -> str:
@@ -317,16 +322,17 @@ def _window_clause(col: str, start: date | None) -> str:
 
 
 # One row per person in the analysed basis: (person_id, result node uuid or NULL/STAYED).
+# First employment is computed for the cohort's people only (first_employment_for, migration 0034).
 METRIC_SQL = {
     "FIRST_ROLE_DISTRIBUTION": """
         SELECT fe.person_id, w.role_taxonomy_node_id::text AS node
-        FROM first_employment_all(:fe_rule, :as_of) fe
+        FROM first_employment_for(:fe_rule, :as_of, (SELECT array_agg(person_id) FROM cohort)) fe
         JOIN cohort c ON c.person_id = fe.person_id
         LEFT JOIN work_event w ON w.work_event_id = fe.work_event_id
         WHERE {window_fe}""",
     "FIRST_INDUSTRY_DISTRIBUTION": """
         SELECT fe.person_id, oi.taxonomy_node_id::text AS node
-        FROM first_employment_all(:fe_rule, :as_of) fe
+        FROM first_employment_for(:fe_rule, :as_of, (SELECT array_agg(person_id) FROM cohort)) fe
         JOIN cohort c ON c.person_id = fe.person_id
         LEFT JOIN work_event w ON w.work_event_id = fe.work_event_id
         LEFT JOIN organization_industry oi ON oi.organization_id = w.organization_id
@@ -339,7 +345,8 @@ METRIC_SQL = {
         WHERE w.start_date <= :as_of AND (w.end_date IS NULL OR w.end_date > :as_of)
           AND w.event_type <> 'STUDY'
           AND (CAST(:win_start AS date) IS NULL OR EXISTS (
-                SELECT 1 FROM first_employment_all(:fe_rule, :as_of) fe
+                SELECT 1 FROM first_employment_for(:fe_rule, :as_of,
+                                                   (SELECT array_agg(person_id) FROM cohort)) fe
                 WHERE fe.person_id = w.person_id AND fe.start_date >= :win_start))
         ORDER BY w.person_id, w.start_date DESC, w.work_event_id""",
     # For each person: the first event in the from-subtree, then the next event that starts

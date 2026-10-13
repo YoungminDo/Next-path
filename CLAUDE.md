@@ -21,6 +21,9 @@ accounts in `HELLOMYME_ADMIN_ACCOUNT_IDS`, counts only. Migration 0025 closes th
 - `make db | migrate | import-preseed | api | web | test` from the repo root.
 - Pre-seed data is NOT in the repo. Official PRE_SEED = `HELLOMYME_PreSeed_Career_Data_v1.3.xlsx`:
   `uv run hellomyme-import-preseed <file.xlsx> --retire v1.2` (version/as-of read from 00_README).
+  v1.4 = add-on built from it for the other 4-year schools (`hellomyme-make-preseed`, `importer/generate.py`,
+  `scripts/add-preseed-schools.ps1`; docs/10 §PRE_SEED v1.4). School list = public data in `hellomyme/reference/`
+  (migration 0032, `scripts/build_kr_*.py`).
 - v1.4 code paths: `domain/career_query.py` (CareerQuery engine, cohort v2), `domain/acquisition.py`
   + `api/acquisition.py` (`/acq/*` student/professional flows, login merge, `/acq/me`),
   web `components/AcquisitionFlow.tsx`. Legacy `/career/*` + snapshot engine remain for old drafts.
