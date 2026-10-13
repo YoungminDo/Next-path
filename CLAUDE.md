@@ -49,7 +49,8 @@ and small-cell suppression; ACCOUNT ≠ PERSON; PII separated; PRE_SEED never id
 shown as a person/mentor; consent recorded before combining HMM identity with career data.
 Interview phone numbers: own consent (INTERVIEW_CONTACT), optional, never logged, cleared on withdrawal.
 Uploaded resumes/captures are never stored; overseas-transfer consent is recorded before the read; read rows
-are kept only as the person confirmed them (before login: through the draft and the login merge).
+become career records only as the person confirmed them (before login: through the draft and the login merge);
+the raw read is kept for statistics only with its own optional consent (0031, 3 years).
 While results come from PRE_SEED, result screens keep one small beta line (`data_basis ===
 "SIMULATION"`); test/SIMULATION banners are gone for the demand test, but simulated numbers are
 never presented as real people's outcomes.

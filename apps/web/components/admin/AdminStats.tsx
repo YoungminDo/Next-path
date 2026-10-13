@@ -185,6 +185,8 @@ export default function AdminStats() {
               <Mini label="실패" value={data.imports.failed} />
               <Mini label="미리보기까지" value={data.imports.drafts} />
               <Mini label="로그인까지" value={data.imports.signed_up} />
+              <Mini label="통계 동의" value={data.imports.stats_consented} />
+              <Mini label="남긴 경력 수" value={data.imports.experiences_kept} />
             </div>
           </Card>
         </div>

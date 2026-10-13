@@ -218,6 +218,7 @@ def status(conn: Connection, settings: Settings, account_id: str | None,
         remaining = 0
     return {"enabled": extractor is not None,
             "consent_text_version": settings.career_import_consent_version,
+            "stats_consent_text_version": settings.career_import_stats_consent_version,
             "max_files": MAX_UPLOADS, "remaining_today": remaining}
 
 
@@ -286,12 +287,15 @@ def _text(s: str | None, limit: int) -> str | None:
 
 def parse(engine: Engine, settings: Settings, account_id: str | None,
           anonymous_session: str | None, raw_files: list[dict], consent_text_version: str,
-          extractor: Extractor | None, internal: bool = False, client_ip: str | None = None) -> dict:
+          extractor: Extractor | None, internal: bool = False, client_ip: str | None = None,
+          stats_consent_text_version: str | None = None) -> dict:
     """No database connection is held while the model reads (10-30 s): each step before and
     after it is its own short transaction, so a burst of uploads cannot starve the pool."""
     if extractor is None:
         raise ImportFailed(409, "지금은 파일로 채우기를 쓸 수 없어요. 직접 입력해 주세요")
     if consent_text_version != settings.career_import_consent_version:
+        raise ImportFailed(409, "안내 문구가 바뀌었어요. 새로고침 후 다시 동의해 주세요")
+    if stats_consent_text_version not in (None, settings.career_import_stats_consent_version):
         raise ImportFailed(409, "안내 문구가 바뀌었어요. 새로고침 후 다시 동의해 주세요")
     if not account_id and (not anonymous_session or len(anonymous_session) < 16):
         raise ImportFailed(400, "세션 정보가 없어요. 새로고침 후 다시 시도해 주세요")
@@ -300,14 +304,15 @@ def parse(engine: Engine, settings: Settings, account_id: str | None,
         raise ImportFailed(503, "지금 읽는 분이 많아요. 잠시 후 다시 시도해 주세요")
     try:
         return _parse(engine, settings, account_id, anonymous_session, files, consent_text_version,
-                      extractor, internal, client_hash(client_ip))
+                      extractor, internal, client_hash(client_ip), stats_consent_text_version)
     finally:
         _IN_FLIGHT.release()
 
 
 def _parse(engine: Engine, settings: Settings, account_id: str | None,
            anonymous_session: str | None, files: list[tuple[str, str]], consent_text_version: str,
-           extractor: Extractor, internal: bool, client: str | None) -> dict:
+           extractor: Extractor, internal: bool, client: str | None,
+           stats_version: str | None) -> dict:
     # The session is kept for members too: a draft made in this browser can then name the read.
     sid = anonymous_session and session_hash(anonymous_session)
     # The attempt (with the consent wording version) is committed before anything leaves: it is
@@ -326,10 +331,11 @@ def _parse(engine: Engine, settings: Settings, account_id: str | None,
                 raise ImportFailed(429, "오늘은 요청이 많아 파일 읽기를 잠시 멈췄어요. 직접 입력해 주세요")
         attempt_id = conn.execute(text(
             """INSERT INTO import_attempt (account_id, session_hash, client_hash, internal, files,
-                   consent_text_version, model)
-               VALUES (:a, :s, :c, :i, :n, :v, :m) RETURNING import_attempt_id::text"""),
+                   consent_text_version, stats_consent_version, model)
+               VALUES (:a, :s, :c, :i, :n, :v, :sv, :m) RETURNING import_attempt_id::text"""),
             {"a": account_id, "s": sid, "c": client, "i": internal, "n": len(files),
-             "v": consent_text_version, "m": extractor.model}).scalar_one()
+             "v": consent_text_version, "sv": stats_version, "m": extractor.model}).scalar_one()
+        _purge(conn, settings.career_import_retention_days)
 
     try:
         extraction, outcome, usage = extractor.extract(files)
@@ -350,7 +356,42 @@ def _parse(engine: Engine, settings: Settings, account_id: str | None,
     if extraction is None:
         raise ImportFailed(502, "파일을 읽지 못했어요. 잠시 후 다시 시도하거나 직접 입력해 주세요")
     with engine.begin() as conn:
-        return _suggest(conn, attempt_id, extraction, account_id)
+        read = _suggest(conn, attempt_id, extraction, account_id)
+        if stats_version:
+            _keep(conn, read)
+        return read
+
+
+def _keep(conn: Connection, read: dict) -> None:
+    """What the read showed, kept as anonymous statistics input (the person agreed separately).
+    As read and checked for plausibility only; unknown stays NULL; nothing about the person."""
+    for i, x in enumerate(read["experiences"], 1):
+        conn.execute(text(
+            """INSERT INTO import_experience (import_attempt_id, ordinal, company_raw, title_raw,
+                   employment_type, start_year, start_month, end_year, end_month, is_current,
+                   role_taxonomy_node_id, organization_id)
+               VALUES (CAST(:a AS uuid), :o, :c, :t, :et, :sy, :sm, :ey, :em, :cur,
+                       CAST(:r AS uuid), CAST(:org AS uuid))"""),
+            {"a": read["import_attempt_id"], "o": i, "c": x["company"], "t": x["title"],
+             "et": x["employment_type"], "sy": x["start_year"], "sm": x["start_month"],
+             "ey": x["end_year"], "em": x["end_month"], "cur": x["is_current"],
+             "r": x["suggested_role_node_id"], "org": x["suggested_organization_id"]})
+    for i, e in enumerate(read["education"], 1):
+        conn.execute(text(
+            """INSERT INTO import_education (import_attempt_id, ordinal, school_raw, major_raw,
+                   degree_raw, start_year, end_year, institution_id, major_taxonomy_node_id)
+               VALUES (CAST(:a AS uuid), :o, :s, :m, :d, :sy, :ey, CAST(:i AS uuid),
+                       CAST(:mj AS uuid))"""),
+            {"a": read["import_attempt_id"], "o": i, "s": e["school"], "m": e["major"],
+             "d": e["degree"], "sy": e["start_year"], "ey": e["end_year"],
+             "i": e["suggested_institution_id"], "mj": e["suggested_major_node_id"]})
+
+
+def _purge(conn: Connection, days: int) -> None:
+    """Rows kept for statistics leave after the retention period promised in the consent."""
+    for table in ("import_experience", "import_education"):
+        conn.execute(text(f"DELETE FROM {table} WHERE created_at < now() - make_interval(days => :d)"),
+                     {"d": days})
 
 
 def _suggest(conn: Connection, attempt_id: str, extraction: Extraction,

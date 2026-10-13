@@ -129,8 +129,8 @@ export type InterviewStatus = {
   verification_required: boolean; consent_text_version: string; reward_text: string | null;
 };
 export type EmploymentType = "FULL_TIME" | "PART_TIME" | "CONTRACT" | "INTERN";
-export type ImportStatus = { enabled: boolean; consent_text_version: string; max_files: number;
-  remaining_today: number };
+export type ImportStatus = { enabled: boolean; consent_text_version: string;
+  stats_consent_text_version: string; max_files: number; remaining_today: number };
 /** One experience as the reader saw it, with what the lists matched (the person decides). */
 export type ImportedJob = {
   company: string | null; title: string | null; employment_type: EmploymentType | null;
@@ -196,10 +196,14 @@ export const acq = {
   interviewWithdraw: () => call<InterviewStatus>("/acq/me/interview", { method: "DELETE" }),
   importStatus: () => call<ImportStatus>("/acq/import"),
   /** Reads the person's own files (never stored). Before login the rows only prefill the form. */
-  importParse: (files: { media_type: string; data: string }[], consentTextVersion: string, internal: boolean) =>
+  importParse: (files: { media_type: string; data: string }[], consentTextVersion: string,
+                statsConsentVersion: string | null, internal: boolean) =>
     call<ImportRead>("/acq/import/parse", {
       method: "POST",
-      body: JSON.stringify({ files, consent: true, consent_text_version: consentTextVersion, internal }),
+      body: JSON.stringify({
+        files, consent: true, consent_text_version: consentTextVersion,
+        stats_consent: statsConsentVersion !== null, stats_consent_text_version: statsConsentVersion, internal,
+      }),
     }),
   importConfirm: (importAttemptId: string, jobs: PastJob[]) =>
     call<{ added: number; skipped: number; replayed: boolean }>("/acq/me/import/confirm", {

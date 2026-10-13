@@ -49,6 +49,10 @@ class Settings(BaseSettings):
     career_import_client_limit: int = 20  # per client address before login (shared Wi-Fi allowed)
     career_import_anonymous_daily_limit: int = 300  # all anonymous reads together
     career_import_consent_version: str = "career_import_v1"
+    # Optional, separate consent: keep what the read showed as anonymous statistics input, also
+    # when the person never signs up (migration 0031). Kept this many days, then removed.
+    career_import_stats_consent_version: str = "career_import_stats_v1"
+    career_import_retention_days: int = 365 * 3
 
     # Team dashboard (/admin): account ids allowed to see the aggregate numbers, e.g.
     # HELLOMYME_ADMIN_ACCOUNT_IDS='["3f0c…-…"]'. A member who is not listed sees their own id.

@@ -238,6 +238,9 @@ class ParseRequest(BaseModel):
     files: list[ImportFile] = Field(min_length=1, max_length=career_import.MAX_FILES)
     consent: Literal[True]  # the overseas-transfer notice, ticked by the person
     consent_text_version: str = Field(min_length=1, max_length=64)
+    # Optional and separate: keep what was read as anonymous statistics input.
+    stats_consent: bool = False
+    stats_consent_text_version: str | None = Field(default=None, max_length=64)
     internal: bool = False
 
 
@@ -253,7 +256,8 @@ def import_parse(body: ParseRequest, settings: AppSettings, extractor: Extractor
         account_id = optional_account(conn, authorization)
     return _import(lambda: career_import.parse(
         engine, settings, account_id, anon, [f.model_dump() for f in body.files],
-        body.consent_text_version, extractor, internal=body.internal, client_ip=client_ip))
+        body.consent_text_version, extractor, internal=body.internal, client_ip=client_ip,
+        stats_consent_text_version=body.stats_consent_text_version if body.stats_consent else None))
 
 
 class ImportConfirmRequest(BaseModel):

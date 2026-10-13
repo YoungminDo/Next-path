@@ -19,8 +19,9 @@ import { prepareUpload, UploadError } from "@/lib/upload";
    checks it and sees the preview, and the login keeps it. A member ticks which jobs to add. The
    files are never stored. */
 
-// The version of the transfer notice below; the server refuses any other (change both together).
+// Versions of the two notices below; the server refuses any other (change both together).
 export const IMPORT_CONSENT_VERSION = "career_import_v1";
+export const IMPORT_STATS_CONSENT_VERSION = "career_import_stats_v1";
 const isPdf = (f: File) => f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf");
 
 const two = (m: number | null) => (m ? `.${String(m).padStart(2, "0")}` : "");
@@ -47,6 +48,7 @@ export function ImportUpload({ member, onRead, onManual }: {
   const [status, setStatus] = useState<ImportStatus | null>();
   const [files, setFiles] = useState<File[]>([]);
   const [agree, setAgree] = useState(false);
+  const [stats, setStats] = useState(false); // optional: keep what is read for anonymous statistics
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string>();
   useEffect(() => {
@@ -66,8 +68,10 @@ export function ImportUpload({ member, onRead, onManual }: {
     setBusy(true);
     try {
       const parts = await prepareUpload(files);
-      track("import_uploaded", { member, files: files.length, parts: parts.length, pdf: files.filter(isPdf).length });
-      const r = await acq.importParse(parts, IMPORT_CONSENT_VERSION, isInternal());
+      track("import_uploaded", { member, files: files.length, parts: parts.length, pdf: files.filter(isPdf).length,
+                                 stats_consent: stats });
+      const r = await acq.importParse(parts, IMPORT_CONSENT_VERSION, stats ? IMPORT_STATS_CONSENT_VERSION : null,
+                                      isInternal());
       track("import_parsed", {
         member, source_kind: r.source_kind, experiences: r.experiences.length, education: r.education.length,
         roles_matched: r.experiences.filter((x) => x.suggested_role_node_id).length,
@@ -115,6 +119,11 @@ export function ImportUpload({ member, onRead, onManual }: {
               ))}
             </ul>
           )}
+          <label className="check consent-all">
+            <input type="checkbox" checked={agree && stats}
+                   onChange={(e) => { setAgree(e.target.checked); setStats(e.target.checked); }} />
+            <b>모두 동의하기</b>
+          </label>
           <label className="check consent-detail">
             <input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} />
             <span>
@@ -133,6 +142,15 @@ export function ImportUpload({ member, onRead, onManual }: {
               <li>동의하지 않아도 돼요. 동의하지 않으면 직접 입력으로 같은 결과를 볼 수 있어요.</li>
             </ul>
           </details>
+          <label className="check consent-detail">
+            <input type="checkbox" checked={stats} onChange={(e) => setStats(e.target.checked)} />
+            <span>
+              <b>[선택] 읽은 경력·학력을 익명 통계에 쓰는 것에 동의</b><br />
+              가입하지 않아도, 읽은 회사·직무·학교·기간을 이름·연락처 없이 남겨
+              &lsquo;나와 같은 자리였던 사람들&rsquo; 통계를 만드는 데 써요.
+              보유 기간: 3년. 동의하지 않아도 파일 읽기는 그대로 돼요.
+            </span>
+          </label>
           {err && <p className="error" role="alert">{err}</p>}
           <button className="cta" disabled={busy || !files.length || !agree} onClick={() => void read()}>
             {busy ? "읽는 중이에요… (20초쯤 걸려요)" : "올리고 채우기"}

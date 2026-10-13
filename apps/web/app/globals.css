@@ -416,3 +416,4 @@ body { word-break: keep-all; overflow-wrap: break-word; }
 .heroform-upload { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; padding: 12px 14px; border: 1px dashed #4a4f56; border-radius: 12px; color: #fff; text-decoration: none; text-align: center; }
 .heroform-upload b { color: var(--mint); font-size: 14px; }
 .heroform-upload span { color: #c9cdd2; font-size: 12px; }
+.consent-all { padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); }

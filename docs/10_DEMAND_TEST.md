@@ -118,8 +118,15 @@
   - PDF는 10쪽까지(쪽마다 비용이 들어서, 보내기 전에 센다). 암호 걸린 PDF는 받지 않는다.
   - 동시에 읽는 건 8건까지(넘으면 "잠시 후 다시"). 읽는 동안(10~30초) DB 연결을 잡지 않는다.
   - 로그인 전에 파일로 시작한 기존 회원이 로그인하면, 확인한 경력 중 없는 것만 기존 프로필에 더한다.
+- **가입하지 않아도 남기기 (migration 0031):** 업로드 화면의 [선택] "읽은 경력·학력을 익명 통계에 쓰는 것에 동의"를
+  체크하면, 읽은 그대로(회사·직함·고용 형태·기간, 학교·전공·학위)를 `import_experience` / `import_education`에 남긴다.
+  - 가입·로그인과 상관없이 남는다. 이름·연락처·파일은 남기지 않고, 시도(import_attempt: 세션 해시/계정)에만 연결된다.
+  - 국외 이전 동의와 따로 받는다(§22①). 선택이라 거부해도 파일 읽기는 된다(§16③). "모두 동의하기"로 한 번에 체크할 수 있다.
+  - 문구 버전 `career_import_stats_v1`(웹 `IMPORT_STATS_CONSENT_VERSION`). 동의 여부는 `import_attempt.stats_consent_version`.
+  - 보유 기간 3년(`HELLOMYME_CAREER_IMPORT_RETENTION_DAYS`). 지난 행은 업로드 API가 호출될 때 지운다.
+  - 입력 폼을 끝까지 제출한 사람은 동의와 별개로 기존처럼 초안(`anonymous_draft`)에도 남는다.
 - **끄기:** Render에서 `ANTHROPIC_API_KEY`를 지우면 업로드 화면이 "직접 입력"으로 바뀐다.
-- **저장 위치:** `import_attempt`(읽기 1회 = 1행, 결과·토큰·출처 종류), 확인된 경력은 `work_event` +
+- **저장 위치:** `import_attempt`(읽기 1회 = 1행, 결과·토큰·출처 종류), 통계 동의 시 `import_experience`/`import_education`, 확인된 경력은 `work_event` +
   `source_record`(`LINKEDIN_USER_UPLOAD` 또는 `CAREER_DOCUMENT`), 초안은 `anonymous_draft.payload_json.other_jobs`.
 - **이벤트:** `import_viewed` → `import_uploaded` → `import_parsed` → `import_confirmed`(member true/false).
 

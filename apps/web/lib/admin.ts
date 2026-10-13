@@ -21,7 +21,8 @@ export type AdminStats = {
   interview: { applied: number; verified: number; withdrawn: number; applied_in_range: number;
     shown: number; skipped: number; submitted: number };
   imports: { reads: number; before_login: number; parsed: number; not_career: number; failed: number;
-    input_tokens: number; output_tokens: number; drafts: number; signed_up: number; est_cost_usd: number };
+    input_tokens: number; output_tokens: number; drafts: number; signed_up: number; est_cost_usd: number;
+    stats_consented: number; experiences_kept: number };
 };
 
 /** 401: not logged in. 403: logged in, not on the admin list (the body says the account id). */

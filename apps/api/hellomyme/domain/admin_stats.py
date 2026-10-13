@@ -190,7 +190,10 @@ def stats(conn: Connection, rng: Range, with_team: bool) -> dict:
                coalesce(sum(input_tokens), 0) AS input_tokens,
                coalesce(sum(output_tokens), 0) AS output_tokens,
                (SELECT count(*) FROM d) AS drafts,
-               (SELECT count(*) FROM d WHERE claimed_at IS NOT NULL) AS signed_up
+               (SELECT count(*) FROM d WHERE claimed_at IS NOT NULL) AS signed_up,
+               count(*) FILTER (WHERE stats_consent_version IS NOT NULL) AS stats_consented,
+               (SELECT count(*) FROM import_experience x
+                 WHERE x.import_attempt_id IN (SELECT import_attempt_id FROM a)) AS experiences_kept
         FROM a"""), p).one()._mapping)
     price_in, price_out = IMPORT_PRICE_PER_MTOK
     imports["est_cost_usd"] = round(

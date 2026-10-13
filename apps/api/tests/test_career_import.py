@@ -348,3 +348,49 @@ def test_a_returning_member_keeps_what_they_confirmed_from_a_file(engine, ids): 
     # The earliest job has no role yet: the comparison uses the earliest one with a role.
     me = c.get("/acq/me", headers=auth).json()["profile"]
     assert me["first_job"]["role_node_id"] == ids["R3"] and me["first_job_is_current"] is True
+
+
+def test_what_was_read_is_kept_only_with_the_separate_consent(engine, ids):  # noqa: F811
+    c = app_with(Fake())
+    stats = {"stats_consent": True, "stats_consent_text_version": "career_import_stats_v1"}
+    assert c.post("/acq/import/parse", headers=anon(),
+                  json=body(stats_consent=True, stats_consent_text_version="old")).status_code == 409
+
+    kept = c.post("/acq/import/parse", headers=anon(), json=body(**stats)).json()  # never signs up
+    not_kept = c.post("/acq/import/parse", headers=anon(), json=body()).json()
+    with engine.begin() as conn:
+        rows = conn.execute(text(
+            """SELECT ordinal, company_raw, title_raw, employment_type, start_year, start_month,
+                      end_year, end_month, is_current, role_taxonomy_node_id::text AS role
+               FROM import_experience WHERE import_attempt_id = CAST(:a AS uuid)
+               ORDER BY ordinal"""), {"a": kept["import_attempt_id"]}).all()
+        edu = conn.execute(text(
+            """SELECT school_raw, major_raw, institution_id::text, major_taxonomy_node_id::text
+               FROM import_education WHERE import_attempt_id = CAST(:a AS uuid)"""),
+            {"a": kept["import_attempt_id"]}).one()
+        none = conn.execute(text(
+            "SELECT count(*) FROM import_experience WHERE import_attempt_id = CAST(:a AS uuid)"),
+            {"a": not_kept["import_attempt_id"]}).scalar_one()
+        versions = conn.execute(text(
+            """SELECT stats_consent_version FROM import_attempt
+               WHERE import_attempt_id IN (CAST(:a AS uuid), CAST(:b AS uuid))
+               ORDER BY created_at"""),
+            {"a": kept["import_attempt_id"], "b": not_kept["import_attempt_id"]}).scalars().all()
+    assert len(rows) == 4 and none == 0
+    assert tuple(rows[0])[:9] == (1, "질의컴퍼니", "브랜드 마케팅", "FULL_TIME", 2022, 3, None, None, True)
+    assert rows[0].role == ids["R3"]
+    assert (rows[3].end_year, rows[3].end_month) == (None, None)  # the misread end stays unknown
+    assert tuple(edu) == ("질의대학교", "경영학과", ids["inst"], ids["M3"])
+    assert versions == ["career_import_stats_v1", None]
+
+    # After the promised retention period the rows are removed.
+    with engine.begin() as conn:
+        conn.execute(text(
+            """UPDATE import_experience SET created_at = now() - interval '4 years'
+               WHERE import_attempt_id = CAST(:a AS uuid)"""), {"a": kept["import_attempt_id"]})
+    c.post("/acq/import/parse", headers=anon(), json=body())
+    with engine.begin() as conn:
+        left = conn.execute(text(
+            "SELECT count(*) FROM import_experience WHERE import_attempt_id = CAST(:a AS uuid)"),
+            {"a": kept["import_attempt_id"]}).scalar_one()
+    assert left == 0
