@@ -26,13 +26,29 @@ from hellomyme.domain.policies import PolicyMissing
 
 LOOKBACKS = {"1Y": 1, "3Y": 3, "5Y": 5, "10Y": 10, "ALL": None}
 FIRST_EMPLOYMENT_RULE = "fe_v1"
+STAYED = "STAYED"
+# Results that are fixed bands, not taxonomy nodes: code -> label, in display order.
+BANDS = {
+    "COMPANY_SIZE": {"ENTERPRISE": "대기업", "LARGE": "대형", "MID": "중견", "SMALL": "소형",
+                     "MICRO": "초소형"},
+    "TENURE": {"LT_1Y": "1년 안", "Y1_2": "1~2년", "Y2_3": "2~3년", "GE_3Y": "3년 이상",
+               STAYED: "아직 다니는 중"},
+}
 SUPPORTED_METRICS = {
     "FIRST_ROLE_DISTRIBUTION": "ROLE",
     "FIRST_INDUSTRY_DISTRIBUTION": "INDUSTRY",
     "CURRENT_ROLE_DISTRIBUTION": "ROLE",
     "NEXT_ROLE_DISTRIBUTION": "ROLE",
+    # The first job's company size and how long it lasted (student result cards).
+    "FIRST_COMPANY_SIZE_DISTRIBUTION": "COMPANY_SIZE",
+    "FIRST_JOB_TENURE_DISTRIBUTION": "TENURE",
+    # After a role: the next job's company size, and how long people stayed in the role.
+    "NEXT_COMPANY_SIZE_DISTRIBUTION": "COMPANY_SIZE",
+    "ROLE_TENURE_DISTRIBUTION": "TENURE",
 }
-STAYED = "STAYED"
+# Metrics that start from a role (from_role_node_ids).
+FROM_ROLE_METRICS = ("NEXT_ROLE_DISTRIBUTION", "NEXT_COMPANY_SIZE_DISTRIBUTION",
+                     "ROLE_TENURE_DISTRIBUTION")
 
 
 class QueryInvalid(ValueError):
@@ -329,6 +345,33 @@ def _window_clause(col: str, start: date | None) -> str:
     return f"{col} <= :as_of" + (f" AND {col} >= :win_start" if start else "")
 
 
+def _tenure(start: str, end: str) -> str:
+    return (f"CASE WHEN {end} < {start} + interval '1 year' THEN 'LT_1Y' "
+            f"WHEN {end} < {start} + interval '2 years' THEN 'Y1_2' "
+            f"WHEN {end} < {start} + interval '3 years' THEN 'Y2_3' ELSE 'GE_3Y' END")
+
+
+# For each person: the first event in the from-subtree, then the next event that starts after it
+# (the next choice). Still in it at as_of with nothing after = STAYED.
+_FROM_ROLE = """
+        , ev AS (
+            SELECT w.person_id, w.work_event_id, w.role_taxonomy_node_id, w.start_date,
+                   w.end_date,
+                   lead(w.role_taxonomy_node_id) OVER per AS next_node,
+                   lead(w.start_date) OVER per AS next_start,
+                   lead(o.company_size_band) OVER per AS next_size
+            FROM canonical_work_event w JOIN cohort c ON c.person_id = w.person_id
+            LEFT JOIN organization o ON o.organization_id = w.organization_id
+            WHERE w.start_date IS NOT NULL AND w.start_date <= :as_of
+              AND w.event_type NOT IN ('STUDY', 'MILITARY', 'CAREER_BREAK')
+            WINDOW per AS (PARTITION BY w.person_id ORDER BY w.start_date, w.work_event_id)),
+        src AS (
+            SELECT DISTINCT ON (person_id) * FROM ev
+            WHERE role_taxonomy_node_id = ANY(CAST(:from_roles AS uuid[]))
+            ORDER BY person_id, start_date, work_event_id)"""
+_NEXT_OR_STAYED = """(next_start IS NOT NULL AND {window_next})
+           OR (next_start IS NULL AND (end_date IS NULL OR end_date > :as_of))"""
+
 # One row per person in the analysed basis: (person_id, result node uuid or NULL/STAYED).
 # First employment is computed for the cohort's people only (first_employment_for, migration 0034).
 METRIC_SQL = {
@@ -357,28 +400,40 @@ METRIC_SQL = {
                                                    (SELECT array_agg(person_id) FROM cohort)) fe
                 WHERE fe.person_id = w.person_id AND fe.start_date >= :win_start))
         ORDER BY w.person_id, w.start_date DESC, w.work_event_id""",
-    # For each person: the first event in the from-subtree, then the next event that starts
-    # after it (the next choice). Still in it at as_of with nothing after = STAYED.
-    "NEXT_ROLE_DISTRIBUTION": """
-        , ev AS (
-            SELECT w.person_id, w.work_event_id, w.role_taxonomy_node_id, w.start_date,
-                   w.end_date,
-                   lead(w.role_taxonomy_node_id) OVER per AS next_node,
-                   lead(w.start_date) OVER per AS next_start
-            FROM canonical_work_event w JOIN cohort c ON c.person_id = w.person_id
-            WHERE w.start_date IS NOT NULL AND w.start_date <= :as_of
-              AND w.event_type NOT IN ('STUDY', 'MILITARY', 'CAREER_BREAK')
-            WINDOW per AS (PARTITION BY w.person_id ORDER BY w.start_date, w.work_event_id)),
-        src AS (
-            SELECT DISTINCT ON (person_id) * FROM ev
-            WHERE role_taxonomy_node_id = ANY(CAST(:from_roles AS uuid[]))
-            ORDER BY person_id, start_date, work_event_id)
+    "NEXT_ROLE_DISTRIBUTION": _FROM_ROLE + """
         SELECT person_id,
                CASE WHEN next_start IS NOT NULL THEN next_node::text
                     WHEN end_date IS NULL OR end_date > :as_of THEN 'STAYED' END AS node
         FROM src
-        WHERE (next_start IS NOT NULL AND {window_next})
-           OR (next_start IS NULL AND (end_date IS NULL OR end_date > :as_of))""",
+        WHERE """ + _NEXT_OR_STAYED,
+    "FIRST_COMPANY_SIZE_DISTRIBUTION": """
+        SELECT fe.person_id, o.company_size_band AS node
+        FROM first_employment_for(:fe_rule, :as_of, (SELECT array_agg(person_id) FROM cohort)) fe
+        JOIN cohort c ON c.person_id = fe.person_id
+        LEFT JOIN work_event w ON w.work_event_id = fe.work_event_id
+        LEFT JOIN organization o ON o.organization_id = w.organization_id
+        WHERE {window_fe}""",
+    # Still in the first job at as_of = STAYED; an ended one by how long it lasted.
+    "FIRST_JOB_TENURE_DISTRIBUTION": """
+        SELECT fe.person_id,
+               CASE WHEN w.start_date IS NULL THEN NULL
+                    WHEN w.end_date IS NULL OR w.end_date > :as_of THEN 'STAYED'
+                    ELSE """ + _tenure("w.start_date", "w.end_date") + """ END AS node
+        FROM first_employment_for(:fe_rule, :as_of, (SELECT array_agg(person_id) FROM cohort)) fe
+        JOIN cohort c ON c.person_id = fe.person_id
+        LEFT JOIN work_event w ON w.work_event_id = fe.work_event_id
+        WHERE {window_fe}""",
+    # Only the people who moved on: the company size of the job after the role.
+    "NEXT_COMPANY_SIZE_DISTRIBUTION": _FROM_ROLE + """
+        SELECT person_id, next_size AS node FROM src
+        WHERE next_start IS NOT NULL AND {window_next}""",
+    # How long the role lasted before the next move; still in it = STAYED.
+    "ROLE_TENURE_DISTRIBUTION": _FROM_ROLE + """
+        SELECT person_id,
+               CASE WHEN next_start IS NULL THEN 'STAYED'
+                    ELSE """ + _tenure("start_date", "COALESCE(end_date, next_start)") + """ END AS node
+        FROM src
+        WHERE """ + _NEXT_OR_STAYED,
 }
 
 
@@ -390,7 +445,7 @@ def _basis(conn: Connection, q: CareerQuery, f: Filters, majors: Taxonomy, roles
         window_next=_window_clause("next_start", win_start))
     params.update(layers=layers, as_of=q.as_of_date, win_start=win_start,
                   fe_rule=FIRST_EMPLOYMENT_RULE)
-    if q.target_metric == "NEXT_ROLE_DISTRIBUTION":
+    if q.target_metric in FROM_ROLE_METRICS:
         params["from_roles"] = roles.subtree(q.from_role_node_ids)
     # Metric SQL either starts with SELECT or continues the CTE list with ", name AS (...)".
     rows = conn.execute(text(f"WITH cohort AS ({cohort}) {sql}"), params).all()
@@ -406,14 +461,18 @@ def evaluate_with_filters(conn: Connection, q: CareerQuery, *,
     """Like evaluate, plus the effective cohort filters for follow-up queries on the same cohort."""
     if q.target_metric not in SUPPORTED_METRICS:
         raise QueryInvalid(f"target_metric must be one of {sorted(SUPPORTED_METRICS)}")
-    if q.target_metric == "NEXT_ROLE_DISTRIBUTION" and not q.from_role_node_ids:
-        raise QueryInvalid("NEXT_ROLE_DISTRIBUTION needs from_role_node_ids")
+    if q.target_metric in FROM_ROLE_METRICS and not q.from_role_node_ids:
+        raise QueryInvalid(f"{q.target_metric} needs from_role_node_ids")
     win_start, win_end = time_window(q.as_of_date, q.lookback)
     policy = active_cohort_policy_v2(conn)
     majors, roles = load_taxonomy(conn, "MAJOR"), load_taxonomy(conn, "ROLE")
     result_type = SUPPORTED_METRICS[q.target_metric]
-    result_tax = roles if result_type == "ROLE" else load_taxonomy(conn, result_type)
-    depth = surface_depth(conn, q.surface_code, result_type, q.requested_depth)
+    bands = BANDS.get(result_type)
+    if bands is None:
+        result_tax = roles if result_type == "ROLE" else load_taxonomy(conn, result_type)
+        depth = surface_depth(conn, q.surface_code, result_type, q.requested_depth)
+    else:
+        result_tax, depth = None, None
     for ids, tax in ((q.major_node_ids, majors), (q.current_role_node_ids, roles),
                      (q.first_role_node_ids, roles), (q.from_role_node_ids, roles)):
         unknown = [i for i in ids if i not in tax.nodes]
@@ -451,7 +510,12 @@ def evaluate_with_filters(conn: Connection, q: CareerQuery, *,
     counts: dict[str, int] = defaultdict(int)
     unknown_n = 0
     for _, node in rows:
-        if node is None or (node != STAYED and node not in result_tax.nodes):
+        if bands is not None:
+            if node in bands:
+                counts[node] += 1
+            else:
+                unknown_n += 1
+        elif node is None or (node != STAYED and node not in result_tax.nodes):
             unknown_n += 1
         else:
             counts[node if node == STAYED else result_tax.ancestor_at(node, depth)] += 1
@@ -462,11 +526,19 @@ def evaluate_with_filters(conn: Connection, q: CareerQuery, *,
             if n < min_cell or len(cells) >= policy.top_n:
                 other_n += n
                 continue
+            if bands is not None:
+                cells.append({"key": key, "code": key, "label": bands[key], "depth": None,
+                              "n": n, "share": round(n / effective_n, 4)})
+                continue
             node = result_tax.nodes.get(key)
             cells.append({
                 "key": key, "code": node["code"] if node else key,
                 "label": node["label"] if node else None, "depth": node["depth"] if node else None,
                 "n": n, "share": round(n / effective_n, 4)})
+        if bands is not None:
+            # Bands read in their own order (대기업 → 초소형, 1년 안 → 3년 이상), not by size.
+            order = list(bands)
+            cells.sort(key=lambda c: order.index(c["key"]))
     other = None
     if other_n:
         # A folded remainder smaller than one cell would itself expose a small group.
@@ -480,7 +552,7 @@ def evaluate_with_filters(conn: Connection, q: CareerQuery, *,
                         "end": win_end.isoformat()},
         "taxonomy_depth": depth,
         "taxonomy_version": {"ROLE": roles.version, "MAJOR": majors.version,
-                             result_type: result_tax.version},
+                             **({result_type: result_tax.version} if result_tax else {})},
         "cohort_policy_version": policy.version, "first_employment_rule": FIRST_EMPLOYMENT_RULE,
         "requested_filters": requested.public(majors, roles),
         "effective_filters": effective.public(majors, roles),

@@ -199,6 +199,33 @@ def stats(conn: Connection, rng: Range, with_team: bool) -> dict:
     imports["est_cost_usd"] = round(
         (imports["input_tokens"] * price_in + imports["output_tokens"] * price_out) / 1e6, 2)
 
+    # Paid cards and the payment-intent test (docs/10 §결과 카드와 결제): per card, how many
+    # opened it with 튜브, pressed "990원으로 열기" (an order), saw the checkout, pressed 결제하기.
+    cards = _rows(conn, """
+        WITH o AS (
+            SELECT * FROM payment_order
+            WHERE (CAST(:t_from AS timestamptz) IS NULL OR created_at >= :t_from)
+              AND (:with_team OR NOT internal)),
+        u AS (
+            SELECT insight_type, count(*) AS n FROM unlock_event
+            WHERE (CAST(:t_from AS timestamptz) IS NULL OR created_at >= :t_from)
+            GROUP BY 1)
+        SELECT coalesce(o.insight_type, u.insight_type) AS card,
+               coalesce(max(u.n), 0) AS unlocked,
+               count(o.order_id) AS orders,
+               count(DISTINCT o.account_id) AS buyers,
+               count(o.order_id) FILTER (WHERE o.status = 'TEST_COMPLETED') AS test_completed,
+               count(o.order_id) FILTER (WHERE o.status = 'PAID') AS paid,
+               coalesce(sum(o.amount_krw) FILTER (WHERE o.status = 'PAID'), 0) AS paid_krw
+        FROM o FULL JOIN u ON u.insight_type = o.insight_type
+        GROUP BY 1 ORDER BY orders DESC, unlocked DESC""", p)
+    checkout = conn.execute(text(_EVENTS + """
+        SELECT count(DISTINCT sid) FILTER (WHERE event_name = 'payment_started') AS started,
+               count(DISTINCT sid) FILTER (WHERE event_name = 'checkout_viewed') AS viewed,
+               count(DISTINCT sid) FILTER (WHERE event_name = 'checkout_completed') AS completed,
+               count(DISTINCT sid) FILTER (WHERE event_name = 'checkout_cancelled') AS cancelled
+        FROM ev"""), p).one()._mapping
+
     return {
         "range": rng, "with_team": with_team,
         "since": t_from.isoformat() if t_from else None,
@@ -207,6 +234,7 @@ def stats(conn: Connection, rng: Range, with_team: bool) -> dict:
         "desired_status": desired_status, "desired_roles": desired_roles, "backlog": backlog,
         "interview": {**dict(interview), **dict(shown)},
         "imports": imports,
+        "pay": {"cards": cards, "checkout": dict(checkout)},
     }
 
 

@@ -397,15 +397,16 @@ def _other_schools(filters: dict, e: AcqEducation) -> dict:
 
 
 def student_first_roles(conn, p: AcquisitionPayload, *, layers, as_of, exclude=(),
-                        other_schools: bool = False):
-    """S2: what similar seniors did first (FIRST_ROLE at the surface depth)."""
+                        other_schools: bool = False, metric: str = "FIRST_ROLE_DISTRIBUTION"):
+    """S2: what similar seniors did first (FIRST_ROLE at the surface depth). The result cards
+    ask other questions (metric) of the same education cohort."""
     _require(p, "education")
     e = p.education
     filters, similar = cohort_inputs(conn, e)
     if other_schools:
         filters = _other_schools(filters, e)
     return _say_similar(evaluate_with_filters(conn, CareerQuery(
-        as_of_date=as_of, target_metric="FIRST_ROLE_DISTRIBUTION", surface_code=SURFACE,
+        as_of_date=as_of, target_metric=metric, surface_code=SURFACE,
         **filters,
         admission_year_from=e.admission_year, admission_year_to=e.admission_year,
         graduation_year_from=e.graduation_year, graduation_year_to=e.graduation_year,
@@ -413,8 +414,10 @@ def student_first_roles(conn, p: AcquisitionPayload, *, layers, as_of, exclude=(
 
 
 def professional_next_roles(conn, p: AcquisitionPayload, *, layers, as_of, exclude=(),
-                            with_first_job: bool = False, other_schools: bool = False):
-    """P2 (current role only) and P4 (same first role and current role): the next choice."""
+                            with_first_job: bool = False, other_schools: bool = False,
+                            metric: str = "NEXT_ROLE_DISTRIBUTION"):
+    """P2 (current role only) and P4 (same first role and current role): the next choice. The
+    result cards ask other questions (metric) of the same people."""
     _require(p, "education", "current_job")
     roles = load_taxonomy(conn, "ROLE")
     current = _surface_node(conn, roles, p.current_job.role_node_id)
@@ -428,11 +431,41 @@ def professional_next_roles(conn, p: AcquisitionPayload, *, layers, as_of, exclu
     if other_schools:
         filters = _other_schools(filters, e)
     return _say_similar(evaluate_with_filters(conn, CareerQuery(
-        as_of_date=as_of, target_metric="NEXT_ROLE_DISTRIBUTION", surface_code=SURFACE,
+        as_of_date=as_of, target_metric=metric, surface_code=SURFACE,
         **filters,
         graduation_year_from=e.graduation_year, graduation_year_to=e.graduation_year,
         gender_codes=_gender(p), from_role_node_ids=(current,), first_role_node_ids=first,
         exclude_person_ids=tuple(exclude)), layers=layers), e, similar)
+
+
+# Result cards after the free one (docs/10 §결과 카드): insight_type -> (flow, metric) on the same
+# cohort as the free card. Each opens with 튜브 (unlock_policy); titles are on the web.
+CARDS = {
+    "FIRST_COMPANY_SIZE": ("STUDENT", "FIRST_COMPANY_SIZE_DISTRIBUTION"),
+    "FIRST_JOB_TENURE": ("STUDENT", "FIRST_JOB_TENURE_DISTRIBUTION"),
+    "ROLE_NOW": ("STUDENT", "CURRENT_ROLE_DISTRIBUTION"),
+    "NEXT_COMPANY_SIZE": ("PROFESSIONAL", "NEXT_COMPANY_SIZE_DISTRIBUTION"),
+    "ROLE_TENURE": ("PROFESSIONAL", "ROLE_TENURE_DISTRIBUTION"),
+}
+
+
+def cards_for(p: AcquisitionPayload) -> list[str]:
+    flow = "PROFESSIONAL" if p.is_professional else "STUDENT"
+    return [card for card, (f, _) in CARDS.items() if f == flow]
+
+
+def card_result(conn, p: AcquisitionPayload, card: str, *, layers, as_of, exclude=()) -> dict | None:
+    """One result card's distribution, or None when the card is not one of this flow's."""
+    if card not in cards_for(p):
+        return None
+    metric = CARDS[card][1]
+    if p.is_professional:
+        out, _ = professional_next_roles(conn, p, layers=layers, as_of=as_of, exclude=exclude,
+                                         metric=metric)
+    else:
+        out, _ = student_first_roles(conn, p, layers=layers, as_of=as_of, exclude=exclude,
+                                     metric=metric)
+    return out
 
 
 def _months(a: date, b: date) -> int:

@@ -21,6 +21,10 @@ const DESIRED: Record<string, string> = {
   SKIPPED: "답하지 않음",
 };
 const KIND: Record<string, string> = { INSTITUTION: "학교", MAJOR: "전공", ROLE: "직무" };
+const CARD_LABELS: Record<string, string> = {
+  SCHOOL_COMPARE: "다른 학교 같은 과", PATH_DEEP_DIVE: "도착한 회사·산업", FIRST_COMPANY_SIZE: "첫 직장 규모",
+  FIRST_JOB_TENURE: "첫 직장 근속", ROLE_NOW: "지금 직무", NEXT_COMPANY_SIZE: "옮긴 회사 규모", ROLE_TENURE: "직무 근속",
+};
 const DEV_LOGIN = process.env.NEXT_PUBLIC_ENABLE_DEV_LOGIN === "true";
 
 const fmt = (n: number | null | undefined) => (n == null ? "–" : n.toLocaleString("ko-KR"));
@@ -174,6 +178,18 @@ export default function AdminStats() {
               <Mini label="번호 인증됨" value={data.interview.verified} />
               <Mini label="철회" value={data.interview.withdrawn} />
             </div>
+          </Card>
+
+          <Card title="결제 의향" note="정식 결제 전에는 결제하기를 눌러도 결제되지 않고 튜브 1개를 선물해요. 의향률 = 결제하기 ÷ 990원 버튼. 주문 수는 계정 기준.">
+            <div className="mini-kpis">
+              <Mini label="990원 버튼 누름" value={data.pay.checkout.started} />
+              <Mini label="결제 화면 확인" value={data.pay.checkout.viewed} />
+              <Mini label="결제하기 누름" value={data.pay.checkout.completed} />
+              <Mini label="취소" value={data.pay.checkout.cancelled} />
+            </div>
+            <Table head={["카드", "튜브로 열기", "주문", "결제하기 누름", "의향률", "실제 결제"]} rows={data.pay.cards.map((c) => [
+              CARD_LABELS[c.card] ?? c.card, fmt(c.unlocked), fmt(c.orders), fmt(c.test_completed),
+              pct(c.test_completed, c.orders), c.paid ? `${fmt(c.paid)}건 · ${fmt(c.paid_krw)}원` : "–"])} />
           </Card>
 
           <Card title="이력서·캡처로 시작" note={`파일은 저장하지 않아요. 비용은 정가 기준 추정치예요 (약 $${data.imports.est_cost_usd.toFixed(2)}).`}>

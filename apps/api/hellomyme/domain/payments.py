@@ -4,6 +4,10 @@ The order (price and 튜브 from the active pricing_policy) is written before th
 opens; the payment is confirmed server-side with Toss (secret key, amount checked against the
 order) before anything is credited; a paid order credits once (ledger key purchase:<order_id>).
 Card numbers never reach this service; only the method, approval time and receipt link are kept.
+
+Payment-intent test (migration 0038): with no Toss key the checkout is our own page. Pressing
+"결제하기" charges nothing and asks for no payment details; it is recorded (TEST_COMPLETED) and
+gifts 1 튜브 (reward PAYMENT_TEST_GIFT) that opens the card. Retiring that reward turns it off.
 """
 from __future__ import annotations
 
@@ -18,13 +22,18 @@ from sqlalchemy import Connection, text
 
 from hellomyme.config import Settings
 from hellomyme.domain import ledger
+from hellomyme.domain.acquisition import CARDS
+from hellomyme.domain.policies import active_reward_policy
 
 log = logging.getLogger(__name__)
 
 SKU = "CARD_1"
 ORDER_NAME = "nextpath 카드 1장"
 # The cards that can be opened right after a payment (unlock_policy.insight_type).
-PAYABLE = ("SCHOOL_COMPARE", "PATH_DEEP_DIVE")
+PAYABLE = ("SCHOOL_COMPARE", "PATH_DEEP_DIVE", *CARDS)
+TEST_GIFT = "PAYMENT_TEST_GIFT"
+# What the test checkout offers (nothing is charged whichever is chosen).
+TEST_METHODS = ("CARD", "EASY_PAY", "TRANSFER")
 
 
 class PaymentFailed(Exception):
@@ -63,6 +72,16 @@ def get_provider(settings: Settings) -> PaymentProvider | None:
     return TossPayments(settings) if settings.toss_secret_key else None
 
 
+def mode(conn: Connection, settings: Settings) -> str | None:
+    """TOSS with a secret key; TEST (the payment-intent test) without one while its gift reward is
+    active; None when cards cannot be bought."""
+    if price(conn) is None:
+        return None
+    if settings.toss_secret_key:
+        return "TOSS"
+    return "TEST" if active_reward_policy(conn, TEST_GIFT) else None
+
+
 def price(conn: Connection):
     return conn.execute(text(
         """SELECT pricing_policy_id::text AS id, sku, amount_krw, credit_amount, version
@@ -76,7 +95,8 @@ def customer_key(account_id: str) -> str:
     return "np_" + hashlib.sha256(f"nextpath-customer:{account_id}".encode()).hexdigest()[:40]
 
 
-def create_order(conn: Connection, account_id: str, insight_type: str, internal: bool = False) -> dict:
+def create_order(conn: Connection, account_id: str, insight_type: str, internal: bool = False,
+                 provider: str = "TOSS") -> dict:
     if insight_type not in PAYABLE:
         raise PaymentFailed(422, "열 수 없는 카드예요")
     p = price(conn)
@@ -84,13 +104,52 @@ def create_order(conn: Connection, account_id: str, insight_type: str, internal:
         raise PaymentFailed(409, "지금은 결제할 수 없어요")
     order_id = "np-" + secrets.token_urlsafe(24)[:32]
     conn.execute(text(
-        """INSERT INTO payment_order (order_id, account_id, pricing_policy_id, sku, amount_krw,
-               credit_amount, insight_type, internal)
-           VALUES (:o, :a, CAST(:pp AS uuid), :s, :amt, :c, :i, :internal)"""),
-        {"o": order_id, "a": account_id, "pp": p.id, "s": p.sku, "amt": p.amount_krw,
-         "c": p.credit_amount, "i": insight_type, "internal": internal})
+        """INSERT INTO payment_order (order_id, account_id, provider, pricing_policy_id, sku,
+               amount_krw, credit_amount, insight_type, internal)
+           VALUES (:o, :a, :prov, CAST(:pp AS uuid), :s, :amt, :c, :i, :internal)"""),
+        {"o": order_id, "a": account_id, "prov": provider, "pp": p.id, "s": p.sku,
+         "amt": p.amount_krw, "c": p.credit_amount, "i": insight_type, "internal": internal})
     return {"order_id": order_id, "amount": p.amount_krw, "order_name": ORDER_NAME,
-            "customer_key": customer_key(account_id), "insight_type": insight_type}
+            "customer_key": customer_key(account_id), "insight_type": insight_type,
+            "mode": provider}
+
+
+def order(conn: Connection, account_id: str, order_id: str) -> dict:
+    """What the checkout page shows for one of the member's own orders."""
+    row = conn.execute(text(
+        """SELECT order_id, provider, status, amount_krw, credit_amount, insight_type
+           FROM payment_order WHERE order_id = :o AND account_id = CAST(:a AS uuid)"""),
+        {"o": order_id, "a": account_id}).first()
+    if row is None:
+        raise PaymentFailed(404, "주문을 찾지 못했어요")
+    return {"order_id": row.order_id, "mode": row.provider, "status": row.status,
+            "amount": row.amount_krw, "credit_amount": row.credit_amount,
+            "order_name": ORDER_NAME, "insight_type": row.insight_type}
+
+
+def test_complete(conn: Connection, account_id: str, order_id: str, method: str) -> dict:
+    """The test checkout's "결제하기" was pressed: record it (nothing is charged) and gift the 튜브
+    once per order. A replay returns the same answer; the gift stops at the reward's cap."""
+    row = conn.execute(text(
+        """SELECT order_id, status, insight_type, ledger_id::text AS ledger_id
+           FROM payment_order
+           WHERE order_id = :o AND account_id = CAST(:a AS uuid) AND provider = 'TEST'
+           FOR UPDATE"""), {"o": order_id, "a": account_id}).first()
+    if row is None:
+        raise PaymentFailed(404, "주문을 찾지 못했어요")
+    if row.status == "TEST_COMPLETED":
+        return {"completed": True, "order_id": order_id, "insight_type": row.insight_type,
+                "gifted": row.ledger_id is not None}
+    if row.status != "CREATED":
+        raise PaymentFailed(409, "이미 끝난 주문이에요")
+    gift = ledger.grant_reward(conn, account_id, TEST_GIFT, "PAYMENT_ORDER", order_id)
+    conn.execute(text(
+        """UPDATE payment_order SET status = 'TEST_COMPLETED', method = :m,
+               ledger_id = CAST(:l AS uuid), updated_at = now()
+           WHERE order_id = :o"""),
+        {"m": method, "l": gift and gift.ledger_id, "o": order_id})
+    return {"completed": True, "order_id": order_id, "insight_type": row.insight_type,
+            "gifted": gift is not None}
 
 
 def confirm(conn: Connection, account_id: str, order_id: str, payment_key: str, amount: int,

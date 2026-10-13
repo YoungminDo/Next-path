@@ -190,6 +190,13 @@
     열면 우리 학교와 나란히 비교한다. 잠긴 동안은 흐린 그림만 보여주고 숫자는 보내지 않는다.
   - 가격은 `unlock_policy`의 `SCHOOL_COMPARE`(1튜브, unlock_v1). 다른 학교 인원이 기준보다 적으면 튜브를 쓰지 않는다.
   - 학교가 목록에 없으면 카드 2는 나오지 않는다.
+- **카드 3~ (migration 0038, 각 1튜브):** 같은 사람들(무료 카드와 같은 묶음)에게 다른 질문을 한다. 잠긴 동안 숫자는 보내지 않는다.
+  - 학생·취준생: "첫 직장, 대기업이었을까?"(`FIRST_COMPANY_SIZE`, 첫 직장 회사 규모), "첫 직장, 얼마나 다녔을까?"
+    (`FIRST_JOB_TENURE`, 1년 안/1~2년/2~3년/3년 이상/아직 다니는 중), "그 선배들, 지금은 무슨 일을 할까?"(`ROLE_NOW`, 지금 직무).
+  - 직장인: "옮긴 사람들은 어떤 회사로 갔을까?"(`NEXT_COMPANY_SIZE`, 옮긴 사람만), "이 직무에서 몇 년 있다가 옮겼을까?"
+    (`ROLE_TENURE`, 아직 그 직무 포함).
+  - 엔진: `career_query.py`의 띠(band) 지표(회사 규모·근속), 순서는 띠 순서 그대로. 회사 규모를 모르는 사람은 `unknown_n`.
+  - API: `/acq/me`의 `cards[]`, `POST /acq/me/cards/{type}/unlock`. 비어 있거나 인원이 적으면 튜브를 쓰지 않는다.
 
 ## 유료 카드와 결제 (migration 0037, 대표 결정 2026-10-13)
 - **구성:** 결과 카드 1장 무료 + 가입 선물 1튜브(카드 1장 더). 그다음부터는 카드 1장 = 1튜브 = **990원**(토스페이먼츠).
@@ -205,6 +212,18 @@
 - **법적 표시:** 결제 버튼 아래 청약철회 제한 고지(전자상거래법 §17②5, 무료 카드가 미리보기), `/terms`(가격·환불·청약철회),
   모든 판매 화면 하단 사업자 정보(`components/BusinessInfo.tsx`), `/privacy`에 결제 기록 5년·토스페이먼츠 위탁.
 - **퍼널:** `payment_started` → (`credit_purchased` | `payment_failed`). `payment_order`(internal 표시)로 매출·실패 사유를 본다.
+
+## 결제 의향 테스트 (migration 0038, 대표 결정 2026-10-13)
+- 토스 키가 없는 동안(`payments.mode` = TEST) "990원으로 열기"는 우리 결제 화면 `/pay/checkout`으로 간다.
+  주문은 `payment_order`(provider TEST)에 정상 주문처럼 남는다. 결제 정보는 받지 않고, 결제 수단은 고르기만 한다.
+- "990원 결제하기"를 누르면 `POST /acq/me/payments/test-complete`: 주문이 TEST_COMPLETED(고른 수단 포함)가 되고,
+  `reward_policy` PAYMENT_TEST_GIFT로 1튜브를 선물해 그 카드를 연다(주문당 1번, 한 사람 10번까지).
+  바로 다음 화면에서 "실제로 결제되지 않았어요, 대신 튜브 1개를 선물했어요"라고 알린다. /terms·/privacy에도 적었다.
+- **보는 숫자 (/admin "결제 의향"):** 카드별 주문(= 990원 버튼 누름) → 결제 화면 확인(`checkout_viewed`) →
+  결제하기 누름(TEST_COMPLETED, `checkout_completed`) / 취소(`checkout_cancelled`). 의향률 = 결제하기 누름 ÷ 990원 버튼 누름.
+- **끄기·바꾸기:** PAYMENT_TEST_GIFT 행을 RETIRED로 바꾸면 테스트가 꺼진다(버튼 "튜브가 부족해요"). Render에 `TOSS_SECRET_KEY`를
+  넣으면 자동으로 실제 결제(TOSS)가 된다.
+- 결제 화면은 우리 디자인이다. 결제 회사의 로고·화면을 흉내 내지 않는다.
 
 ## 숫자 아래 기준 표시 (신뢰도)
 - 미리보기와 결과의 큰 숫자 바로 아래에, 그 숫자가 세는 사람이 누구인지 적는다(실제로 쓴 조건 기준).

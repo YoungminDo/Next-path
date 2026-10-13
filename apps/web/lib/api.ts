@@ -116,8 +116,11 @@ export type MyResult = {
     content: { company_size: DeepDiveItem[]; industry: DeepDiveItem[] } | null };
   /** Other schools, same major: a 튜브 product; the result only once opened. */
   compare: { available: boolean; unlocked: boolean; cost_tube: number | null; result: QueryResult | null };
-  /** Paid cards: with no 튜브 left a card opens for price_krw (Toss Payments). */
-  payments: { enabled: boolean; price_krw: number | null };
+  /** More result cards on the same cohort (1 튜브 each); the numbers only once opened. */
+  cards: ResultCard[];
+  /** Paid cards: with no 튜브 left a card opens for price_krw. TOSS = Toss Payments; TEST = the
+   *  payment-intent test (our checkout, nothing charged, a 튜브 gifted). */
+  payments: Payments;
   balance_tube: number; data_basis: "SIMULATION" | "OBSERVED"; unlisted?: Unlisted;
 };
 export type AcqStep = "first_roles" | "next_roles" | "similar_paths";
@@ -129,8 +132,15 @@ export type TeaserResult = {
   unlisted?: Unlisted;
 };
 export type DesiredRole = { role_node_id: string | null; role_raw: string | null };
+export type CardType = "FIRST_COMPANY_SIZE" | "FIRST_JOB_TENURE" | "ROLE_NOW" | "NEXT_COMPANY_SIZE" | "ROLE_TENURE";
+export type ResultCard = { type: CardType; available: boolean; unlocked: boolean; cost_tube: number | null;
+  result: QueryResult | null };
+export type Payments = { enabled: boolean; mode: "TOSS" | "TEST" | null; price_krw: number | null };
 /** Cards that can be bought (one 튜브 each, 990원 when no 튜브 is left). */
-export type PayableInsight = "SCHOOL_COMPARE" | "PATH_DEEP_DIVE";
+export type PayableInsight = "SCHOOL_COMPARE" | "PATH_DEEP_DIVE" | CardType;
+export type PayOrder = { order_id: string; mode: "TOSS" | "TEST"; status: "CREATED" | "PAID" | "FAILED" | "TEST_COMPLETED";
+  amount: number; credit_amount: number; order_name: string; insight_type: PayableInsight };
+export type TestMethod = "CARD" | "EASY_PAY" | "TRANSFER";
 /** What a returning member's new answers would change in their profile (labels for display). */
 export type ProfileChange = { field: "user_type" | "education" | "current_job"; before: string | null; after: string | null };
 export type DesiredStatus = "CHOSEN" | "NONE" | "UNSURE" | "KEEP_CURRENT";
@@ -200,8 +210,17 @@ export const acq = {
       headers: { "Idempotency-Key": crypto.randomUUID() },
     }),
   createOrder: (insightType: PayableInsight, internal: boolean) =>
-    call<{ order_id: string; amount: number; order_name: string; customer_key: string; insight_type: PayableInsight }>(
+    call<{ order_id: string; amount: number; order_name: string; customer_key: string; insight_type: PayableInsight;
+      mode: "TOSS" | "TEST" }>(
       "/acq/me/payments", { method: "POST", body: JSON.stringify({ insight_type: insightType, internal }) }),
+  order: (orderId: string) => call<PayOrder>(`/acq/me/payments/${encodeURIComponent(orderId)}`),
+  /** The test checkout's 결제하기: nothing is charged; a 튜브 is gifted and opens the card. */
+  testComplete: (orderId: string, method: TestMethod) =>
+    call<{ completed: boolean; gifted: boolean; opened: boolean; insight_type: PayableInsight; balance_tube: number }>(
+      "/acq/me/payments/test-complete", { method: "POST", body: JSON.stringify({ order_id: orderId, method }) }),
+  unlockCard: (card: CardType) =>
+    call<{ unlocked: boolean; charged?: boolean; balance_tube?: number; result?: QueryResult }>(
+      `/acq/me/cards/${card}/unlock`, { method: "POST", headers: { "Idempotency-Key": crypto.randomUUID() } }),
   confirmPayment: (orderId: string, paymentKey: string, amount: number) =>
     call<{ paid: boolean; opened: boolean; insight_type: PayableInsight; balance_tube: number }>(
       "/acq/me/payments/confirm", { method: "POST",

@@ -1,10 +1,69 @@
 "use client";
 
-import type { Cell, QueryResult } from "@/lib/api";
+import type { CardType, Cell, PayableInsight, Payments, QueryResult, ResultCard } from "@/lib/api";
 
 /* The member's result as insight cards, in the landing gallery's look (.gcard) but with their
-   own numbers: their school·major is open; "다른 학교, 같은 과" opens with 튜브 and is drawn next to
-   their school. Colours: s1 = my school, s2 = other schools, gray = folded rest. */
+   own numbers: their school·major is open; "다른 학교, 같은 과" and the cards after it open with
+   튜브 (990원 when none is left). Colours: s1 = my school, s2 = other schools, gray = folded rest. */
+
+const pctOf = (r: QueryResult, keys: string[]) =>
+  Math.round(r.cells.filter((c) => keys.includes(c.key)).reduce((s, c) => s + c.share, 0) * 100);
+const top = (r: QueryResult, skip: string[] = []) => r.cells.filter((c) => !skip.includes(c.key))
+  .sort((a, b) => b.share - a.share)[0];
+
+/** What each card asks (title), what it promises before it opens (teaser), and the one line it
+ *  answers with once open. Band cells come labelled from the API. */
+export const CARDS: Record<CardType, {
+  title: string; tag: string; teaser: string; label?: Record<string, string>;
+  takeaway: (r: QueryResult, name: (c: Cell) => string) => string | null;
+}> = {
+  FIRST_COMPANY_SIZE: {
+    title: "첫 직장, 대기업이었을까?", tag: "Company",
+    teaser: "첫 직장이 대기업이었는지, 중견·작은 회사였는지 나눠 봐요.",
+    takeaway: (r) => {
+      const big = pctOf(r, ["ENTERPRISE", "LARGE"]);
+      return `대기업·대형 회사에서 시작한 사람은 ${big}%예요.`;
+    },
+  },
+  FIRST_JOB_TENURE: {
+    title: "첫 직장, 얼마나 다녔을까?", tag: "Tenure",
+    teaser: "첫 직장을 1년 안에 그만둔 사람이 얼마나 되는지 봐요.",
+    takeaway: (r) => {
+      const early = pctOf(r, ["LT_1Y"]);
+      const stayed = pctOf(r, ["STAYED"]);
+      return early > 0 ? `첫 직장을 1년 안에 그만둔 사람은 ${early}%예요.`
+        : stayed > 0 ? `${stayed}%는 아직 첫 직장에 다니고 있어요.` : null;
+    },
+  },
+  ROLE_NOW: {
+    title: "그 선배들, 지금은 무슨 일을 할까?", tag: "Now",
+    teaser: "처음 간 곳과 지금 있는 곳은 다를 수 있어요. 지금의 직무를 봐요.",
+    takeaway: (r, name) => {
+      const t = top(r);
+      return t ? `지금은 ${name(t)} 일을 하는 사람이 가장 많아요 (${Math.round(t.share * 100)}%).` : null;
+    },
+  },
+  NEXT_COMPANY_SIZE: {
+    title: "옮긴 사람들은 어떤 회사로 갔을까?", tag: "Company",
+    teaser: "이 직무에서 옮긴 사람들의 다음 회사가 대기업이었는지 작은 회사였는지 봐요.",
+    takeaway: (r) => `옮긴 사람 중 대기업·대형 회사로 간 사람은 ${pctOf(r, ["ENTERPRISE", "LARGE"])}%예요.`,
+  },
+  ROLE_TENURE: {
+    title: "이 직무에서 몇 년 있다가 옮겼을까?", tag: "Tenure",
+    teaser: "같은 직무였던 사람들이 얼마나 머물다 옮겼는지 봐요.",
+    label: { STAYED: "아직 그 직무" },
+    takeaway: (r, name) => {
+      const t = top(r, ["STAYED"]);
+      return t ? `옮긴 사람은 ${name(t)} 만에 옮긴 경우가 가장 많아요 (${Math.round(t.share * 100)}%).` : null;
+    },
+  },
+};
+
+/** The checkout's product line for each card that can be bought. */
+export const CARD_NAMES: Record<PayableInsight, string> = {
+  SCHOOL_COMPARE: "다른 학교, 같은 과 비교", PATH_DEEP_DIVE: "그 길에 도착한 회사·산업",
+  ...Object.fromEntries(Object.entries(CARDS).map(([k, v]) => [k, v.title])) as Record<CardType, string>,
+};
 
 type Row = { key: string; label: string; share: number };
 
@@ -18,6 +77,8 @@ const pct = (x: number) => Math.round(x * 100);
 
 function Bars({ data }: { data: Row[] }) {
   const max = Math.max(...data.map((d) => d.share), 0.01);
+  // The biggest share is the dark bar (bands keep their own order, so it is not always first).
+  const lead = data.findIndex((d) => d.key !== "_rest" && d.share === max);
   const h = data.length * 28 + 4;
   return (
     <svg viewBox={`0 0 300 ${h}`} className="gchart" role="img"
@@ -29,7 +90,7 @@ function Bars({ data }: { data: Row[] }) {
           <g key={d.key}>
             <text x="0" y={y + 13} className="lbl">{d.label.length > 8 ? `${d.label.slice(0, 8)}…` : d.label}</text>
             <rect x="92" y={y + 2} width={w} height="16" rx="4"
-                  className={`grow ${d.key === "_rest" ? "other" : i === 0 ? "s1" : "s1soft"}`}
+                  className={`grow ${d.key === "_rest" ? "other" : i === lead ? "s1" : "s1soft"}`}
                   style={{ animationDelay: `${i * 70}ms` }} />
             <text x={92 + w + 6} y={y + 14} className="val">{pct(d.share)}%</text>
           </g>
@@ -86,7 +147,7 @@ export function PayNote() {
 
 /** Open with a 튜브 when there is one; otherwise buy it (990원) when payments are on. */
 export function OpenButton({ cost, balance, payments, busy, onTube, onBuy }: {
-  cost: number | null; balance: number; payments: { enabled: boolean; price_krw: number | null };
+  cost: number | null; balance: number; payments: Payments;
   busy: boolean; onTube: () => void; onBuy: () => void;
 }) {
   if (balance >= (cost ?? 1)) {
@@ -103,14 +164,59 @@ export function OpenButton({ cost, balance, payments, busy, onTube, onBuy }: {
   return <button className="cta" disabled>튜브가 부족해요</button>;
 }
 
-export default function ResultCards({ base, compare, professional, school, major, label, takeaway, busy,
-  balance, payments, onUnlockCompare, onBuyCompare }: {
+function LockedBars() {
+  return (
+    <div className="locked-chart" aria-hidden="true">
+      {[72, 54, 40, 28, 18].map((w, i) => <div key={i} className="lrow"><i style={{ width: `${w}%` }} /></div>)}
+    </div>
+  );
+}
+
+/** One of the cards after the free one: a blurred chart and the open button until it is open. */
+function MoreCard({ card, label, busy, balance, payments, onUnlock, onBuy }: {
+  card: ResultCard; label: (c: Cell) => string; busy: boolean; balance: number; payments: Payments;
+  onUnlock: () => void; onBuy: () => void;
+}) {
+  const meta = CARDS[card.type];
+  const r = card.result && !card.result.suppressed && card.result.cells.length ? card.result : null;
+  const name = (c: Cell) => meta.label?.[c.key] ?? c.label ?? label(c);
+  return (
+    <article className="gcard" id={`card-${card.type}`}>
+      <header>
+        <h3>{meta.title}</h3>
+        <span className={card.unlocked ? "tag" : "tag lock"}>{card.unlocked ? meta.tag : "튜브로 열기"}</span>
+      </header>
+      {r ? (
+        <>
+          <Bars data={rows(r, name)} />
+          {meta.takeaway(r, name) && <p className="takeaway">{meta.takeaway(r, name)}</p>}
+          <footer><span>{r.effective_n.toLocaleString()}명 기준</span><span /></footer>
+        </>
+      ) : card.unlocked ? (
+        <p className="sub">이 카드를 보여주기엔 기록이 아직 적어요.</p>
+      ) : (
+        <>
+          <LockedBars />
+          <p className="takeaway">{meta.teaser}</p>
+          <OpenButton cost={card.cost_tube} balance={balance} payments={payments} busy={busy}
+                      onTube={onUnlock} onBuy={onBuy} />
+          <footer><span>기록이 적으면 튜브를 쓰지 않아요</span><span /></footer>
+        </>
+      )}
+    </article>
+  );
+}
+
+export default function ResultCards({ base, compare, cards, professional, school, major, label, takeaway, busy,
+  balance, payments, onUnlockCompare, onBuyCompare, onUnlockCard, onBuyCard }: {
   base: QueryResult;
   compare: { available: boolean; unlocked: boolean; cost_tube: number | null; result: QueryResult | null };
+  cards: ResultCard[];
   professional: boolean; school: string | null; major: string | null;
   label: (c: Cell) => string; takeaway: string | null; busy: boolean;
-  balance: number; payments: { enabled: boolean; price_krw: number | null };
+  balance: number; payments: Payments;
   onUnlockCompare: () => void; onBuyCompare: () => void;
+  onUnlockCard: (card: CardType) => void; onBuyCard: (card: CardType) => void;
 }) {
   if (base.suppressed) return null;
   const mine = rows(base, label);
@@ -176,6 +282,10 @@ export default function ResultCards({ base, compare, professional, school, major
           )}
         </article>
       )}
+      {cards.filter((c) => c.available).map((c) => (
+        <MoreCard key={c.type} card={c} label={label} busy={busy} balance={balance} payments={payments}
+                  onUnlock={() => onUnlockCard(c.type)} onBuy={() => onBuyCard(c.type)} />
+      ))}
     </div>
   );
 }

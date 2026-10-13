@@ -23,6 +23,12 @@ export type AdminStats = {
   imports: { reads: number; before_login: number; parsed: number; not_career: number; failed: number;
     input_tokens: number; output_tokens: number; drafts: number; signed_up: number; est_cost_usd: number;
     stats_consented: number; experiences_kept: number };
+  /** Paid cards and the payment-intent test, per card. */
+  pay: {
+    cards: { card: string; unlocked: number; orders: number; buyers: number; test_completed: number;
+      paid: number; paid_krw: number }[];
+    checkout: { started: number; viewed: number; completed: number; cancelled: number };
+  };
 };
 
 /** 401: not logged in. 403: logged in, not on the admin list (the body says the account id). */

@@ -154,6 +154,9 @@ def my_result(conn: Conn, settings: AppSettings, account_id: Account, as_of: AsO
     if compare_open:
         compare = _run(lambda: acq.result(conn, payload, "other_schools", layers=layers,
                                           as_of=as_of, exclude=(person_id,)))["result"]
+    cards = [_card_state(conn, settings, account_id, person_id, payload, as_of, card)
+             for card in acq.cards_for(payload)]
+    mode = payments.mode(conn, settings)
     return {
         "profile": payload.model_dump(mode="json", exclude={"intents"}),
         "intent": (payload.latest_intent() and
@@ -166,9 +169,11 @@ def my_result(conn: Conn, settings: AppSettings, account_id: Account, as_of: AsO
                                   and compare_policy is not None,
                      "unlocked": compare_open, "cost_tube": compare_policy and compare_policy.cost_tube,
                      "result": compare},
+        "cards": cards,
         "balance_tube": ledger.balance(conn, account_id),
-        # Paid cards: with no 튜브 left, a card opens for this price (Toss Payments).
-        "payments": {"enabled": bool(settings.toss_secret_key) and price is not None,
+        # Paid cards: with no 튜브 left, a card opens for this price. mode TOSS = Toss Payments;
+        # TEST = the payment-intent test checkout (nothing charged, a 튜브 gifted).
+        "payments": {"enabled": mode is not None, "mode": mode,
                      "price_krw": price and price.amount_krw},
         "data_basis": _basis(settings),
         "unlisted": acq.unlisted(payload),
@@ -236,6 +241,57 @@ def _open_compare(conn, settings, account_id, person_id, payload, as_of, key) ->
             "balance_tube": ledger.balance(conn, account_id), "data_basis": _basis(settings)}
 
 
+# --- more result cards (migration 0038) -------------------------------------------------------
+
+CardType = Literal["FIRST_COMPANY_SIZE", "FIRST_JOB_TENURE", "ROLE_NOW", "NEXT_COMPANY_SIZE",
+                   "ROLE_TENURE"]
+
+
+def _card_key(payload, card: str) -> str:
+    return acq.insight_key(payload, f"CARD:{card}")
+
+
+def _card_state(conn, settings, account_id, person_id, payload, as_of, card: str) -> dict:
+    """A card is offered when its unlock_policy is active; its numbers only once it is open."""
+    policy = active_unlock_policy(conn, card)
+    unlocked = ledger.has_entitlement(conn, account_id, card, _card_key(payload, card))
+    result = None
+    if unlocked:
+        result = _run(lambda: acq.card_result(conn, payload, card,
+                                              layers=settings.career_map_data_layers,
+                                              as_of=as_of, exclude=(person_id,)))
+    return {"type": card, "available": policy is not None, "unlocked": unlocked,
+            "cost_tube": policy and policy.cost_tube, "result": result}
+
+
+def _card_opener(card: str):
+    def open_card(conn, settings, account_id, person_id, payload, as_of, key) -> dict:
+        out = _run(lambda: acq.card_result(conn, payload, card,
+                                           layers=settings.career_map_data_layers, as_of=as_of,
+                                           exclude=(person_id,)))
+        if out is None or out["suppressed"] or not out["cells"]:
+            return {"unlocked": False, "charged": False}  # never charge for an empty card
+        try:
+            grant = ledger.unlock(conn, account_id, card, _card_key(payload, card),
+                                  {"effective_n": out["effective_n"],
+                                   "fallback_reason": out["fallback_reason"]}, key)
+        except (ledger.InsufficientCredit, ledger.IdempotencyConflict,
+                ledger.PolicyUnavailable) as exc:
+            raise _unlock_error(exc) from exc
+        return {"unlocked": True, **grant, "result": out,
+                "balance_tube": ledger.balance(conn, account_id), "data_basis": _basis(settings)}
+    return open_card
+
+
+@router.post("/me/cards/{card}/unlock")
+def unlock_card(card: CardType, conn: Conn, settings: AppSettings, account_id: Account,
+                key: IdempotencyKey, as_of: AsOf):
+    person_id, payload = _member(conn, account_id, as_of)
+    if card not in acq.cards_for(payload):
+        raise HTTPException(422, "this card is not part of this result")
+    return _card_opener(card)(conn, settings, account_id, person_id, payload, as_of, key)
+
+
 # --- paid cards: 튜브 bought through Toss Payments (migration 0037) ---------------------------
 
 def payment_provider(settings: AppSettings) -> payments.PaymentProvider | None:
@@ -243,25 +299,66 @@ def payment_provider(settings: AppSettings) -> payments.PaymentProvider | None:
 
 
 Provider = Annotated[payments.PaymentProvider | None, Depends(payment_provider)]
-OPENERS = {SCHOOL_COMPARE: _open_compare, DEEP_DIVE: _open_deep_dive}
+OPENERS = {SCHOOL_COMPARE: _open_compare, DEEP_DIVE: _open_deep_dive,
+           **{card: _card_opener(card) for card in acq.CARDS}}
 
 
 class OrderRequest(BaseModel):
-    insight_type: Literal["SCHOOL_COMPARE", "PATH_DEEP_DIVE"]
+    insight_type: str = Field(min_length=1, max_length=40)  # one of payments.PAYABLE
     internal: bool = False
 
 
-@router.post("/me/payments")
-def create_order(body: OrderRequest, conn: Conn, account_id: Account, provider: Provider,
-                 as_of: AsOf):
-    """The checkout for one card: price and 튜브 come from the active pricing_policy."""
-    _member(conn, account_id, as_of)
-    if provider is None:
-        raise HTTPException(409, {"message": "지금은 결제할 수 없어요"})
+def _pay(fn):
     try:
-        return payments.create_order(conn, account_id, body.insight_type, body.internal)
+        return fn()
     except payments.PaymentFailed as exc:
         raise HTTPException(exc.status, {"message": exc.message}) from exc
+
+
+@router.post("/me/payments")
+def create_order(body: OrderRequest, conn: Conn, settings: AppSettings, account_id: Account,
+                 provider: Provider, as_of: AsOf):
+    """The checkout for one card: price and 튜브 come from the active pricing_policy. Without a
+    payment provider it is the payment-intent test's order (mode TEST, our own checkout)."""
+    _member(conn, account_id, as_of)
+    mode = "TOSS" if provider is not None else payments.mode(conn, settings)
+    if mode is None:
+        raise HTTPException(409, {"message": "지금은 결제할 수 없어요"})
+    return _pay(lambda: payments.create_order(conn, account_id, body.insight_type, body.internal,
+                                              provider=mode))
+
+
+@router.get("/me/payments/{order_id}")
+def get_order(order_id: str, conn: Conn, account_id: Account):
+    return _pay(lambda: payments.order(conn, account_id, order_id))
+
+
+class TestCompleteRequest(BaseModel):
+    order_id: str = Field(min_length=6, max_length=64)
+    method: Literal[payments.TEST_METHODS]
+
+
+@router.post("/me/payments/test-complete")
+def test_complete(body: TestCompleteRequest, conn: Conn, settings: AppSettings,
+                  account_id: Account, as_of: AsOf):
+    """The test checkout's "결제하기": nothing is charged. The press is recorded, 1 튜브 is gifted
+    and the card the order was for opens with it (same opener as a real payment)."""
+    out = _pay(lambda: payments.test_complete(conn, account_id, body.order_id, body.method))
+    opened = _open_after_order(conn, settings, account_id, as_of, out["insight_type"],
+                               body.order_id)
+    return {**out, "opened": opened, "balance_tube": ledger.balance(conn, account_id)}
+
+
+def _open_after_order(conn, settings, account_id, as_of, insight_type, order_id) -> bool:
+    opener = OPENERS.get(insight_type)
+    if not opener:
+        return False
+    person_id, payload = _member(conn, account_id, as_of)
+    try:
+        return bool(opener(conn, settings, account_id, person_id, payload, as_of,
+                           f"order-{order_id}").get("unlocked"))
+    except HTTPException:
+        return False
 
 
 class ConfirmRequest(BaseModel):
@@ -277,23 +374,13 @@ def confirm_payment(body: ConfirmRequest, conn: Conn, settings: AppSettings, acc
     bought for (a card the sample cannot support keeps the 튜브 in the balance)."""
     if provider is None:
         raise HTTPException(409, {"message": "지금은 결제할 수 없어요"})
-    try:
-        out = payments.confirm(conn, account_id, body.order_id, body.payment_key, body.amount,
-                               provider)
-    except payments.PaymentFailed as exc:
-        raise HTTPException(exc.status, {"message": exc.message}) from exc
+    out = _pay(lambda: payments.confirm(conn, account_id, body.order_id, body.payment_key,
+                                        body.amount, provider))
     if not out["paid"]:
         # Kept: the failure is recorded with this request (no exception, so it commits).
         return JSONResponse(status_code=402, content={"detail": {"message": out["message"]}})
-    opened = False
-    opener = OPENERS.get(out["insight_type"])
-    if opener:
-        person_id, payload = _member(conn, account_id, as_of)
-        try:
-            opened = bool(opener(conn, settings, account_id, person_id, payload, as_of,
-                                 f"order-{body.order_id}").get("unlocked"))
-        except HTTPException:
-            opened = False
+    opened = _open_after_order(conn, settings, account_id, as_of, out["insight_type"],
+                               body.order_id)
     return {"paid": True, "opened": opened, "insight_type": out["insight_type"],
             "balance_tube": ledger.balance(conn, account_id)}
 

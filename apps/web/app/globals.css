@@ -461,3 +461,17 @@ body { word-break: keep-all; overflow-wrap: break-word; }
 .bizinfo p { margin: 0; }
 .bizinfo a { color: inherit; }
 .lfoot .bizinfo { flex-basis: 100%; text-align: left; margin-top: 8px; }
+/* Payment-intent test checkout (/pay/checkout): plain, our own look. */
+.checkout .co-box { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; margin: 0; }
+.checkout .co-label { margin: 0 0 6px; font-size: 12.5px; color: var(--sub); font-weight: 700; padding: 0; }
+.checkout .co-item { margin: 0; font-weight: 800; font-size: 16px; line-height: 1.4; }
+.checkout .co-meta { margin: 4px 0 0; font-size: 12.5px; color: var(--sub); }
+.checkout .co-total { display: flex; justify-content: space-between; align-items: baseline; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.checkout .co-total b { font-size: 22px; }
+.checkout .co-methods { display: grid; gap: 8px; }
+.checkout .co-methods label { display: flex; gap: 10px; align-items: center; padding: 12px; border: 1px solid var(--line); border-radius: 10px; font-weight: 700; cursor: pointer; }
+.checkout .co-methods label.on { border-color: var(--mint); box-shadow: 0 0 0 1px var(--mint) inset; }
+.checkout .co-methods input { accent-color: var(--mint); }
+.checkout-done { text-align: center; align-items: center; padding-top: 40px; }
+.checkout-done .gift { font-size: 48px; }
+.checkout-done .cta { align-self: stretch; text-align: center; text-decoration: none; }

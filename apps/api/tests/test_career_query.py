@@ -176,3 +176,22 @@ def test_unknown_metric_and_node_are_rejected(engine, ids):
     with pytest.raises(QueryInvalid):
         run(engine, target_metric="FIRST_ROLE_DISTRIBUTION",
             major_node_ids=("00000000-0000-0000-0000-000000000000",))
+
+
+def test_band_metrics_count_company_size_and_tenure_in_their_own_order(engine, ids):
+    edu = dict(institution_ids=(ids["inst"],), major_node_ids=(ids["M3"],))
+    size = run(engine, target_metric="FIRST_COMPANY_SIZE_DISTRIBUTION", **edu)
+    assert [(c["key"], c["label"], c["n"]) for c in size["cells"]] == [("LARGE", "대형", 45)]
+    assert size["taxonomy_depth"] is None and size["unknown_n"] == 0
+    # 10 left their first job after 1y10m; 35 are still in it.
+    tenure = run(engine, target_metric="FIRST_JOB_TENURE_DISTRIBUTION", **edu)
+    assert [(c["key"], c["n"]) for c in tenure["cells"]] == [("Y1_2", 10), ("STAYED", 35)]
+    # After marketing (R3): only the 10 who moved on count, too few to show (below 30).
+    moved = run(engine, target_metric="NEXT_COMPANY_SIZE_DISTRIBUTION", **edu,
+                from_role_node_ids=(ids["R3"],))
+    assert (moved["effective_n"], moved["suppressed"], moved["cells"]) == (10, True, [])
+    stay = run(engine, target_metric="ROLE_TENURE_DISTRIBUTION", **edu,
+               from_role_node_ids=(ids["R3"],))
+    assert [(c["key"], c["n"]) for c in stay["cells"]] == [("Y1_2", 10), ("STAYED", 20)]
+    with pytest.raises(QueryInvalid):
+        run(engine, target_metric="ROLE_TENURE_DISTRIBUTION", **edu)
