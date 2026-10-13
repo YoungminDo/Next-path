@@ -33,6 +33,13 @@ BANDS = {
                      "MICRO": "초소형"},
     "TENURE": {"LT_1Y": "1년 안", "Y1_2": "1~2년", "Y2_3": "2~3년", "GE_3Y": "3년 이상",
                STAYED: "아직 다니는 중"},
+    # Company size of the later job against the earlier one (MICRO < ... < ENTERPRISE).
+    "SIZE_MOVE": {"UP": "더 큰 회사로", "SAME": "같은 규모로", "DOWN": "더 작은 회사로",
+                  STAYED: "아직 첫 직장"},
+    # Jobs so far minus one (a new company or a new role both count).
+    "JOB_MOVES": {"NONE": "안 옮김", "ONCE": "1번", "TWICE": "2번", "THREE_PLUS": "3번 이상"},
+    # The job after the role: in the same surface-depth family or another one.
+    "ROLE_SWITCH": {"SAME": "비슷한 직무로", "SWITCH": "다른 직무로", STAYED: "아직 그 직무"},
 }
 SUPPORTED_METRICS = {
     "FIRST_ROLE_DISTRIBUTION": "ROLE",
@@ -45,10 +52,18 @@ SUPPORTED_METRICS = {
     # After a role: the next job's company size, and how long people stayed in the role.
     "NEXT_COMPANY_SIZE_DISTRIBUTION": "COMPANY_SIZE",
     "ROLE_TENURE_DISTRIBUTION": "TENURE",
+    # First job against the current one; how many times people moved.
+    "SIZE_MOVE_DISTRIBUTION": "SIZE_MOVE",
+    "JOB_MOVES_DISTRIBUTION": "JOB_MOVES",
+    # After a role: another kind of work or not, a bigger company or not, moves so far.
+    "ROLE_SWITCH_DISTRIBUTION": "ROLE_SWITCH",
+    "ROLE_SIZE_MOVE_DISTRIBUTION": "SIZE_MOVE",
+    "ROLE_JOB_MOVES_DISTRIBUTION": "JOB_MOVES",
 }
 # Metrics that start from a role (from_role_node_ids).
 FROM_ROLE_METRICS = ("NEXT_ROLE_DISTRIBUTION", "NEXT_COMPANY_SIZE_DISTRIBUTION",
-                     "ROLE_TENURE_DISTRIBUTION")
+                     "ROLE_TENURE_DISTRIBUTION", "ROLE_SWITCH_DISTRIBUTION",
+                     "ROLE_SIZE_MOVE_DISTRIBUTION", "ROLE_JOB_MOVES_DISTRIBUTION")
 
 
 class QueryInvalid(ValueError):
@@ -351,12 +366,25 @@ def _tenure(start: str, end: str) -> str:
             f"WHEN {end} < {start} + interval '3 years' THEN 'Y2_3' ELSE 'GE_3Y' END")
 
 
+def _size_move(before: str, after: str) -> str:
+    rank = "array_position(ARRAY['MICRO','SMALL','MID','LARGE','ENTERPRISE'], {})"
+    a, b = rank.format(before), rank.format(after)
+    return (f"CASE WHEN {a} IS NULL OR {b} IS NULL THEN NULL WHEN {b} > {a} THEN 'UP' "
+            f"WHEN {b} < {a} THEN 'DOWN' ELSE 'SAME' END")
+
+
+def _moves(n: str) -> str:
+    return f"CASE {n} WHEN 1 THEN 'NONE' WHEN 2 THEN 'ONCE' WHEN 3 THEN 'TWICE' ELSE 'THREE_PLUS' END"
+
+
+_JOBS = "w.event_type NOT IN ('STUDY', 'MILITARY', 'CAREER_BREAK')"
+
 # For each person: the first event in the from-subtree, then the next event that starts after it
 # (the next choice). Still in it at as_of with nothing after = STAYED.
 _FROM_ROLE = """
         , ev AS (
             SELECT w.person_id, w.work_event_id, w.role_taxonomy_node_id, w.start_date,
-                   w.end_date,
+                   w.end_date, o.company_size_band AS size,
                    lead(w.role_taxonomy_node_id) OVER per AS next_node,
                    lead(w.start_date) OVER per AS next_start,
                    lead(o.company_size_band) OVER per AS next_size
@@ -434,6 +462,51 @@ METRIC_SQL = {
                     ELSE """ + _tenure("start_date", "COALESCE(end_date, next_start)") + """ END AS node
         FROM src
         WHERE """ + _NEXT_OR_STAYED,
+    # People working at as_of: still in the first job = STAYED, else the current company's size
+    # against the first one's (unknown when either size is unknown).
+    "SIZE_MOVE_DISTRIBUTION": """
+        , cur AS (
+            SELECT DISTINCT ON (w.person_id) w.person_id, w.work_event_id, o.company_size_band AS size
+            FROM canonical_work_event w JOIN cohort c ON c.person_id = w.person_id
+            LEFT JOIN organization o ON o.organization_id = w.organization_id
+            WHERE w.start_date <= :as_of AND (w.end_date IS NULL OR w.end_date > :as_of)
+              AND """ + _JOBS + """
+            ORDER BY w.person_id, w.start_date DESC, w.work_event_id)
+        SELECT fe.person_id,
+               CASE WHEN cur.work_event_id = fe.work_event_id THEN 'STAYED'
+                    ELSE """ + _size_move("fo.company_size_band", "cur.size") + """ END AS node
+        FROM first_employment_for(:fe_rule, :as_of, (SELECT array_agg(person_id) FROM cohort)) fe
+        JOIN cohort c ON c.person_id = fe.person_id
+        JOIN cur ON cur.person_id = fe.person_id
+        LEFT JOIN work_event w ON w.work_event_id = fe.work_event_id
+        LEFT JOIN organization fo ON fo.organization_id = w.organization_id
+        WHERE {window_fe}""",
+    "JOB_MOVES_DISTRIBUTION": """
+        SELECT w.person_id, """ + _moves("count(*)") + """ AS node
+        FROM canonical_work_event w JOIN cohort c ON c.person_id = w.person_id
+        WHERE w.start_date IS NOT NULL AND w.start_date <= :as_of AND """ + _JOBS + """
+        GROUP BY w.person_id
+        HAVING CAST(:win_start AS date) IS NULL OR min(w.start_date) >= :win_start""",
+    # The next job's role in the same subtree as the role (the surface-depth family) or not.
+    "ROLE_SWITCH_DISTRIBUTION": _FROM_ROLE + """
+        SELECT person_id,
+               CASE WHEN next_start IS NULL THEN 'STAYED'
+                    WHEN next_node IS NULL THEN NULL
+                    WHEN next_node = ANY(CAST(:from_roles AS uuid[])) THEN 'SAME'
+                    ELSE 'SWITCH' END AS node
+        FROM src
+        WHERE """ + _NEXT_OR_STAYED,
+    "ROLE_SIZE_MOVE_DISTRIBUTION": _FROM_ROLE + """
+        SELECT person_id,
+               CASE WHEN next_start IS NULL THEN 'STAYED'
+                    ELSE """ + _size_move("size", "next_size") + """ END AS node
+        FROM src
+        WHERE """ + _NEXT_OR_STAYED,
+    # Everyone who held the role: how many jobs they have had so far, minus one.
+    "ROLE_JOB_MOVES_DISTRIBUTION": _FROM_ROLE + """
+        SELECT ev.person_id, """ + _moves("count(*)") + """ AS node
+        FROM ev WHERE ev.person_id IN (SELECT person_id FROM src)
+        GROUP BY ev.person_id""",
 }
 
 

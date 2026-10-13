@@ -475,3 +475,4 @@ body { word-break: keep-all; overflow-wrap: break-word; }
 .checkout-done { text-align: center; align-items: center; padding-top: 40px; }
 .checkout-done .gift { font-size: 48px; }
 .checkout-done .cta { align-self: stretch; text-align: center; text-decoration: none; }
+.rcards .gcard footer { gap: 8px; line-height: 1.5; }

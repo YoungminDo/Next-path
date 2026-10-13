@@ -243,8 +243,9 @@ def _open_compare(conn, settings, account_id, person_id, payload, as_of, key) ->
 
 # --- more result cards (migration 0038) -------------------------------------------------------
 
-CardType = Literal["FIRST_COMPANY_SIZE", "FIRST_JOB_TENURE", "ROLE_NOW", "NEXT_COMPANY_SIZE",
-                   "ROLE_TENURE"]
+CardType = Literal["FIRST_COMPANY_SIZE", "SIZE_MOVE", "FIRST_JOB_TENURE", "JOB_MOVES", "ROLE_NOW",
+                   "NEXT_COMPANY_SIZE", "ROLE_SIZE_MOVE", "ROLE_SWITCH", "ROLE_TENURE",
+                   "ROLE_JOB_MOVES"]
 
 
 def _card_key(payload, card: str) -> str:

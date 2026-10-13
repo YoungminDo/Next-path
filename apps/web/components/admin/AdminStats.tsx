@@ -24,6 +24,8 @@ const KIND: Record<string, string> = { INSTITUTION: "학교", MAJOR: "전공", R
 const CARD_LABELS: Record<string, string> = {
   SCHOOL_COMPARE: "다른 학교 같은 과", PATH_DEEP_DIVE: "도착한 회사·산업", FIRST_COMPANY_SIZE: "첫 직장 규모",
   FIRST_JOB_TENURE: "첫 직장 근속", ROLE_NOW: "지금 직무", NEXT_COMPANY_SIZE: "옮긴 회사 규모", ROLE_TENURE: "직무 근속",
+  SIZE_MOVE: "더 큰 회사로 (학생)", JOB_MOVES: "옮긴 횟수 (학생)", ROLE_SWITCH: "직무 전환",
+  ROLE_SIZE_MOVE: "더 큰 회사로 (직장인)", ROLE_JOB_MOVES: "옮긴 횟수 (직장인)",
 };
 const DEV_LOGIN = process.env.NEXT_PUBLIC_ENABLE_DEV_LOGIN === "true";
 

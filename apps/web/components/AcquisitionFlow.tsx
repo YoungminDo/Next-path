@@ -1136,6 +1136,8 @@ function MyScreen({ me, busy, onUnlock, onUnlockCompare, onUnlockCard, onBuy, na
 }) {
   const p = me.intent_paths.paths;
   const professional = me.profile.user_type === "PROFESSIONAL";
+  const edu = (me.profile.education ?? {}) as { admission_year?: number; graduation_year?: number };
+  const basis = (r: QueryResult) => basisText(r.effective_filters, r.fallback_reason, edu, professional);
   return (
     <section className="screen">
       <div className="row-between">
@@ -1144,7 +1146,7 @@ function MyScreen({ me, busy, onUnlock, onUnlockCompare, onUnlockCard, onBuy, na
       </div>
       <ResultCards base={me.base} compare={me.compare} cards={me.cards ?? []} professional={professional}
                    school={names.school}
-                   major={names.major} label={(c) => cellLabel(c, professional)}
+                   major={names.major} label={(c) => cellLabel(c, professional)} basis={basis}
                    takeaway={conclusion(me.base, professional)} busy={busy} balance={me.balance_tube}
                    payments={me.payments} onUnlockCompare={onUnlockCompare}
                    onBuyCompare={() => onBuy("SCHOOL_COMPARE")} onUnlockCard={onUnlockCard}

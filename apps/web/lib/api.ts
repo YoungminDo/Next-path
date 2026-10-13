@@ -132,7 +132,8 @@ export type TeaserResult = {
   unlisted?: Unlisted;
 };
 export type DesiredRole = { role_node_id: string | null; role_raw: string | null };
-export type CardType = "FIRST_COMPANY_SIZE" | "FIRST_JOB_TENURE" | "ROLE_NOW" | "NEXT_COMPANY_SIZE" | "ROLE_TENURE";
+export type CardType = "FIRST_COMPANY_SIZE" | "SIZE_MOVE" | "FIRST_JOB_TENURE" | "JOB_MOVES" | "ROLE_NOW"
+  | "NEXT_COMPANY_SIZE" | "ROLE_SIZE_MOVE" | "ROLE_SWITCH" | "ROLE_TENURE" | "ROLE_JOB_MOVES";
 export type ResultCard = { type: CardType; available: boolean; unlocked: boolean; cost_tube: number | null;
   result: QueryResult | null };
 export type Payments = { enabled: boolean; mode: "TOSS" | "TEST" | null; price_krw: number | null };

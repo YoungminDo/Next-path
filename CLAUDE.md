@@ -42,7 +42,7 @@ accounts in `HELLOMYME_ADMIN_ACCOUNT_IDS`, counts only. Migration 0025 closes th
 - Credit unit is **튜브** (`*_tube` columns/fields), not MY. Paid cards (owner decision 2026-10-13, replaces
   "no real-money purchase in Phase 1"): one result card free, sign-up gives 1 튜브 (reward_v2), each further card
   1 튜브 = 990원 through Toss Payments (`pricing_policy` CARD_1, `domain/payments.py`, migration 0037, /terms).
-  More cards (0038, `acquisition.CARDS`). Until a Toss key is set the checkout is the payment-intent test
+  More cards (0038/0039, `acquisition.CARDS`, band metrics in `career_query.py`). Until a Toss key is set the checkout is the payment-intent test
   (`/pay/checkout`, provider TEST): nothing charged, the press is recorded, 1 튜브 gifted (PAYMENT_TEST_GIFT) and
   the person is told right after; the page never imitates a payment company.
 - Kakao login only through HMM ID (`id.da-sh.io`, repo `YoungminDo/hmm-id`), backend-only

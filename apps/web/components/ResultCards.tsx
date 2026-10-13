@@ -8,6 +8,25 @@ import type { CardType, Cell, PayableInsight, Payments, QueryResult, ResultCard 
 
 const pctOf = (r: QueryResult, keys: string[]) =>
   Math.round(r.cells.filter((c) => keys.includes(c.key)).reduce((s, c) => s + c.share, 0) * 100);
+/** Share of `keys` among the people in `of` (counts, so folded and unknown people stay out). */
+const among = (r: QueryResult, keys: string[], of: string[]) => {
+  const n = (ks: string[]) => r.cells.filter((c) => ks.includes(c.key)).reduce((s, c) => s + c.n, 0);
+  const total = n(of);
+  return total ? Math.round((n(keys) / total) * 100) : null;
+};
+const MOVED = ["ONCE", "TWICE", "THREE_PLUS"];
+const MOVES_TEASER = "한 곳에 계속 있었는지, 여러 번 옮겼는지 봐요. 회사나 직무를 바꾼 횟수예요.";
+const movesTakeaway = (r: QueryResult) => {
+  const moved = among(r, MOVED, ["NONE", ...MOVED]);
+  return moved == null ? null : `한 번 이상 옮긴 사람은 ${moved}%예요.`;
+};
+const sizeMoveTakeaway = (r: QueryResult) => {
+  const of = ["UP", "SAME", "DOWN"];
+  const up = among(r, ["UP"], of), down = among(r, ["DOWN"], of);
+  if (up == null || down == null) return null;
+  if (up === 0 && down === 0) return "옮긴 사람은 모두 같은 규모의 회사로 갔어요.";
+  return `옮긴 사람 중 더 큰 회사로 간 사람은 ${up}%, 더 작은 회사로 간 사람은 ${down}%예요.`;
+};
 const top = (r: QueryResult, skip: string[] = []) => r.cells.filter((c) => !skip.includes(c.key))
   .sort((a, b) => b.share - a.share)[0];
 
@@ -15,6 +34,8 @@ const top = (r: QueryResult, skip: string[] = []) => r.cells.filter((c) => !skip
  *  answers with once open. Band cells come labelled from the API. */
 export const CARDS: Record<CardType, {
   title: string; tag: string; teaser: string; label?: Record<string, string>;
+  /** Who the count is, when it is not everyone in the group ("지금 일하는", "옮긴"). */
+  counted?: string;
   takeaway: (r: QueryResult, name: (c: Cell) => string) => string | null;
 }> = {
   FIRST_COMPANY_SIZE: {
@@ -24,6 +45,14 @@ export const CARDS: Record<CardType, {
       const big = pctOf(r, ["ENTERPRISE", "LARGE"]);
       return `대기업·대형 회사에서 시작한 사람은 ${big}%예요.`;
     },
+  },
+  SIZE_MOVE: {
+    title: "첫 직장보다 큰 회사로 옮겼을까?", tag: "Move", counted: "지금 일하는",
+    teaser: "작은 회사에서 시작해 큰 회사로 간 사람, 반대로 간 사람이 얼마나 되는지 봐요.",
+    takeaway: sizeMoveTakeaway,
+  },
+  JOB_MOVES: {
+    title: "첫 직장 이후 몇 번 옮겼을까?", tag: "Moves", teaser: MOVES_TEASER, takeaway: movesTakeaway,
   },
   FIRST_JOB_TENURE: {
     title: "첫 직장, 얼마나 다녔을까?", tag: "Tenure",
@@ -36,7 +65,7 @@ export const CARDS: Record<CardType, {
     },
   },
   ROLE_NOW: {
-    title: "그 선배들, 지금은 무슨 일을 할까?", tag: "Now",
+    title: "그 선배들, 지금은 무슨 일을 할까?", tag: "Now", counted: "지금 일하는",
     teaser: "처음 간 곳과 지금 있는 곳은 다를 수 있어요. 지금의 직무를 봐요.",
     takeaway: (r, name) => {
       const t = top(r);
@@ -44,9 +73,26 @@ export const CARDS: Record<CardType, {
     },
   },
   NEXT_COMPANY_SIZE: {
-    title: "옮긴 사람들은 어떤 회사로 갔을까?", tag: "Company",
+    title: "옮긴 사람들은 어떤 회사로 갔을까?", tag: "Company", counted: "옮긴",
     teaser: "이 직무에서 옮긴 사람들의 다음 회사가 대기업이었는지 작은 회사였는지 봐요.",
     takeaway: (r) => `옮긴 사람 중 대기업·대형 회사로 간 사람은 ${pctOf(r, ["ENTERPRISE", "LARGE"])}%예요.`,
+  },
+  ROLE_SIZE_MOVE: {
+    title: "이 직무에서 옮기면 회사가 커질까?", tag: "Move",
+    teaser: "같은 직무였던 사람들이 옮길 때 더 큰 회사로 갔는지, 작은 회사로 갔는지 봐요.",
+    label: { STAYED: "아직 그 직무" }, takeaway: sizeMoveTakeaway,
+  },
+  ROLE_SWITCH: {
+    title: "옮긴 사람들, 비슷한 일을 했을까 다른 일로 갔을까?", tag: "Switch",
+    teaser: "같은 직무였던 사람들이 옮길 때 직무까지 바꿨는지 봐요.",
+    takeaway: (r) => {
+      const sw = among(r, ["SWITCH"], ["SAME", "SWITCH"]);
+      return sw == null ? null : `옮긴 사람 중 ${sw}%는 다른 직무로 갔어요.`;
+    },
+  },
+  ROLE_JOB_MOVES: {
+    title: "같은 직무였던 사람들, 지금까지 몇 번 옮겼을까?", tag: "Moves", teaser: MOVES_TEASER,
+    takeaway: movesTakeaway,
   },
   ROLE_TENURE: {
     title: "이 직무에서 몇 년 있다가 옮겼을까?", tag: "Tenure",
@@ -173,9 +219,9 @@ function LockedBars() {
 }
 
 /** One of the cards after the free one: a blurred chart and the open button until it is open. */
-function MoreCard({ card, label, busy, balance, payments, onUnlock, onBuy }: {
-  card: ResultCard; label: (c: Cell) => string; busy: boolean; balance: number; payments: Payments;
-  onUnlock: () => void; onBuy: () => void;
+function MoreCard({ card, label, basis, busy, balance, payments, onUnlock, onBuy }: {
+  card: ResultCard; label: (c: Cell) => string; basis: (r: QueryResult) => string | null; busy: boolean;
+  balance: number; payments: Payments; onUnlock: () => void; onBuy: () => void;
 }) {
   const meta = CARDS[card.type];
   const r = card.result && !card.result.suppressed && card.result.cells.length ? card.result : null;
@@ -190,7 +236,10 @@ function MoreCard({ card, label, busy, balance, payments, onUnlock, onBuy }: {
         <>
           <Bars data={rows(r, name)} />
           {meta.takeaway(r, name) && <p className="takeaway">{meta.takeaway(r, name)}</p>}
-          <footer><span>{r.effective_n.toLocaleString()}명 기준</span><span /></footer>
+          <footer>
+            <span>{meta.counted ? `${meta.counted} ` : ""}{r.effective_n.toLocaleString()}명 기준
+              {basis(r) && <> · {basis(r)}</>}</span>
+          </footer>
         </>
       ) : card.unlocked ? (
         <p className="sub">이 카드를 보여주기엔 기록이 아직 적어요.</p>
@@ -207,13 +256,15 @@ function MoreCard({ card, label, busy, balance, payments, onUnlock, onBuy }: {
   );
 }
 
-export default function ResultCards({ base, compare, cards, professional, school, major, label, takeaway, busy,
-  balance, payments, onUnlockCompare, onBuyCompare, onUnlockCard, onBuyCard }: {
+export default function ResultCards({ base, compare, cards, professional, school, major, label, basis, takeaway,
+  busy, balance, payments, onUnlockCompare, onBuyCompare, onUnlockCard, onBuyCard }: {
   base: QueryResult;
   compare: { available: boolean; unlocked: boolean; cost_tube: number | null; result: QueryResult | null };
   cards: ResultCard[];
   professional: boolean; school: string | null; major: string | null;
   label: (c: Cell) => string; takeaway: string | null; busy: boolean;
+  /** The group a count stands for, in the same words as the result screen (who was widened). */
+  basis: (r: QueryResult) => string | null;
   balance: number; payments: Payments;
   onUnlockCompare: () => void; onBuyCompare: () => void;
   onUnlockCard: (card: CardType) => void; onBuyCard: (card: CardType) => void;
@@ -245,7 +296,10 @@ export default function ResultCards({ base, compare, cards, professional, school
         </header>
         <Bars data={mine} />
         {takeaway && <p className="takeaway">{takeaway}</p>}
-        <footer><span>{base.effective_n.toLocaleString()}명 기준</span><span className="free">무료</span></footer>
+        <footer>
+          <span>{base.effective_n.toLocaleString()}명 기준{basis(base) && <> · {basis(base)}</>}</span>
+          <span className="free">무료</span>
+        </footer>
       </article>
       {compare.available && (
         <article className="gcard">
@@ -283,7 +337,7 @@ export default function ResultCards({ base, compare, cards, professional, school
         </article>
       )}
       {cards.filter((c) => c.available).map((c) => (
-        <MoreCard key={c.type} card={c} label={label} busy={busy} balance={balance} payments={payments}
+        <MoreCard key={c.type} card={c} label={label} basis={basis} busy={busy} balance={balance} payments={payments}
                   onUnlock={() => onUnlockCard(c.type)} onBuy={() => onBuyCard(c.type)} />
       ))}
     </div>

@@ -195,3 +195,21 @@ def test_band_metrics_count_company_size_and_tenure_in_their_own_order(engine, i
     assert [(c["key"], c["n"]) for c in stay["cells"]] == [("Y1_2", 10), ("STAYED", 20)]
     with pytest.raises(QueryInvalid):
         run(engine, target_metric="ROLE_TENURE_DISTRIBUTION", **edu)
+
+
+def test_move_metrics_compare_jobs_against_earlier_ones(engine, ids):
+    edu = dict(institution_ids=(ids["inst"],), major_node_ids=(ids["M3"],))
+
+    def cells(**kw):
+        out = run(engine, **edu, **kw)
+        assert not out["suppressed"], out
+        return [(c["key"], c["n"]) for c in out["cells"]]
+
+    # 35 are still in their first job; 10 moved, all within ORG1 (LARGE -> LARGE).
+    assert cells(target_metric="SIZE_MOVE_DISTRIBUTION") == [("SAME", 10), ("STAYED", 35)]
+    assert cells(target_metric="JOB_MOVES_DISTRIBUTION") == [("NONE", 35), ("ONCE", 10)]
+    marketing = dict(from_role_node_ids=(ids["R3"],))
+    # From marketing the 10 movers went to data: another subtree.
+    assert cells(target_metric="ROLE_SWITCH_DISTRIBUTION", **marketing) == [("SWITCH", 10), ("STAYED", 20)]
+    assert cells(target_metric="ROLE_SIZE_MOVE_DISTRIBUTION", **marketing) == [("SAME", 10), ("STAYED", 20)]
+    assert cells(target_metric="ROLE_JOB_MOVES_DISTRIBUTION", **marketing) == [("NONE", 20), ("ONCE", 10)]

@@ -157,8 +157,8 @@ def test_cards_open_with_a_tube_and_never_charge_twice(engine, ids):  # noqa: F8
     auth = member(c, ids, "cards-student")
     cards = c.get("/acq/me", headers=auth).json()["cards"]
     assert [(x["type"], x["available"], x["unlocked"], x["cost_tube"], x["result"]) for x in cards] == [
-        ("FIRST_COMPANY_SIZE", True, False, 1, None), ("FIRST_JOB_TENURE", True, False, 1, None),
-        ("ROLE_NOW", True, False, 1, None)]
+        (t, True, False, 1, None)
+        for t in ("FIRST_COMPANY_SIZE", "SIZE_MOVE", "FIRST_JOB_TENURE", "JOB_MOVES", "ROLE_NOW")]
     hdr = {**auth, "Idempotency-Key": uuid.uuid4().hex}
     opened = c.post("/acq/me/cards/FIRST_JOB_TENURE/unlock", headers=hdr)
     assert opened.status_code == 200, opened.text
@@ -186,7 +186,8 @@ def test_a_professional_gets_the_professional_cards(ids):  # noqa: F811
            "current_job": {"organization_name": "어딘가", "role_node_id": ids["R3"], "start_year": 2021}}
     auth, _ = merge(c, h, save(c, h, pro), "cards-pro")
     cards = c.get("/acq/me", headers=auth).json()["cards"]
-    assert [x["type"] for x in cards] == ["NEXT_COMPANY_SIZE", "ROLE_TENURE"]
+    assert [x["type"] for x in cards] == ["NEXT_COMPANY_SIZE", "ROLE_SIZE_MOVE", "ROLE_SWITCH",
+                                          "ROLE_TENURE", "ROLE_JOB_MOVES"]
     out = c.post("/acq/me/cards/ROLE_TENURE/unlock",
                  headers={**auth, "Idempotency-Key": uuid.uuid4().hex}).json()
     assert out["unlocked"] and {"Y1_2", "STAYED"} <= {x["key"] for x in out["result"]["cells"]}
@@ -194,3 +195,7 @@ def test_a_professional_gets_the_professional_cards(ids):  # noqa: F811
     moved = c.post("/acq/me/cards/NEXT_COMPANY_SIZE/unlock",
                    headers={**auth, "Idempotency-Key": uuid.uuid4().hex}).json()
     assert moved == {"unlocked": False, "charged": False}
+    # Everyone who was a marketer counts here: 20 never moved, 10 moved once (and other members).
+    moves = c.post("/acq/me/cards/ROLE_JOB_MOVES/unlock",
+                   headers={**auth, "Idempotency-Key": uuid.uuid4().hex})
+    assert moves.status_code == 402  # the sign-up 튜브 went on ROLE_TENURE
