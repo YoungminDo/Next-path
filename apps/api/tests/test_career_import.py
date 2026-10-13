@@ -225,3 +225,126 @@ def test_unlock_key_unchanged_by_months_and_resume_fields(ids):  # noqa: F811
               "other_jobs": [{"role_raw": "그로스 해커", "start_year": 2020}]}
     assert insight_key(AcquisitionPayload.model_validate(base), "T") == insight_key(
         AcquisitionPayload.model_validate(richer), "T")
+
+
+class Broken(Fake):
+    def extract(self, files):
+        raise ValueError("cut off mid-JSON")
+
+
+def pdf(pages: int) -> str:
+    import io
+
+    from pypdf import PdfWriter
+    w = PdfWriter()
+    for _ in range(pages):
+        w.add_blank_page(width=200, height=200)
+    buf = io.BytesIO()
+    w.write(buf)
+    return base64.b64encode(buf.getvalue()).decode()
+
+
+def test_guards_before_and_around_the_read(engine, ids):  # noqa: F811
+    from hellomyme.domain import career_import
+
+    fake = Fake()
+    c = app_with(fake, career_import_client_limit=1)
+    short = {"X-Anonymous-Session": "short"}
+    assert c.post("/acq/import/parse", headers=short, json=body()).status_code == 400
+    long_pdf = body([{"media_type": "application/pdf", "data": pdf(11)}])
+    assert c.post("/acq/import/parse", headers=anon(), json=long_pdf).status_code == 413
+    junk = body([{"media_type": "application/pdf", "data": PNG}])
+    assert c.post("/acq/import/parse", headers=anon(), json=junk).status_code == 422
+    assert fake.calls == 0  # refused before anything was sent
+
+    ip = {"X-Client-IP": "203.0.113.7"}
+    ok = c.post("/acq/import/parse", headers={**anon(), **ip},
+                json=body([{"media_type": "application/pdf", "data": pdf(2)}]))
+    assert ok.status_code == 200, ok.text
+    assert c.post("/acq/import/parse", headers={**anon(), **ip}, json=body()).status_code == 429
+
+    taken = [career_import._IN_FLIGHT.acquire(blocking=False) for _ in range(8)]
+    try:
+        assert all(taken)
+        assert c.post("/acq/import/parse", headers=anon(), json=body()).status_code == 503
+    finally:
+        for _ in taken:
+            career_import._IN_FLIGHT.release()
+
+    broken = app_with(Broken())
+    r = broken.post("/acq/import/parse", headers={**anon(), **login(broken, "import-broken")}, json=body())
+    assert r.status_code == 502
+    with engine.begin() as conn:
+        outcome = conn.execute(text(
+            """SELECT a.outcome FROM import_attempt a JOIN account_identity ai USING (account_id)
+               WHERE ai.provider_subject = 'import-broken'""")).scalar_one()
+    assert outcome == "FAILED"  # never left open
+
+
+TWICE = Extraction(
+    is_career_document=True, source_kind="LINKEDIN",
+    experiences=[experience("질의컴퍼니", "브랜드 마케팅", 2022, 3, current=True),
+                 experience("목록밖회사", "그로스 해커", 2020, 1, 2022, 2),
+                 experience("목록밖회사", "그로스 해커", 2020, 1, 2022, 2)],
+    education=[])
+
+
+def test_repeated_positions_and_a_member_without_a_company(engine, ids):  # noqa: F811
+    c = app_with(Fake(TWICE))
+    h = anon()
+    # Typed by hand without a company: the read current job is still recognised.
+    payload = {"user_type": "PROFESSIONAL",
+               "education": {"institution_id": ids["inst"], "major_node_id": ids["M3"],
+                             "admission_year": 2016, "graduation_year": 2020},
+               "current_job": {"role_node_id": ids["R3"], "start_year": 2022}}
+    auth, person_id = merge(c, h, save(c, h, payload), "import-nocompany")
+    read = c.post("/acq/import/parse", headers={**h, **auth}, json=body()).json()
+    assert [x["already_saved"] for x in read["experiences"]] == [True, False]  # shown once
+
+    # Before login, the same position sent twice (and the current job again) is written once.
+    h2 = anon()
+    read2 = c.post("/acq/import/parse", headers=h2, json=body()).json()
+    growth = {"organization_name": "목록밖회사", "role_raw": "그로스 해커", "start_year": 2020,
+              "start_month": 1, "end_year": 2022, "end_month": 2}
+    current = {"organization_name": "질의컴퍼니", "role_node_id": ids["R3"], "start_year": 2022,
+               "start_month": 3}
+    draft = save(c, h2, {**payload, "import_attempt_id": read2["import_attempt_id"],
+                         "current_job": current,
+                         "other_jobs": [growth, growth, {**current, "is_current": True}]})
+    _, person2 = merge(c, h2, draft, "import-twice")
+    with engine.begin() as conn:
+        n = conn.execute(text("SELECT count(*) FROM work_event WHERE person_id = :p"),
+                         {"p": person2}).scalar_one()
+    assert n == 2
+
+
+def test_a_returning_member_keeps_what_they_confirmed_from_a_file(engine, ids):  # noqa: F811
+    c = app_with(Fake())
+    h = anon()
+    base = {"user_type": "PROFESSIONAL",
+            "education": {"institution_id": ids["inst"], "major_node_id": ids["M3"],
+                          "admission_year": 2016, "graduation_year": 2020},
+            "current_job": {"organization_name": "질의컴퍼니", "role_node_id": ids["R3"],
+                            "start_year": 2022}}
+    merge(c, h, save(c, h, base), "import-returning")
+
+    # Later, logged out (another browser): starts from a file, then logs in with the same account.
+    h2 = anon()
+    read = c.post("/acq/import/parse", headers=h2, json=body()).json()
+    draft = save(c, h2, {**base, "import_attempt_id": read["import_attempt_id"],
+                         "other_jobs": [{"organization_name": "목록밖회사", "role_raw": "그로스 해커",
+                                         "start_year": 2020, "end_year": 2022}]})
+    auth = login(c, "import-returning")
+    r = c.post("/auth/merge-draft", headers={**auth, **h2, "Idempotency-Key": uuid.uuid4().hex},
+               json={"draft_id": draft, "consent_policy_version": "v1"})
+    assert r.status_code == 200 and r.json()["linked"] is True, r.text
+    with engine.begin() as conn:
+        rows = conn.execute(text(
+            """SELECT w.organization_raw FROM work_event w JOIN person p USING (person_id)
+               JOIN account_identity ai ON ai.account_id = p.account_id
+               WHERE ai.provider_subject = 'import-returning' ORDER BY w.start_date""")).scalars().all()
+    assert rows == ["목록밖회사", "질의컴퍼니"]  # the current job was already there: not twice
+
+    # The earliest job has no role yet: the comparison uses the earliest one with a role.
+    me = c.get("/acq/me", headers=auth).json()["profile"]
+    assert me["first_job"]["role_node_id"] == ids["R3"] and me["first_job_is_current"] is True

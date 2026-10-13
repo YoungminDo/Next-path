@@ -15,6 +15,7 @@ dependencies = [
     "openpyxl>=3.1",
     "jsonschema>=4.22",
     "anthropic>=1.13.0",
+    "pypdf>=5",
 ]
 
 [dependency-groups]

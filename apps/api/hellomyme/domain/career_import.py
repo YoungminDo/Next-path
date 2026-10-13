@@ -19,8 +19,11 @@ together.
 from __future__ import annotations
 
 import base64
+import hashlib
+import io
 import json
 import logging
+import threading
 from datetime import date
 from typing import Literal, Protocol
 
@@ -50,6 +53,9 @@ MAX_TOTAL_BYTES = 3_200_000  # the web proxy takes about 4.5 MB per request (bas
 IMAGE_TYPES = ("image/jpeg", "image/png", "image/webp")
 PDF = "application/pdf"
 MAX_ITEMS = 12
+MAX_PDF_PAGES = 10  # a resume or a LinkedIn PDF; every page costs model input
+# Reads in flight at once in this process (each holds a worker thread for up to 50 s).
+_IN_FLIGHT = threading.BoundedSemaphore(8)
 
 
 class ImportFailed(Exception):
@@ -147,6 +153,9 @@ class ClaudeExtractor:
         except anthropic.APIConnectionError:
             log.error("career import: Claude API unreachable")
             return None, "FAILED", Usage()
+        except Exception:  # e.g. an answer cut off mid-JSON fails the SDK's own validation
+            log.exception("career import: unreadable answer")
+            return None, "FAILED", Usage()
         usage = Usage(input_tokens=response.usage.input_tokens,
                       output_tokens=response.usage.output_tokens)
         if response.stop_reason == "refusal":
@@ -182,6 +191,13 @@ def _used(conn: Connection, account_id: str | None, sid: str | None) -> int:
         """SELECT count(*) FROM import_attempt
            WHERE session_hash = :s AND created_at > now() - interval '1 day'"""),
         {"s": sid}).scalar_one()
+
+
+def _client_today(conn: Connection, client: str) -> int:
+    return conn.execute(text(
+        """SELECT count(*) FROM import_attempt
+           WHERE client_hash = :c AND created_at > now() - interval '1 day'"""),
+        {"c": client}).scalar_one()
 
 
 def _anonymous_today(conn: Connection) -> int:
@@ -220,8 +236,31 @@ def _files(raw: list[dict]) -> list[tuple[str, str]]:
         total += size
         if size > (MAX_PDF_BYTES if media_type == PDF else MAX_IMAGE_BYTES) or total > MAX_TOTAL_BYTES:
             raise ImportFailed(413, "파일이 너무 커요. PDF는 2.5MB, 전체 3MB까지 올릴 수 있어요")
+        if media_type == PDF and _pdf_pages(data) > MAX_PDF_PAGES:
+            raise ImportFailed(413, f"PDF가 너무 길어요. 경력이 있는 {MAX_PDF_PAGES}쪽 이내로 올려 주세요")
         out.append((media_type, data))
     return out
+
+
+def _pdf_pages(data: str) -> int:
+    """Pages, counted before anything is sent (each page is model input, i.e. cost)."""
+    from pypdf import PdfReader
+    from pypdf.errors import PdfReadError
+
+    try:
+        reader = PdfReader(io.BytesIO(base64.b64decode(data)))
+        if reader.is_encrypted:
+            raise ImportFailed(422, "암호가 걸린 PDF는 읽을 수 없어요. 암호를 풀고 올려 주세요")
+        return len(reader.pages)
+    except (PdfReadError, ValueError, KeyError, TypeError) as exc:
+        raise ImportFailed(422, "PDF를 열지 못했어요. 다른 파일로 다시 올려 주세요") from exc
+
+
+def client_hash(ip: str | None) -> str | None:
+    """A per-day key for the client address (limits only; the address itself is not kept)."""
+    if not ip:
+        return None
+    return hashlib.sha256(f"{date.today().isoformat()}:{ip.strip()}".encode()).hexdigest()
 
 
 # --- read -------------------------------------------------------------------------------
@@ -247,16 +286,28 @@ def _text(s: str | None, limit: int) -> str | None:
 
 def parse(engine: Engine, settings: Settings, account_id: str | None,
           anonymous_session: str | None, raw_files: list[dict], consent_text_version: str,
-          extractor: Extractor | None, internal: bool = False) -> dict:
+          extractor: Extractor | None, internal: bool = False, client_ip: str | None = None) -> dict:
     """No database connection is held while the model reads (10-30 s): each step before and
     after it is its own short transaction, so a burst of uploads cannot starve the pool."""
     if extractor is None:
         raise ImportFailed(409, "지금은 파일로 채우기를 쓸 수 없어요. 직접 입력해 주세요")
     if consent_text_version != settings.career_import_consent_version:
         raise ImportFailed(409, "안내 문구가 바뀌었어요. 새로고침 후 다시 동의해 주세요")
-    if not account_id and not anonymous_session:
+    if not account_id and (not anonymous_session or len(anonymous_session) < 16):
         raise ImportFailed(400, "세션 정보가 없어요. 새로고침 후 다시 시도해 주세요")
     files = _files(raw_files)
+    if not _IN_FLIGHT.acquire(blocking=False):
+        raise ImportFailed(503, "지금 읽는 분이 많아요. 잠시 후 다시 시도해 주세요")
+    try:
+        return _parse(engine, settings, account_id, anonymous_session, files, consent_text_version,
+                      extractor, internal, client_hash(client_ip))
+    finally:
+        _IN_FLIGHT.release()
+
+
+def _parse(engine: Engine, settings: Settings, account_id: str | None,
+           anonymous_session: str | None, files: list[tuple[str, str]], consent_text_version: str,
+           extractor: Extractor, internal: bool, client: str | None) -> dict:
     # The session is kept for members too: a draft made in this browser can then name the read.
     sid = anonymous_session and session_hash(anonymous_session)
     # The attempt (with the consent wording version) is committed before anything leaves: it is
@@ -268,16 +319,23 @@ def parse(engine: Engine, settings: Settings, account_id: str | None,
             raise ImportFailed(429, "오늘은 더 읽을 수 없어요. 내일 다시 시도하거나 직접 입력해 주세요")
         if not account_id:
             conn.execute(text("SELECT pg_advisory_xact_lock(hashtextextended('career-import:anon', 31))"))
+            # One address (as the web proxy saw it) cannot use up everyone's reads.
+            if client and _client_today(conn, client) >= settings.career_import_client_limit:
+                raise ImportFailed(429, "오늘은 더 읽을 수 없어요. 내일 다시 시도하거나 직접 입력해 주세요")
             if _anonymous_today(conn) >= settings.career_import_anonymous_daily_limit:
                 raise ImportFailed(429, "오늘은 요청이 많아 파일 읽기를 잠시 멈췄어요. 직접 입력해 주세요")
         attempt_id = conn.execute(text(
-            """INSERT INTO import_attempt (account_id, session_hash, internal, files,
+            """INSERT INTO import_attempt (account_id, session_hash, client_hash, internal, files,
                    consent_text_version, model)
-               VALUES (:a, :s, :i, :n, :v, :m) RETURNING import_attempt_id::text"""),
-            {"a": account_id, "s": sid, "i": internal, "n": len(files), "v": consent_text_version,
-             "m": extractor.model}).scalar_one()
+               VALUES (:a, :s, :c, :i, :n, :v, :m) RETURNING import_attempt_id::text"""),
+            {"a": account_id, "s": sid, "c": client, "i": internal, "n": len(files),
+             "v": consent_text_version, "m": extractor.model}).scalar_one()
 
-    extraction, outcome, usage = extractor.extract(files)
+    try:
+        extraction, outcome, usage = extractor.extract(files)
+    except Exception:  # never leave the attempt open
+        log.exception("career import: reader failed")
+        extraction, outcome, usage = None, "FAILED", Usage()
 
     with engine.begin() as conn:
         conn.execute(text(
@@ -299,13 +357,20 @@ def _suggest(conn: Connection, attempt_id: str, extraction: Extraction,
              account_id: str | None) -> dict:
     person_id = account_id and member_person_id(conn, account_id)
     existing = _existing_jobs(conn, person_id) if person_id else []
-    experiences = []
-    for x in extraction.experiences[:MAX_ITEMS]:
+    experiences, seen = [], set()
+    for x in extraction.experiences:
         company, title = _text(x.company, 200), _text(x.title, 200)
         sy, ey = _year(x.start_year), None if x.is_current else _year(x.end_year)
         sm, em = _month(x.start_month), _month(x.end_month) if ey else None
         if sy and ey and (ey, em or 12) < (sy, sm or 1):
             ey = em = None  # a misread end date: left for the person to fill in
+        # The same position twice (overlapping screenshot pieces, two captures) is shown once.
+        key = (_norm(company), _norm(title), sy, sm)
+        if key in seen:
+            continue
+        seen.add(key)
+        if len(experiences) >= MAX_ITEMS:
+            break
         role = _lookup(conn, "ROLE", title)
         experiences.append({
             "company": company, "title": title, "employment_type": x.employment_type,
@@ -350,13 +415,20 @@ def _norm(s: str | None) -> str:
 
 
 def _duplicate(existing: list[dict], org: str | None, role: str | None, year: int | None) -> bool:
-    """Already on record: same start year and the same company (or, without one, the same role)."""
+    """Already on record: same start year and the same company; when either side has no company
+    (it is optional when typed by hand), the same role."""
     if year is None:
         return False
     key = _norm(org)
-    return any(e["year"] == year and ((key and _norm(e["org"]) == key)
-                                      or (not key and role and e["role"] == role))
-               for e in existing)
+    for e in existing:
+        if e["year"] != year:
+            continue
+        other = _norm(e["org"])
+        if key and other and key == other:
+            return True
+        if (not key or not other) and role and e["role"] == role:
+            return True
+    return False
 
 
 def confirm(conn: Connection, account_id: str, person_id: str, attempt_id: str,
@@ -375,13 +447,21 @@ def confirm(conn: Connection, account_id: str, person_id: str, attempt_id: str,
     if any(j.role_node_id and j.role_node_id not in roles.nodes for j in jobs):
         raise QueryInvalid("unknown role")
 
+    return add_jobs(conn, account_id, person_id, source_type,
+                    f"career_import:{account_id}:{idempotency_key}", attempt_id, jobs, roles)
+
+
+def add_jobs(conn: Connection, account_id: str, person_id: str, source_type: str, source_key: str,
+             attempt_id: str, jobs: list[AcqPastJob], roles) -> dict:
+    """Jobs from a read file added to an existing profile under one source record (a replay
+    writes nothing); jobs already on record are skipped."""
     source_id = conn.execute(text(
         """INSERT INTO source_record (source_type, data_layer, source_system, source_key,
                raw_payload, legal_basis, metadata)
            VALUES (:t, 'VERIFIED', 'HELLOMYME_APP', :k, CAST(:raw AS jsonb), 'MEMBER_CONSENT',
                    CAST(:meta AS jsonb))
            ON CONFLICT (source_system, source_key) DO NOTHING RETURNING source_id::text"""),
-        {"t": source_type, "k": f"career_import:{account_id}:{idempotency_key}",
+        {"t": source_type, "k": source_key,
          "raw": json.dumps([j.model_dump() for j in jobs], ensure_ascii=False),
          "meta": json.dumps({"import_attempt_id": attempt_id})}).scalar()
     if source_id is None:
@@ -402,3 +482,20 @@ def confirm(conn: Connection, account_id: str, person_id: str, attempt_id: str,
             "WORK_EVENT", weid))
     return {"replayed": False, "added": added, "skipped": skipped,
             "rewards": [{"ledger_id": r.ledger_id, "amount": r.amount} for r in rewards if r]}
+
+
+def add_draft_jobs(conn: Connection, account_id: str, person_id: str, payload, draft_id: str) -> dict:
+    """A returning member who started from a file before logging in: the jobs they confirmed in
+    the form are added to the profile they already have (nothing else of the draft is)."""
+    source_type = import_source_type(conn, payload.import_attempt_id)
+    if not source_type:
+        return {"replayed": False, "added": 0, "skipped": 0, "rewards": []}
+    jobs = list(payload.other_jobs)
+    if payload.current_job is not None:
+        jobs.append(AcqPastJob(**payload.current_job.model_dump(), is_current=True))
+    if payload.first_job is not None and not payload.first_job_is_current:
+        jobs.append(AcqPastJob(**payload.first_job.model_dump()))
+    if not jobs:
+        return {"replayed": False, "added": 0, "skipped": 0, "rewards": []}
+    return add_jobs(conn, account_id, person_id, source_type, f"draft:{draft_id}:jobs",
+                    payload.import_attempt_id, jobs, load_taxonomy(conn, "ROLE"))

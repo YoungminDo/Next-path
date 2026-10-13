@@ -25,6 +25,9 @@ async function proxy(req: NextRequest, ctx: { params: Promise<{ path: string[] }
   }
   const token = req.cookies.get(SESSION_COOKIE)?.value;
   if (token) headers.authorization = `Bearer ${token}`;
+  // The visitor's address as Vercel saw it, for per-visitor limits on costly reads (never stored as is).
+  const ip = req.headers.get("x-real-ip") ?? req.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+  if (ip) headers["x-client-ip"] = ip;
 
   let upstream: Response;
   try {

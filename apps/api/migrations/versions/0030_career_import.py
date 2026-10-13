@@ -37,6 +37,7 @@ def upgrade() -> None:
         import_attempt_id    uuid PRIMARY KEY DEFAULT gen_random_uuid(),
         account_id           uuid REFERENCES account ON DELETE CASCADE,
         session_hash         text,  -- sha256 of the anonymous session, as anonymous_draft.session_id
+        client_hash          text,  -- sha256 of the day and the client address (limits only)
         internal             boolean NOT NULL DEFAULT false,
         files                integer NOT NULL CHECK (files BETWEEN 1 AND 10),
         consent_text_version text NOT NULL,
@@ -56,6 +57,8 @@ def upgrade() -> None:
     CREATE INDEX import_attempt_session_idx ON import_attempt (session_hash, created_at)
         WHERE session_hash IS NOT NULL;
     CREATE INDEX import_attempt_created_idx ON import_attempt (created_at);
+    CREATE INDEX import_attempt_client_idx ON import_attempt (client_hash, created_at)
+        WHERE client_hash IS NOT NULL;
     ALTER TABLE import_attempt ENABLE ROW LEVEL SECURITY;
 
     ALTER TABLE analytics.event DROP CONSTRAINT event_event_name_check;

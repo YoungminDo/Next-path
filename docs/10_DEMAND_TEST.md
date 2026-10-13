@@ -112,9 +112,12 @@
   보유 기간, 거부할 권리(직접 입력으로 같은 결과)를 적는다. 문구 버전 `career_import_v1`(웹 `IMPORT_CONSENT_VERSION`과 서버 설정이 같아야 함).
   동의 기록은 `import_attempt`(문구 버전·시각·세션/계정)에 남는다.
 - **비용 상한:** 읽기 1회 약 4천~2만 입력 토큰. `import_attempt`에 토큰을 남기고 대시보드에 추정 비용을 보여준다.
-  - 계정당 하루 10회, 비회원 세션당 하루 3회, **비회원 전체 하루 300회**(`HELLOMYME_CAREER_IMPORT_ANONYMOUS_DAILY_LIMIT`).
-    상한에 닿으면 "직접 입력"으로 안내한다. 실패한 읽기도 횟수에 들어간다.
-  - 읽는 동안(10~30초) DB 연결을 잡지 않는다(동시 업로드가 몰려도 다른 화면이 멈추지 않게).
+  - 계정당 하루 10회, 비회원 세션당 하루 3회, 비회원 접속 주소당 하루 20회(주소는 날짜를 섞은 해시로만 남김),
+    **비회원 전체 하루 300회**(`HELLOMYME_CAREER_IMPORT_ANONYMOUS_DAILY_LIMIT`). 상한에 닿으면 "직접 입력"으로 안내한다.
+    실패한 읽기도 횟수에 들어간다.
+  - PDF는 10쪽까지(쪽마다 비용이 들어서, 보내기 전에 센다). 암호 걸린 PDF는 받지 않는다.
+  - 동시에 읽는 건 8건까지(넘으면 "잠시 후 다시"). 읽는 동안(10~30초) DB 연결을 잡지 않는다.
+  - 로그인 전에 파일로 시작한 기존 회원이 로그인하면, 확인한 경력 중 없는 것만 기존 프로필에 더한다.
 - **끄기:** Render에서 `ANTHROPIC_API_KEY`를 지우면 업로드 화면이 "직접 입력"으로 바뀐다.
 - **저장 위치:** `import_attempt`(읽기 1회 = 1행, 결과·토큰·출처 종류), 확인된 경력은 `work_event` +
   `source_record`(`LINKEDIN_USER_UPLOAD` 또는 `CAREER_DOCUMENT`), 초안은 `anonymous_draft.payload_json.other_jobs`.

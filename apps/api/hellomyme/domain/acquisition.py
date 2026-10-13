@@ -554,7 +554,17 @@ def _resolve_other_jobs(conn: Connection, p: AcquisitionPayload, lookup) -> Acqu
         return p
     roles = load_taxonomy(conn, "ROLE")
     out = []
+
+    def key(j) -> tuple:
+        name = "".join(ch for ch in (j.organization_name or "").casefold() if ch.isalnum())
+        return (name, j.start_year, j.start_month, j.role_node_id or (j.role_raw or "").casefold())
+
+    # The same position twice, or the current/first job again, is written once.
+    seen = {key(j) for j in (p.current_job, p.first_job) if j is not None}
     for j in p.other_jobs:
+        if key(j) in seen:
+            continue
+        seen.add(key(j))
         if j.role_node_id and j.role_node_id not in roles.nodes:
             raise QueryInvalid("unknown role")
         if j.organization_id and not conn.execute(text(
@@ -645,6 +655,19 @@ def member_payload(conn: Connection, person_id: str, as_of: date) -> Acquisition
             JOIN work_event w ON w.work_event_id = fe.work_event_id
             WHERE fe.person_id = :p"""),
         {"p": person_id, "d": as_of, "r": FIRST_EMPLOYMENT_RULE}).first()
+    if first is not None and first.role is None:
+        # The first job is on record without a role (a title from a resume nobody has mapped
+        # yet): compare by the earliest qualifying job whose role is known.
+        first = conn.execute(text(
+            f"""SELECT {cols} FROM canonical_work_event w
+                JOIN first_employment_rule r ON r.version = :r
+                WHERE w.person_id = :p AND w.event_type = ANY (r.included_event_types)
+                  AND (w.employment_type IS NULL
+                       OR NOT (w.employment_type = ANY (r.excluded_employment_types)))
+                  AND w.start_date IS NOT NULL AND w.start_date <= :d
+                  AND w.role_taxonomy_node_id IS NOT NULL
+                ORDER BY w.start_date, w.work_event_id LIMIT 1"""),
+            {"p": person_id, "d": as_of, "r": FIRST_EMPLOYMENT_RULE}).first()
     intents = conn.execute(text(
         """SELECT source_surface, target_kind, target_taxonomy_node_id::text AS node, captured_at
            FROM intent_event WHERE person_id = :p AND signal_type = :s

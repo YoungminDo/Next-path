@@ -46,6 +46,7 @@ class Settings(BaseSettings):
     career_import_model: str = "claude-opus-5-5"
     career_import_daily_limit: int = 10  # per account
     career_import_session_limit: int = 3  # per anonymous session
+    career_import_client_limit: int = 20  # per client address before login (shared Wi-Fi allowed)
     career_import_anonymous_daily_limit: int = 300  # all anonymous reads together
     career_import_consent_version: str = "career_import_v1"
 

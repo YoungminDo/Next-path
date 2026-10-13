@@ -110,10 +110,16 @@ def merge_draft(conn: Connection, account_id: str, draft_id: str, anonymous_sess
         # A returning member: the profile they already have stays as it is (no second person,
         # no duplicate records). The new answers stay in the draft, now linked to the account,
         # and a new desired-role answer is added to their history.
-        record_desired_roles(conn, existing, AcquisitionPayload.model_validate(row.payload_json),
-                             draft_id)
+        payload = AcquisitionPayload.model_validate(row.payload_json)
+        record_desired_roles(conn, existing, payload, draft_id)
+        added = {"rewards": []}
+        if payload.import_attempt_id:
+            # Started from a file: the jobs they confirmed are added (already-saved ones skipped).
+            from hellomyme.domain.career_import import add_draft_jobs
+            added = add_draft_jobs(conn, account_id, existing, payload, draft_id)
         _claim(conn, draft_id, account_id, existing)
-        return {"person_id": existing, "merged": False, "linked": True, "rewards": []}
+        return {"person_id": existing, "merged": False, "linked": True,
+                "rewards": added["rewards"]}
 
     if is_acquisition_payload(row.payload_json):
         written = write_acquisition_profile(

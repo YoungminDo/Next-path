@@ -243,7 +243,8 @@ class ParseRequest(BaseModel):
 
 @router.post("/import/parse")
 def import_parse(body: ParseRequest, settings: AppSettings, extractor: Extractor,
-                 authorization: Annotated[str | None, Header()] = None, anon: MaybeAnon = None):
+                 authorization: Annotated[str | None, Header()] = None, anon: MaybeAnon = None,
+                 client_ip: Annotated[str | None, Header(alias="X-Client-IP")] = None):
     """Read the person's own files into rows they check. Before login nothing is kept but the
     attempt: the rows prefill the input form and travel with the draft. No request-wide
     connection (the read takes 10-30 s): only short transactions inside."""
@@ -252,7 +253,7 @@ def import_parse(body: ParseRequest, settings: AppSettings, extractor: Extractor
         account_id = optional_account(conn, authorization)
     return _import(lambda: career_import.parse(
         engine, settings, account_id, anon, [f.model_dump() for f in body.files],
-        body.consent_text_version, extractor, internal=body.internal))
+        body.consent_text_version, extractor, internal=body.internal, client_ip=client_ip))
 
 
 class ImportConfirmRequest(BaseModel):

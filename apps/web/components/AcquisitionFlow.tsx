@@ -299,12 +299,16 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
     };
     if (type === "pro") { setUserType("PROFESSIONAL"); setEdu(fromHero); setScreen("p_now"); }
     if (type === "upload" || startOn === "upload") {
-      // A member opening the upload link fills in their own profile instead.
+      // A member opening the upload link fills in their own profile instead (straight away, so a
+      // quick upload never takes the before-login path).
       if (!pending.member()) { setScreen("upload"); return; }
+      setScreen("m_upload");
       acq.me().then(async (m) => {
-        await resumeMember(m);
-        importFrom.current = m.intent ? "me" : m.profile.user_type === "PROFESSIONAL" ? "p_next" : "s_result";
-        setScreen("m_upload");
+        const pro = m.profile.user_type === "PROFESSIONAL";
+        setMe(m);
+        setUserType(pro ? "PROFESSIONAL" : "STUDENT");
+        importFrom.current = m.intent ? "me" : pro ? "p_next" : "s_result";
+        if (!m.intent) setBase(await acq.meStep(pro ? "next_roles" : "first_roles"));
       }).catch((e) => {
         if (e instanceof ApiError && (e.status === 401 || e.status === 404)) pending.member(null);
         setScreen("upload");
@@ -570,9 +574,11 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
     setScreen(back);
   })();
   const profile = me?.profile as { first_job?: unknown; first_job_is_current?: boolean } | undefined;
-  const hasFirst = Boolean(profile?.first_job) || profile?.first_job_is_current === true;
+  // A first job before the current one is already on record (e.g. read from a resume): no need
+  // to ask for it. One job only (first = current) still asks, as typing by hand always did.
+  const hasFirst = Boolean(profile?.first_job) && profile?.first_job_is_current !== true;
   const toSimilar = run(async () => {
-    setSimilar(profile?.first_job_is_current ? undefined : await acq.meStep("similar_paths"));
+    setSimilar(await acq.meStep("similar_paths"));
     setScreen("p_similar");
   });
 
