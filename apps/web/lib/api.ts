@@ -114,6 +114,8 @@ export type MyResult = {
   base: QueryResult; intent_paths: IntentResult;
   deep_dive: { unlocked: boolean; available: boolean; cost_tube: number | null;
     content: { company_size: DeepDiveItem[]; industry: DeepDiveItem[] } | null };
+  /** Other schools, same major: a 튜브 product; the result only once opened. */
+  compare: { available: boolean; unlocked: boolean; cost_tube: number | null; result: QueryResult | null };
   balance_tube: number; data_basis: "SIMULATION" | "OBSERVED"; unlisted?: Unlisted;
 };
 export type AcqStep = "first_roles" | "next_roles" | "similar_paths";
@@ -193,6 +195,9 @@ export const acq = {
       method: "POST",
       headers: { "Idempotency-Key": crypto.randomUUID() },
     }),
+  unlockCompare: () =>
+    call<{ unlocked: boolean; charged?: boolean; balance_tube?: number; result?: QueryResult }>(
+      "/acq/me/unlock/compare", { method: "POST", headers: { "Idempotency-Key": crypto.randomUUID() } }),
   interview: () => call<InterviewStatus>("/acq/me/interview"),
   interviewCode: (phone: string) =>
     call<{ sent: boolean; expires_in: number; phone_masked: string }>("/acq/me/interview/code", {

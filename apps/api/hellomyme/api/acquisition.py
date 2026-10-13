@@ -28,6 +28,8 @@ router = APIRouter(prefix="/acq", tags=["acquisition"])
 AnonStep = Literal["teaser"]
 MemberStep = Literal["first_roles", "next_roles", "similar_paths"]
 DEEP_DIVE = "PATH_DEEP_DIVE"
+SCHOOL_COMPARE = "SCHOOL_COMPARE"
+COMPARE_TARGET = "OTHER_SCHOOLS"  # the entitlement key's target: one comparison per answers
 
 
 def _basis(settings) -> str:
@@ -142,6 +144,14 @@ def my_result(conn: Conn, settings: AppSettings, account_id: Account, as_of: AsO
     unlocked = ledger.has_entitlement(conn, account_id, DEEP_DIVE, key)
     deep = (paths.get("paths") or {}).pop("deep_dive", None)
     policy = active_unlock_policy(conn, DEEP_DIVE)
+    # Other schools, same major: offered when their own school is listed; computed once opened.
+    compare_policy = active_unlock_policy(conn, SCHOOL_COMPARE)
+    compare_key = acq.insight_key(payload, COMPARE_TARGET)
+    compare_open = ledger.has_entitlement(conn, account_id, SCHOOL_COMPARE, compare_key)
+    compare = None
+    if compare_open:
+        compare = _run(lambda: acq.result(conn, payload, "other_schools", layers=layers,
+                                          as_of=as_of, exclude=(person_id,)))["result"]
     return {
         "profile": payload.model_dump(mode="json", exclude={"intents"}),
         "intent": (payload.latest_intent() and
@@ -150,6 +160,10 @@ def my_result(conn: Conn, settings: AppSettings, account_id: Account, as_of: AsO
         "deep_dive": {"unlocked": unlocked, "available": bool(deep) and policy is not None,
                       "cost_tube": policy and policy.cost_tube,
                       "content": deep if unlocked else None},
+        "compare": {"available": bool(payload.education and payload.education.institution_id)
+                                  and compare_policy is not None,
+                     "unlocked": compare_open, "cost_tube": compare_policy and compare_policy.cost_tube,
+                     "result": compare},
         "balance_tube": ledger.balance(conn, account_id),
         "data_basis": _basis(settings),
         "unlisted": acq.unlisted(payload),
@@ -179,6 +193,32 @@ def unlock_deep_dive(conn: Conn, settings: AppSettings, account_id: Account,
     except ledger.PolicyUnavailable as exc:
         raise HTTPException(503, "unlock is not available right now") from exc
     return {"unlocked": True, **grant, "content": p["deep_dive"],
+            "balance_tube": ledger.balance(conn, account_id), "data_basis": _basis(settings)}
+
+
+@router.post("/me/unlock/compare")
+def unlock_compare(conn: Conn, settings: AppSettings, account_id: Account,
+                   key: IdempotencyKey, as_of: AsOf):
+    """Open "다른 학교, 같은 과" with 튜브. Never charged when the other schools are too few."""
+    person_id, payload = _member(conn, account_id, as_of)
+    out = _run(lambda: acq.result(conn, payload, "other_schools",
+                                  layers=settings.career_map_data_layers, as_of=as_of,
+                                  exclude=(person_id,)))["result"]
+    if out is None or out["suppressed"]:
+        return {"unlocked": False, "charged": False}
+    try:
+        grant = ledger.unlock(conn, account_id, SCHOOL_COMPARE,
+                              acq.insight_key(payload, COMPARE_TARGET),
+                              {"effective_n": out["effective_n"],
+                               "fallback_reason": out["fallback_reason"]}, key)
+    except ledger.InsufficientCredit as exc:
+        raise HTTPException(402, {"message": "튜브가 부족해요", "balance": exc.balance,
+                                  "required": exc.required}) from exc
+    except ledger.IdempotencyConflict as exc:
+        raise HTTPException(422, "Idempotency-Key reused for a different unlock") from exc
+    except ledger.PolicyUnavailable as exc:
+        raise HTTPException(503, "unlock is not available right now") from exc
+    return {"unlocked": True, **grant, "result": out,
             "balance_tube": ledger.balance(conn, account_id), "data_basis": _basis(settings)}
 
 

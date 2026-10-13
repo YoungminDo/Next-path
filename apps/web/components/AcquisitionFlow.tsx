@@ -30,6 +30,7 @@ import { ImportedJobs, ImportEntry, importRows, ImportReview, ImportUpload, toPa
 import NodeSelect from "@/components/NodeSelect";
 import SearchSelect, { type Picked } from "@/components/SearchSelect";
 import { inAppBrowser, isInternal, track } from "@/lib/track";
+import ResultCards from "@/components/ResultCards";
 import { YEARS } from "@/lib/years";
 
 /* Order (product decision): input -> teaser (how many people, how many directions) -> login ->
@@ -669,6 +670,19 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
     if (u.unlocked) track("unlock_purchased", { insight: "PATH_DEEP_DIVE", charged: u.charged ?? null });
     setMe(await acq.me());
   });
+  const unlockCompare = run(async () => {
+    const u = await acq.unlockCompare();
+    if (u.unlocked) track("unlock_purchased", { insight: "SCHOOL_COMPARE", charged: u.charged ?? null });
+    else setNotice({ screen: "me", text: "다른 학교 기록이 아직 적어서 열지 않았어요. 튜브는 그대로예요." });
+    setMe(await acq.me());
+  });
+  // School and major as the member gave them, for the result cards' titles.
+  const meEdu = (me?.profile.education ?? {}) as { institution_id?: string | null; institution_raw?: string | null;
+    major_node_id?: string | null; major_raw?: string | null };
+  const meNames = {
+    school: institutions.find((i) => i.id === meEdu.institution_id)?.name ?? meEdu.institution_raw ?? null,
+    major: majors.find((m) => m.node_id === meEdu.major_node_id)?.label ?? meEdu.major_raw ?? null,
+  };
 
   const back: Partial<Record<Screen, Screen>> = {
     upload: "start", s_edu: importId ? "upload" : "start", p_now: importId ? "upload" : "start",
@@ -934,7 +948,8 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
         </section>
       )}
 
-      {screen === "me" && me && <MyScreen me={me} busy={busy} onUnlock={unlock} onChangeIntent={changeIntent}
+      {screen === "me" && me && <MyScreen me={me} busy={busy} onUnlock={unlock} onUnlockCompare={unlockCompare}
+                                          names={meNames} onChangeIntent={changeIntent}
                                           onInterview={openInterview} onImport={openImport} />}
       <p className="policy-link"><a href="/privacy">개인정보처리방침</a></p>
     </main>
@@ -1087,8 +1102,9 @@ function months(m: number) {
   return `${(m / 12).toFixed(1)}년`;
 }
 
-function MyScreen({ me, busy, onUnlock, onChangeIntent, onInterview, onImport }: {
-  me: MyResult; busy: boolean; onUnlock: () => void; onChangeIntent: () => void; onInterview: () => void;
+function MyScreen({ me, busy, onUnlock, onUnlockCompare, names, onChangeIntent, onInterview, onImport }: {
+  me: MyResult; busy: boolean; onUnlock: () => void; onUnlockCompare: () => void;
+  names: { school: string | null; major: string | null }; onChangeIntent: () => void; onInterview: () => void;
   onImport: () => void;
 }) {
   const p = me.intent_paths.paths;
@@ -1099,6 +1115,9 @@ function MyScreen({ me, busy, onUnlock, onChangeIntent, onInterview, onImport }:
         <span className="badge">입력하신 내용을 이어왔어요</span>
         <span className="tube" aria-label={`보유 튜브 ${me.balance_tube}개`}>{me.balance_tube} 튜브</span>
       </div>
+      <ResultCards base={me.base} compare={me.compare} professional={professional} school={names.school}
+                   major={names.major} label={(c) => cellLabel(c, professional)}
+                   takeaway={conclusion(me.base, professional)} busy={busy} onUnlockCompare={onUnlockCompare} />
       {!p || p.suppressed ? (
         <>
           <h2>이 길로 간 사람은 아직 적어요</h2>

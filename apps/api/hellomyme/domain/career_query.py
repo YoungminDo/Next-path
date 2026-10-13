@@ -60,10 +60,14 @@ class CareerQuery:
     requested_depth: int | None = None
     # A member never counts in their own cohort.
     exclude_person_ids: tuple[str, ...] = ()
+    # "Other schools": the matching education must be at a known school not in this list.
+    exclude_institution_ids: tuple[str, ...] = ()
 
     def normalized(self) -> dict:
         d = asdict(self)
         d["as_of_date"] = self.as_of_date.isoformat()
+        if not self.exclude_institution_ids:
+            d.pop("exclude_institution_ids")  # hashes from before the field stay the same
         return {k: (sorted(v) if isinstance(v, tuple) else v) for k, v in d.items()}
 
     def query_hash(self) -> str:
@@ -204,6 +208,7 @@ class Filters:
     current_role_node_ids: list[str] = field(default_factory=list)
     first_role_node_ids: list[str] = field(default_factory=list)
     exclude_person_ids: list[str] = field(default_factory=list)
+    exclude_institution_ids: list[str] = field(default_factory=list)
 
     def public(self, majors: Taxonomy, roles: Taxonomy) -> dict:
         def codes(tax, ids):
@@ -279,6 +284,9 @@ def cohort_sql(f: Filters, majors: Taxonomy, roles: Taxonomy) -> tuple[str, dict
     if f.institution_ids:
         edu.append("e.institution_id = ANY(CAST(:inst AS uuid[]))")
         params["inst"] = f.institution_ids
+    if f.exclude_institution_ids:
+        edu.append("e.institution_id IS NOT NULL AND e.institution_id <> ALL(CAST(:excl_inst AS uuid[]))")
+        params["excl_inst"] = f.exclude_institution_ids
     if f.major_node_ids:
         edu.append("e.major_taxonomy_node_id = ANY(CAST(:majors AS uuid[]))")
         params["majors"] = majors.subtree(f.major_node_ids)
@@ -418,7 +426,8 @@ def evaluate_with_filters(conn: Connection, q: CareerQuery, *,
         graduation=(q.graduation_year_from, q.graduation_year_to),
         gender_codes=list(q.gender_codes), current_role_node_ids=list(q.current_role_node_ids),
         first_role_node_ids=list(q.first_role_node_ids),
-        exclude_person_ids=list(q.exclude_person_ids))
+        exclude_person_ids=list(q.exclude_person_ids),
+        exclude_institution_ids=list(q.exclude_institution_ids))
 
     def threshold(f: Filters) -> int:
         return policy.demographic_min_n if f.demographic else policy.min_exact_n

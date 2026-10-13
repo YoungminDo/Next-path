@@ -348,3 +348,34 @@ def test_a_returning_member_sees_what_changes_and_decides(client, engine, ids): 
                UNION ALL SELECT 'job', retracted_at IS NOT NULL FROM work_event WHERE person_id = :p"""),
             {"p": person_id}).all()
     assert sorted(map(tuple, rows)) == [("edu", False), ("edu", True), ("job", False), ("job", True)]
+
+
+def test_other_schools_same_major_is_a_paid_comparison(client, engine, ids):  # noqa: F811
+    """The member's own school is free; "다른 학교, 같은 과" opens with 튜브, is computed without
+    their school, and is never charged when the other schools are too few."""
+    from hellomyme.domain import ledger
+    from tests.test_career_query import run
+
+    own = run(engine, target_metric="FIRST_ROLE_DISTRIBUTION", major_node_ids=(ids["M3"],),
+              graduation_year_from=2020, graduation_year_to=2020)
+    others = run(engine, target_metric="FIRST_ROLE_DISTRIBUTION", major_node_ids=(ids["M3"],),
+                 graduation_year_from=2020, graduation_year_to=2020,
+                 exclude_institution_ids=(ids["inst"],))
+    assert own["exact_n"] == 10 and others["exact_n"] == 0  # every fixture person is at that school
+    assert own["query_hash"] != others["query_hash"]
+
+    h = anon()
+    auth, _ = merge(client, h, save(client, h, student(ids)), "acq-compare")
+    me = client.get("/acq/me", headers=auth).json()
+    assert me["compare"] == {"available": True, "unlocked": False, "cost_tube": 1, "result": None}
+    before = me["balance_tube"]
+    r = client.post("/acq/me/unlock/compare", headers={**auth, "Idempotency-Key": uuid.uuid4().hex})
+    assert r.status_code == 200 and r.json() == {"unlocked": False, "charged": False}
+    assert client.get("/acq/me", headers=auth).json()["balance_tube"] == before
+
+    with engine.begin() as conn:  # the product exists and costs what the policy says
+        account = conn.execute(text("SELECT account_id::text FROM account_identity "
+                                    "WHERE provider_subject = 'acq-compare'")).scalar_one()
+        grant = ledger.unlock(conn, account, "SCHOOL_COMPARE", "k-compare", {}, "idem-compare")
+        assert grant["charged"] is True
+        assert ledger.balance(conn, account) == before - 1

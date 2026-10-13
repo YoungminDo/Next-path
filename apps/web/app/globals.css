@@ -440,3 +440,17 @@ body { word-break: keep-all; overflow-wrap: break-word; }
 .herotabs button { border: 0; border-radius: 9px; padding: 10px 6px; background: transparent; color: #c9cdd2; font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; }
 .herotabs button[aria-selected="true"] { background: #fff; color: #141517; }
 .check a, .consent-more a { color: var(--mint-ink); }
+/* Result cards (member result): the landing gallery's cards with the member's own numbers, as a
+   swipeable strip at every width (the result column is phone-width). */
+.rcards { display: flex; align-items: flex-start; overflow-x: auto; scroll-snap-type: x mandatory; gap: 12px; margin: 12px -16px 20px; padding: 4px 16px 12px; scrollbar-width: none; }
+.rcards::-webkit-scrollbar { display: none; }
+.rcards .gcard { flex: 0 0 88%; scroll-snap-align: center; }
+.rcards .gcard .cta { margin: 0; }
+.rcards .free { color: var(--mint-ink); font-weight: 700; }
+.gchart .grow { transform-box: fill-box; transform-origin: left; animation: grow 0.7s cubic-bezier(.2,.8,.2,1) both; }
+@keyframes grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@media (prefers-reduced-motion: reduce) { .gchart .grow { animation: none; } }
+.locked-chart { display: grid; gap: 12px; padding: 8px 0; filter: blur(4px); opacity: 0.7; }
+.locked-chart .lrow { display: grid; gap: 4px; }
+.locked-chart i { display: block; height: 10px; border-radius: 3px; background: var(--s1); }
+.locked-chart i.o { background: var(--s2); }

@@ -391,11 +391,19 @@ def _say_similar(result: tuple[dict, Filters], e: AcqEducation,
     return out, eff
 
 
-def student_first_roles(conn, p: AcquisitionPayload, *, layers, as_of, exclude=()):
+def _other_schools(filters: dict, e: AcqEducation) -> dict:
+    """The same answers at every other known school (the member's own school left out)."""
+    return {**filters, "institution_ids": (), "exclude_institution_ids": (e.institution_id,)}
+
+
+def student_first_roles(conn, p: AcquisitionPayload, *, layers, as_of, exclude=(),
+                        other_schools: bool = False):
     """S2: what similar seniors did first (FIRST_ROLE at the surface depth)."""
     _require(p, "education")
     e = p.education
     filters, similar = cohort_inputs(conn, e)
+    if other_schools:
+        filters = _other_schools(filters, e)
     return _say_similar(evaluate_with_filters(conn, CareerQuery(
         as_of_date=as_of, target_metric="FIRST_ROLE_DISTRIBUTION", surface_code=SURFACE,
         **filters,
@@ -405,7 +413,7 @@ def student_first_roles(conn, p: AcquisitionPayload, *, layers, as_of, exclude=(
 
 
 def professional_next_roles(conn, p: AcquisitionPayload, *, layers, as_of, exclude=(),
-                            with_first_job: bool = False):
+                            with_first_job: bool = False, other_schools: bool = False):
     """P2 (current role only) and P4 (same first role and current role): the next choice."""
     _require(p, "education", "current_job")
     roles = load_taxonomy(conn, "ROLE")
@@ -417,6 +425,8 @@ def professional_next_roles(conn, p: AcquisitionPayload, *, layers, as_of, exclu
         first = (_surface_node(conn, roles, p.first_job.role_node_id),)
     e = p.education
     filters, similar = cohort_inputs(conn, e)
+    if other_schools:
+        filters = _other_schools(filters, e)
     return _say_similar(evaluate_with_filters(conn, CareerQuery(
         as_of_date=as_of, target_metric="NEXT_ROLE_DISTRIBUTION", surface_code=SURFACE,
         **filters,
@@ -565,6 +575,17 @@ def result(conn: Connection, p: AcquisitionPayload, step: str, *, layers, as_of,
         return {"step": step, "result": out}
     if step == "next_roles":
         out, _ = professional_next_roles(conn, p, layers=layers, as_of=as_of, exclude=exclude)
+        return {"step": step, "result": out}
+    if step == "other_schools":
+        # The same question at other schools (a paid comparison); needs a listed own school.
+        if not (p.education and p.education.institution_id):
+            return {"step": step, "result": None}
+        if p.is_professional:
+            out, _ = professional_next_roles(conn, p, layers=layers, as_of=as_of, exclude=exclude,
+                                             other_schools=True)
+        else:
+            out, _ = student_first_roles(conn, p, layers=layers, as_of=as_of, exclude=exclude,
+                                         other_schools=True)
         return {"step": step, "result": out}
     if step == "similar_paths":
         out, _ = professional_next_roles(conn, p, layers=layers, as_of=as_of, exclude=exclude,
