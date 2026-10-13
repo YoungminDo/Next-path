@@ -41,10 +41,11 @@ class Fake:
     model = "fake-reader"
 
     def __init__(self, result=RESUME, outcome="PARSED"):
-        self.result, self.outcome, self.calls, self.held = result, outcome, 0, []
+        self.result, self.outcome, self.calls, self.held, self.roles = result, outcome, 0, [], None
 
-    def extract(self, files):
+    def extract(self, files, roles=()):
         self.calls += 1
+        self.roles = list(roles)
         # No connection may be checked out while the model reads (a burst would starve the pool).
         self.held.append(get_engine().pool.checkedout())
         return self.result, self.outcome, Usage(input_tokens=4000, output_tokens=600)
@@ -228,7 +229,7 @@ def test_unlock_key_unchanged_by_months_and_resume_fields(ids):  # noqa: F811
 
 
 class Broken(Fake):
-    def extract(self, files):
+    def extract(self, files, roles=()):
         raise ValueError("cut off mid-JSON")
 
 
@@ -409,11 +410,11 @@ def test_why_a_read_failed_is_kept_for_the_team(engine, ids):  # noqa: F811
 
     from hellomyme.domain.career_import import ClaudeExtractor
 
-    workspaces = []
+    workspaces, sent = [], []
 
     class Refuse(BaseHTTPRequestHandler):
         def do_POST(self):
-            self.rfile.read(int(self.headers.get("content-length", 0)))
+            sent.append(self.rfile.read(int(self.headers.get("content-length", 0))))
             workspaces.append(self.headers.get("anthropic-workspace-id"))
             self.send_response(400)
             self.send_header("content-type", "application/json")
@@ -437,6 +438,7 @@ def test_why_a_read_failed_is_kept_for_the_team(engine, ids):  # noqa: F811
         r = c.post("/acq/import/parse", headers={**anon(), **login(c, "import-why")}, json=body())
         assert r.status_code == 502
         assert r.json()["detail"]["message"].startswith("파일을 읽지 못했어요")
+        assert b"Role list" in sent[0] and b"R3B: " in sent[0]  # the pickable roles go with the files
         # A key that is not scoped to a workspace names it on every request when configured.
         import os
         os.environ["ANTHROPIC_BASE_URL"] = f"http://127.0.0.1:{server.server_port}"
@@ -480,3 +482,24 @@ def test_why_a_read_failed_is_kept_for_the_team(engine, ids):  # noqa: F811
         assert conn.execute(text(
             """SELECT a.failure_reason FROM import_attempt a JOIN account_identity ai USING (account_id)
                WHERE ai.provider_subject = 'import-why-2'""")).scalar_one() == "reader failed: ValueError"
+
+
+def test_the_read_suggests_listed_roles_and_marks_career_breaks(ids):  # noqa: F811
+    """The reader picks the closest pickable role per position (a suggestion the person confirms);
+    a gap year is a break, not a job: no role. Unknown or non-leaf codes suggest nothing."""
+    def x(title, code, brk=False):
+        return ExtractedExperience(company="어딘가", title=title, employment_type=None,
+                                   start_year=2020, start_month=1, end_year=2021, end_month=1,
+                                   is_current=False, role_code=code, is_career_break=brk)
+    fake = Fake(Extraction(is_career_document=True, source_kind="LINKEDIN", education=[],
+                           experiences=[x("Head of New Business", "R3B"),
+                                        x("안식년(Gap year)", "R3", brk=True),
+                                        x("뭔가", "NOPE"), x("상위 직무", "R2")]))
+    c = app_with(fake)
+    r = c.post("/acq/import/parse", headers=anon(), json=body())
+    assert r.status_code == 200, r.text
+    rows = r.json()["experiences"]
+    assert [e["suggested_role_node_id"] for e in rows] == [ids["R3B"], None, None, None]
+    assert [e["is_career_break"] for e in rows] == [False, True, False, False]
+    codes = {code for code, _, _ in fake.roles}
+    assert {"R3", "R3B"} <= codes and "R2" not in codes  # only pickable (leaf) roles

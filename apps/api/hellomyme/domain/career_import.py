@@ -77,6 +77,12 @@ class ExtractedExperience(BaseModel):
     end_year: int | None = None
     end_month: int | None = Field(default=None, description="1-12 only if written, else null")
     is_current: bool = Field(description="true when written as 현재 / 재직 중 / Present")
+    is_career_break: bool = Field(
+        default=False, description="true for a gap year, 안식년, career break, 휴직 or job search: "
+                                   "not a job")
+    role_code: str | None = Field(
+        default=None, description="Code of the closest role in the role list (by what the person "
+                                  "did, not the exact words), or null when none fits or a break")
 
 
 class ExtractedEducation(BaseModel):
@@ -104,7 +110,9 @@ SYSTEM = (
     "extract the person's name, photo, headline, contact details, or anything about other "
     "people. Order experiences from most recent to oldest. Set source_kind to LINKEDIN for "
     "LinkedIn screenshots or a LinkedIn PDF and RESUME for a resume. If the files are neither, "
-    "set is_career_document to false and return empty lists."
+    "set is_career_document to false and return empty lists. For each experience, also pick "
+    "role_code from the role list given with the files: the closest role by what the person did. "
+    "It is a suggestion the person confirms; use null when nothing fits."
 )
 
 
@@ -118,7 +126,8 @@ class Usage(BaseModel):
 class Extractor(Protocol):
     model: str
 
-    def extract(self, files: list[tuple[str, str]]) -> tuple[Extraction | None, str, Usage]: ...
+    def extract(self, files: list[tuple[str, str]],
+                roles: list[tuple[str, str, str | None]] = ()) -> tuple[Extraction | None, str, Usage]: ...
 
 
 class ClaudeExtractor:
@@ -135,10 +144,14 @@ class ClaudeExtractor:
                              if (workspace := getattr(settings, "anthropic_workspace_id", None))
                              and workspace.strip() else None))
 
-    def extract(self, files: list[tuple[str, str]]) -> tuple[Extraction | None, str, Usage]:
+    def extract(self, files: list[tuple[str, str]],
+                roles: list[tuple[str, str, str | None]] = ()) -> tuple[Extraction | None, str, Usage]:
         import anthropic
 
         content: list[dict] = []
+        if roles:
+            content.append({"type": "text", "text": "Role list (code: role - group):\n" + "\n".join(
+                f"{code}: {label} - {group or ''}" for code, label, group in roles)})
         for i, (media_type, data) in enumerate(files, 1):
             content.append({"type": "text", "text": f"File {i}:"})
             content.append({"type": "document" if media_type == PDF else "image",
@@ -351,9 +364,10 @@ def _parse(engine: Engine, settings: Settings, account_id: str | None,
             {"a": account_id, "s": sid, "c": client, "i": internal, "n": len(files),
              "v": consent_text_version, "sv": stats_version, "m": extractor.model}).scalar_one()
         _purge(conn, settings.career_import_retention_days)
+        roles = role_list(conn)
 
     try:
-        extraction, outcome, usage = extractor.extract(files)
+        extraction, outcome, usage = extractor.extract(files, roles=roles)
     except Exception as exc:  # never leave the attempt open
         log.exception("career import: reader failed")
         extraction, outcome, usage = None, "FAILED", Usage(failure=f"reader failed: {type(exc).__name__}")
@@ -409,10 +423,21 @@ def _purge(conn: Connection, days: int) -> None:
                      {"d": days})
 
 
+def role_list(conn: Connection) -> list[tuple[str, str, str | None]]:
+    """The roles a read may suggest: the pickable (leaf) roles, as (code, name, group)."""
+    roles = load_taxonomy(conn, "ROLE")
+    parents = {n["parent"] for n in roles.nodes.values() if n["parent"]}
+    return sorted((n["code"], n["label"], roles.nodes[n["parent"]]["label"] if n["parent"] else None)
+                  for i, n in roles.nodes.items() if i not in parents)
+
+
 def _suggest(conn: Connection, attempt_id: str, extraction: Extraction,
              account_id: str | None) -> dict:
     person_id = account_id and member_person_id(conn, account_id)
     existing = _existing_jobs(conn, person_id) if person_id else []
+    roles = load_taxonomy(conn, "ROLE")
+    pickable = {code for code, _, _ in role_list(conn)}
+    by_code = {n["code"]: i for i, n in roles.nodes.items() if n["code"] in pickable}
     experiences, seen = [], set()
     for x in extraction.experiences:
         company, title = _text(x.company, 200), _text(x.title, 200)
@@ -427,11 +452,13 @@ def _suggest(conn: Connection, attempt_id: str, extraction: Extraction,
         seen.add(key)
         if len(experiences) >= MAX_ITEMS:
             break
-        role = _lookup(conn, "ROLE", title)
+        # A known title (alias) first, else the role the reader suggested; a break has none.
+        role = None if x.is_career_break else (_lookup(conn, "ROLE", title)
+                                                or by_code.get(x.role_code or ""))
         experiences.append({
             "company": company, "title": title, "employment_type": x.employment_type,
             "start_year": sy, "start_month": sm if sy else None, "end_year": ey, "end_month": em,
-            "is_current": x.is_current,
+            "is_current": x.is_current, "is_career_break": x.is_career_break,
             "suggested_role_node_id": role,
             "suggested_organization_id": _lookup(conn, "ORGANIZATION", company),
             "already_saved": _duplicate(existing, company, role, sy)})

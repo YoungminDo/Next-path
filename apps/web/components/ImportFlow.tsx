@@ -169,7 +169,7 @@ type Row = { x: ImportedJob; keep: boolean; role: string };
 export function importRows(read: ImportRead, roles: Node[], skip: ImportedJob[] = []): Row[] {
   const listed = new Set(roles.map((r) => r.node_id));
   return read.experiences.filter((x) => !skip.includes(x)).map((x) => ({
-    x, keep: Boolean(x.start_year) && !x.already_saved,
+    x, keep: Boolean(x.start_year) && !x.already_saved && !x.is_career_break,
     role: x.suggested_role_node_id && listed.has(x.suggested_role_node_id) ? x.suggested_role_node_id : "",
   }));
 }
@@ -184,16 +184,17 @@ export function ImportedJobs({ rows, roles, onChange }: {
       {rows.map((r, i) => (
         <li key={i} className={r.keep ? "" : "off"}>
           <label className="check">
-            <input type="checkbox" checked={r.keep} disabled={!r.x.start_year}
+            <input type="checkbox" checked={r.keep} disabled={!r.x.start_year || r.x.is_career_break}
                    onChange={(e) => set(i, { keep: e.target.checked })} />
             <span>
               <b>{r.x.company ?? "회사 이름 없음"}</b>{r.x.title ? ` · ${r.x.title}` : ""}
               {r.x.employment_type === "INTERN" && <em className="tag">인턴</em>}
               {r.x.already_saved && <em className="tag">이미 있어요</em>}
+              {r.x.is_career_break && <em className="tag">경력 공백 · 저장하지 않아요</em>}
               <br /><small>{period(r.x)}</small>
             </span>
           </label>
-          {r.keep && (
+          {r.keep && !r.x.is_career_break && (
             <NodeSelect nodes={roles} value={r.role} empty="직무 고르기 (선택)" ariaLabel="직무"
                         onChange={(v) => set(i, { role: v })} />
           )}
@@ -226,7 +227,7 @@ export function ImportReview({ read, roles, onDone }: {
   return (
     <section className="screen">
       <h2>읽은 경력이에요</h2>
-      <p className="sub">더할 경력만 남겨 주세요. 직무를 고르면 비교가 더 정확해져요.</p>
+      <p className="sub">더할 경력만 남겨 주세요. 직무는 읽은 내용으로 골라뒀어요. 다르면 바꿔 주세요.</p>
       {rows.length ? <ImportedJobs rows={rows} roles={roles} onChange={setRows} />
         : <p className="hint">경력을 찾지 못했어요. 다른 파일로 다시 올려 주세요.</p>}
       {err && <p className="error" role="alert">{err}</p>}

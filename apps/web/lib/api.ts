@@ -139,6 +139,8 @@ export type ImportedJob = {
   company: string | null; title: string | null; employment_type: EmploymentType | null;
   start_year: number | null; start_month: number | null; end_year: number | null; end_month: number | null;
   is_current: boolean; suggested_role_node_id: string | null; suggested_organization_id: string | null;
+  /** A gap year, 안식년 or career break: shown, never saved as a job. */
+  is_career_break?: boolean;
   already_saved: boolean;
 };
 export type ImportedEdu = {

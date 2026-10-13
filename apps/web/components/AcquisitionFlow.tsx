@@ -536,7 +536,8 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
   /** Fill the form from a read file; the person checks it on the same screen as typing by hand. */
   function applyRead(r: ImportRead) {
     markStarted();
-    const cur = r.experiences.find((x) => x.is_current && x.employment_type !== "INTERN" && x.start_year);
+    const cur = r.experiences.find((x) => x.is_current && !x.is_career_break && x.employment_type !== "INTERN"
+      && x.start_year);
     const e = pickEducation(r.education);
     const inst = e?.suggested_institution_id && institutions.some((i) => i.id === e.suggested_institution_id)
       ? e.suggested_institution_id : "";
@@ -740,7 +741,7 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
           {importId && others.length > 0 && (
             <>
               <h3 className="imported-title">파일에서 읽은 다른 경력</h3>
-              <p className="hint">남길 경력만 체크해 주세요. 로그인하면 내 경력으로 저장돼요.</p>
+              <p className="hint">남길 경력만 체크해 주세요. 직무는 읽은 내용으로 골라뒀어요. 다르면 바꿔 주세요. 로그인하면 내 경력으로 저장돼요.</p>
               <ImportedJobs rows={others} roles={roles} onChange={setOthers} />
             </>
           )}
