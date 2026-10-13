@@ -190,29 +190,35 @@ def get_extractor(settings: Settings) -> Extractor | None:
 
 # --- limits and status ------------------------------------------------------------------
 
+# A read the API refused before the model ran (no tokens: a key or service problem on our side)
+# costs nothing and is not the person's doing, so it does not use up their reads.
+COUNTED = "NOT (outcome = 'FAILED' AND input_tokens IS NULL)"
+
+
 def _used(conn: Connection, account_id: str | None, sid: str | None) -> int:
     if account_id:
         return conn.execute(text(
-            """SELECT count(*) FROM import_attempt
-               WHERE account_id = :a AND created_at > now() - interval '1 day'"""),
+            f"""SELECT count(*) FROM import_attempt
+               WHERE account_id = :a AND created_at > now() - interval '1 day' AND {COUNTED}"""),
             {"a": account_id}).scalar_one()
     return conn.execute(text(
-        """SELECT count(*) FROM import_attempt
-           WHERE session_hash = :s AND created_at > now() - interval '1 day'"""),
+        f"""SELECT count(*) FROM import_attempt
+           WHERE session_hash = :s AND created_at > now() - interval '1 day' AND {COUNTED}"""),
         {"s": sid}).scalar_one()
 
 
 def _client_today(conn: Connection, client: str) -> int:
     return conn.execute(text(
-        """SELECT count(*) FROM import_attempt
-           WHERE client_hash = :c AND created_at > now() - interval '1 day'"""),
+        f"""SELECT count(*) FROM import_attempt
+           WHERE client_hash = :c AND created_at > now() - interval '1 day' AND {COUNTED}"""),
         {"c": client}).scalar_one()
 
 
 def _anonymous_today(conn: Connection) -> int:
     return conn.execute(text(
-        """SELECT count(*) FROM import_attempt
-           WHERE account_id IS NULL AND created_at > now() - interval '1 day'""")).scalar_one()
+        f"""SELECT count(*) FROM import_attempt
+           WHERE account_id IS NULL AND created_at > now() - interval '1 day' AND {COUNTED}"""
+    )).scalar_one()
 
 
 def _limit(settings: Settings, account_id: str | None) -> int:

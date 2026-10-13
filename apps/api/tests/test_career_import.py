@@ -458,6 +458,22 @@ def test_why_a_read_failed_is_kept_for_the_team(engine, ids):  # noqa: F811
     assert reason == ("api 400 invalid_request_error: Your credit balance is too low to access the "
                       "Anthropic API. (request req_test)")
 
+    # Refused before the model ran (no tokens): the person's reads are not used up.
+    server2 = HTTPServer(("127.0.0.1", 0), Refuse)
+    threading.Thread(target=server2.serve_forever, daemon=True).start()
+    try:
+        reader.client = anthropic.Anthropic(api_key="x", max_retries=0, timeout=5,
+                                            base_url=f"http://127.0.0.1:{server2.server_port}")
+        limited, h = app_with(reader, career_import_session_limit=1), anon()
+        for _ in range(2):
+            assert limited.post("/acq/import/parse", headers=h, json=body()).status_code == 502
+        assert limited.get("/acq/import", headers=h).json()["remaining_today"] == 1
+    finally:
+        server2.shutdown()
+    counted, h2 = app_with(Fake(None, "FAILED"), career_import_session_limit=1), anon()
+    assert counted.post("/acq/import/parse", headers=h2, json=body()).status_code == 502
+    assert counted.post("/acq/import/parse", headers=h2, json=body()).status_code == 429
+
     broken = app_with(Broken())
     broken.post("/acq/import/parse", headers={**anon(), **login(broken, "import-why-2")}, json=body())
     with engine.begin() as conn:
