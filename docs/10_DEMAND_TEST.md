@@ -130,6 +130,14 @@
   `source_record`(`LINKEDIN_USER_UPLOAD` 또는 `CAREER_DOCUMENT`), 초안은 `anonymous_draft.payload_json.other_jobs`.
 - **이벤트:** `import_viewed` → `import_uploaded` → `import_parsed` → `import_confirmed`(member true/false).
 
+## 학교 목록 (migration 0032)
+- 4년제·전문대 418곳(같은 이름의 캠퍼스는 하나로, 고려대학교(세종)처럼 이름이 다른 캠퍼스는 따로)을 고를 수 있다.
+  - 출처: 공공데이터포털 「전국대학및전문대학정보표준데이터」(교육부·대학알리미, 2026-05-21 수집, Hello My Me `public/data/schools-info.json`).
+  - 다시 만들기: `python scripts/build_kr_institutions.py <hello-my-me>/public/data/schools-info.json` → `apps/api/hellomyme/reference/kr_institutions.csv`.
+- 줄임말은 정해진 규칙으로만 만든다(삼육대학교→삼육대, 서울여자대학교→서울여대, 서울교육대학교→서울교대, 고려대학교(세종)→고려대(세종)).
+  두 학교가 같은 줄임말이 되면 넣지 않는다.
+- 학교 목록에 있어도 그 학교 경력 데이터가 없으면, 결과는 학교 조건을 넓혀서 계산되고 숫자 아래 기준 표시("여러 학교 · …")로 그렇게 말한다.
+
 ## 숫자 아래 기준 표시 (신뢰도)
 - 미리보기와 결과의 큰 숫자 바로 아래에, 그 숫자가 세는 사람이 누구인지 적는다(실제로 쓴 조건 기준).
   - 예: "같은 학교 · 비슷한 전공 계열 · 비슷한 학번(±2년)", "여러 학교 · 여러 전공 · 같은 학번"
