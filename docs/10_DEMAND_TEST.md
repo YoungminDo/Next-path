@@ -95,6 +95,31 @@
   - Supabase SQL Editor에서 `interview_contact`(withdrawn_at IS NULL) → account → `person` / `canonical_education` / `desired_role`을 조인한다.
   - 번호를 내려받은 파일은 공유 드라이브에 두지 않고, 인터뷰가 끝나면 1년 안에 지운다.
 
+## 이력서·캡처로 시작 (migration 0030)
+- **원칙:** 입력이 먼저, 결과를 보려고 로그인한다. 파일 읽기도 로그인 전에 된다.
+  - 비회원: 랜딩 CTA 또는 `/upload` → 파일 올리기(국외 이전 동의) → 읽은 내용으로 입력칸이 채워짐 → 고치고 "나와 비슷한 사람 찾기"
+    → 미리보기 → 카카오 로그인 → 결과. 읽은 경력은 초안(draft)과 함께 다니다가 로그인할 때 내 기록으로 저장된다.
+  - 회원: 결과 화면의 "경력을 다 채우면 더 많이 보여요" → 파일 올리기 → 더할 경력만 체크 → 저장 → 결과를 다시 계산.
+    이미 있는 경력(같은 회사·같은 시작 연도)은 "이미 있어요"로 표시하고 다시 쓰지 않는다.
+  - 릴스·게시물 링크는 `https://nextpath.da-sh.io/upload?utm_source=instagram&utm_medium=reels` 처럼 utm을 붙인다(대시보드 채널에 잡힘).
+- **읽는 방법:** Claude(`HELLOMYME_CAREER_IMPORT_MODEL`, 기본 claude-opus-5-5)가 경력·학력만 정해진 형식으로 읽는다.
+  - 이름·연락처·사진·자기소개는 읽지 않는다. 회사명·직함·학교·전공은 쓰인 그대로 두고, 직무 목록과 맞는 것만 제안한다.
+  - 월이 적혀 있으면 MONTH 정밀도로, 없으면 YEAR로 저장한다(추정하지 않음). "인턴"은 employment_type INTERN(첫 직장에서 제외).
+  - 목록에 없는 회사·직함은 원문 그대로 저장하고 `mapping_queue`에 올린다.
+- **파일:** PDF(2.5MB까지)와 이미지(최대 4개). 브라우저가 이미지를 JPEG로 다시 저장하고(위치 정보 등 메타데이터 제거),
+  아주 긴 스크롤 캡처는 읽을 수 있는 크기로 나눈다. 파일은 서버에 저장하지 않는다.
+- **동의(개인정보보호법 §28의8 국외 이전):** 파일을 보내기 전에 받는다. 받는 자(Anthropic, PBC·미국), 일시·방법, 항목, 목적,
+  보유 기간, 거부할 권리(직접 입력으로 같은 결과)를 적는다. 문구 버전 `career_import_v1`(웹 `IMPORT_CONSENT_VERSION`과 서버 설정이 같아야 함).
+  동의 기록은 `import_attempt`(문구 버전·시각·세션/계정)에 남는다.
+- **비용 상한:** 읽기 1회 약 4천~2만 입력 토큰. `import_attempt`에 토큰을 남기고 대시보드에 추정 비용을 보여준다.
+  - 계정당 하루 10회, 비회원 세션당 하루 3회, **비회원 전체 하루 300회**(`HELLOMYME_CAREER_IMPORT_ANONYMOUS_DAILY_LIMIT`).
+    상한에 닿으면 "직접 입력"으로 안내한다. 실패한 읽기도 횟수에 들어간다.
+  - 읽는 동안(10~30초) DB 연결을 잡지 않는다(동시 업로드가 몰려도 다른 화면이 멈추지 않게).
+- **끄기:** Render에서 `ANTHROPIC_API_KEY`를 지우면 업로드 화면이 "직접 입력"으로 바뀐다.
+- **저장 위치:** `import_attempt`(읽기 1회 = 1행, 결과·토큰·출처 종류), 확인된 경력은 `work_event` +
+  `source_record`(`LINKEDIN_USER_UPLOAD` 또는 `CAREER_DOCUMENT`), 초안은 `anonymous_draft.payload_json.other_jobs`.
+- **이벤트:** `import_viewed` → `import_uploaded` → `import_parsed` → `import_confirmed`(member true/false).
+
 ## 숫자 아래 기준 표시 (신뢰도)
 - 미리보기와 결과의 큰 숫자 바로 아래에, 그 숫자가 세는 사람이 누구인지 적는다(실제로 쓴 조건 기준).
   - 예: "같은 학교 · 비슷한 전공 계열 · 비슷한 학번(±2년)", "여러 학교 · 여러 전공 · 같은 학번"

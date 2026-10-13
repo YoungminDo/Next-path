@@ -132,6 +132,7 @@ export default function Landing({ options }: { options: Options }) {
         <div className="hero-ctas">
           <a className="cta" href="#hero-form">학교 · 전공 고르러 가기</a>
           <a className="cta ghost" href="/start?type=pro">일하고 있어요</a>
+          <a className="cta ghost" href="/upload">이력서·캡처로 시작하기</a>
         </div>
       </section>
 

@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DATA_LAYERS = ("PRE_SEED", "SEED", "VERIFIED")
@@ -8,7 +8,8 @@ DEV_PHONE_HASH_SECRET = "nextpath-phone-hash-dev"
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="HELLOMYME_", env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_prefix="HELLOMYME_", env_file=".env", extra="ignore",
+                                      populate_by_name=True)
 
     env: str = Field(default="development", pattern="^(development|test|staging|production)$")
     database_url: str = "postgresql+psycopg://hellomyme:hellomyme@localhost:5432/hellomyme"
@@ -33,6 +34,20 @@ class Settings(BaseSettings):
     # Taxonomy/policy rows change only through migrations and imports, so the query engine keeps
     # them in process this long instead of re-reading them on every request (0 disables).
     reference_cache_seconds: int = 60
+
+    # Resume / LinkedIn-capture import: a person's own files are read by Claude into career rows
+    # they check before anything is kept (before login it prefills the input form). Off without a
+    # key; the Anthropic SDK's own variable name is accepted as is. Each read costs money, so
+    # reads are limited per account, per anonymous session and, before login, for everyone
+    # together per 24 h (the cost ceiling).
+    anthropic_api_key: SecretStr | None = Field(
+        default=None, validation_alias=AliasChoices("ANTHROPIC_API_KEY", "HELLOMYME_ANTHROPIC_API_KEY",
+                                                    "anthropic_api_key"))
+    career_import_model: str = "claude-opus-5-5"
+    career_import_daily_limit: int = 10  # per account
+    career_import_session_limit: int = 3  # per anonymous session
+    career_import_anonymous_daily_limit: int = 300  # all anonymous reads together
+    career_import_consent_version: str = "career_import_v1"
 
     # Team dashboard (/admin): account ids allowed to see the aggregate numbers, e.g.
     # HELLOMYME_ADMIN_ACCOUNT_IDS='["3f0c…-…"]'. A member who is not listed sees their own id.

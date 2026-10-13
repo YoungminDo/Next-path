@@ -27,6 +27,9 @@ FUNNEL = (
     ("path_result", "경로 결과 확인", "result_step_viewed", ("me",)),
     ("unlock", "깊은 분석 열기", "unlock_purchased", None),
 )
+# List price of the import model per million tokens (input, output), claude-opus-5-5; the
+# dashboard shows it as an estimate only (https://www.anthropic.com/pricing).
+IMPORT_PRICE_PER_MTOK = (4.0, 20.0)
 RESULT_SCREENS = ("s_result", "s_intent", "p_next", "p_first", "p_similar", "me")
 SCREEN_LABELS = {"s_result": "첫 결과 (학생)", "s_intent": "궁금한 길 고르기", "p_next": "첫 결과 (직장인)",
                  "p_first": "첫 직장 입력", "p_similar": "비슷한 경로", "me": "경로 결과"}
@@ -170,6 +173,29 @@ def stats(conn: Connection, rng: Range, with_team: bool) -> dict:
                count(DISTINCT sid) FILTER (WHERE event_name = 'interview_submitted') AS submitted
         FROM ev"""), p).one()._mapping
 
+    # Resume / capture reads: how they ended, what they cost, and how many reached a login.
+    imports = dict(conn.execute(text("""
+        WITH a AS (
+            SELECT * FROM import_attempt
+            WHERE (CAST(:t_from AS timestamptz) IS NULL OR created_at >= :t_from)
+              AND (:with_team OR NOT internal)),
+        d AS (
+            SELECT d.claimed_at FROM anonymous_draft d
+            WHERE d.payload_json->>'import_attempt_id' IN (SELECT import_attempt_id::text FROM a))
+        SELECT count(*) AS reads,
+               count(*) FILTER (WHERE account_id IS NULL) AS before_login,
+               count(*) FILTER (WHERE outcome = 'PARSED') AS parsed,
+               count(*) FILTER (WHERE outcome = 'NOT_CAREER') AS not_career,
+               count(*) FILTER (WHERE outcome NOT IN ('PARSED', 'NOT_CAREER')) AS failed,
+               coalesce(sum(input_tokens), 0) AS input_tokens,
+               coalesce(sum(output_tokens), 0) AS output_tokens,
+               (SELECT count(*) FROM d) AS drafts,
+               (SELECT count(*) FROM d WHERE claimed_at IS NOT NULL) AS signed_up
+        FROM a"""), p).one()._mapping)
+    price_in, price_out = IMPORT_PRICE_PER_MTOK
+    imports["est_cost_usd"] = round(
+        (imports["input_tokens"] * price_in + imports["output_tokens"] * price_out) / 1e6, 2)
+
     return {
         "range": rng, "with_team": with_team,
         "since": t_from.isoformat() if t_from else None,
@@ -177,6 +203,7 @@ def stats(conn: Connection, rng: Range, with_team: bool) -> dict:
         "inputs": dict(inputs), "schools": schools, "majors": majors, "combos": combos,
         "desired_status": desired_status, "desired_roles": desired_roles, "backlog": backlog,
         "interview": {**dict(interview), **dict(shown)},
+        "imports": imports,
     }
 
 

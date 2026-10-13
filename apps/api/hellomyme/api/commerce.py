@@ -176,6 +176,8 @@ EventName = Literal[
     # Inputs as data, interview opt-in (migration 0026)
     "desired_role_selected", "interview_step_viewed", "interview_skipped", "interview_code_sent",
     "interview_submitted", "interview_withdrawn",
+    # Resume / capture import (migration 0030)
+    "import_viewed", "import_uploaded", "import_parsed", "import_confirmed",
 ]
 
 

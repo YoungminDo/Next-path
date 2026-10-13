@@ -48,6 +48,9 @@ async function proxy(req: NextRequest, ctx: { params: Promise<{ path: string[] }
   return res;
 }
 
+// Reading an uploaded resume takes a while (the model reads every page).
+export const maxDuration = 60;
+
 export const GET = proxy;
 export const POST = proxy;
 export const DELETE = proxy;

@@ -128,6 +128,28 @@ export type InterviewStatus = {
   status: "NONE" | "APPLIED" | "WITHDRAWN"; phone_masked: string | null; verified: boolean;
   verification_required: boolean; consent_text_version: string; reward_text: string | null;
 };
+export type EmploymentType = "FULL_TIME" | "PART_TIME" | "CONTRACT" | "INTERN";
+export type ImportStatus = { enabled: boolean; consent_text_version: string; max_files: number;
+  remaining_today: number };
+/** One experience as the reader saw it, with what the lists matched (the person decides). */
+export type ImportedJob = {
+  company: string | null; title: string | null; employment_type: EmploymentType | null;
+  start_year: number | null; start_month: number | null; end_year: number | null; end_month: number | null;
+  is_current: boolean; suggested_role_node_id: string | null; suggested_organization_id: string | null;
+  already_saved: boolean;
+};
+export type ImportedEdu = {
+  school: string | null; major: string | null; degree: string | null; start_year: number | null;
+  end_year: number | null; suggested_institution_id: string | null; suggested_major_node_id: string | null;
+};
+export type ImportRead = { import_attempt_id: string; source_kind: "LINKEDIN" | "RESUME" | "OTHER";
+  experiences: ImportedJob[]; education: ImportedEdu[] };
+/** A job from the file as the person confirmed it (the role pick is optional). */
+export type PastJob = {
+  organization_id: string | null; organization_name: string | null; role_node_id: string | null;
+  role_raw: string | null; start_year: number; start_month: number | null; end_year: number | null;
+  end_month: number | null; employment_type: EmploymentType | null; is_current: boolean;
+};
 export type Intent = { surface: "STUDENT_FIRST_ROLE" | "PROFESSIONAL_NEXT_ROLE";
   target_kind: "ROLE" | "UNDECIDED"; target_node_id: string | null };
 
@@ -172,6 +194,19 @@ export const acq = {
       body: JSON.stringify({ phone, code, consent: true, consent_text_version: consentTextVersion }),
     }),
   interviewWithdraw: () => call<InterviewStatus>("/acq/me/interview", { method: "DELETE" }),
+  importStatus: () => call<ImportStatus>("/acq/import"),
+  /** Reads the person's own files (never stored). Before login the rows only prefill the form. */
+  importParse: (files: { media_type: string; data: string }[], consentTextVersion: string, internal: boolean) =>
+    call<ImportRead>("/acq/import/parse", {
+      method: "POST",
+      body: JSON.stringify({ files, consent: true, consent_text_version: consentTextVersion, internal }),
+    }),
+  importConfirm: (importAttemptId: string, jobs: PastJob[]) =>
+    call<{ added: number; skipped: number; replayed: boolean }>("/acq/me/import/confirm", {
+      method: "POST",
+      headers: { "Idempotency-Key": crypto.randomUUID() },
+      body: JSON.stringify({ import_attempt_id: importAttemptId, jobs }),
+    }),
 };
 
 /** The message of an API error body ({"detail": {"message": ...}}), if any. */

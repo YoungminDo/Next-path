@@ -114,6 +114,10 @@ export default function HeroForm(props: { institutions: Institution[]; majors: N
       )}
       <p className="heroform-note">카카오로 3초 · 무료</p>
       <a className="heroform-alt" href={`/start?${pro.toString()}`}>지금 일하고 있어요 →</a>
+      <a className="heroform-upload" href="/upload">
+        <b>이력서·링*드인 캡처로 시작하기</b>
+        <span>기존 만들어둔 이력서, 링*드인 캡처 등을 올리시면 됩니다.</span>
+      </a>
     </form>
   );
 }

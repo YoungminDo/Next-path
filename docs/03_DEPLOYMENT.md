@@ -91,6 +91,13 @@ HELLOMYME_DATABASE_URL='<위 URL>' uv run hellomyme-import-preseed /path/to/HELL
 - `/admin` 은 `HELLOMYME_ADMIN_ACCOUNT_IDS`(API, JSON 목록)에 있는 계정만 볼 수 있습니다. 로그인한 사람이 목록에 없으면
   자기 계정 번호가 보이니, 그 번호를 이 환경변수에 추가합니다(docs/10 §팀 대시보드).
 
+## 이력서·캡처 읽기
+- API(Render): `ANTHROPIC_API_KEY` 하나면 켜집니다(없으면 업로드 화면이 직접 입력으로 안내). 키는 Render 환경변수에만 넣습니다.
+- 선택: `HELLOMYME_CAREER_IMPORT_ANONYMOUS_DAILY_LIMIT`(비회원 전체 하루 읽기 상한, 기본 300),
+  `HELLOMYME_CAREER_IMPORT_SESSION_LIMIT`(기본 3), `HELLOMYME_CAREER_IMPORT_DAILY_LIMIT`(계정당, 기본 10),
+  `HELLOMYME_CAREER_IMPORT_MODEL`(기본 claude-opus-5-5). 자세한 내용은 docs/10 §이력서·캡처로 시작.
+- 웹(Vercel): 프록시 함수 `maxDuration = 60`(읽기에 10~30초 걸림).
+
 ## 정식 출시로 전환할 때
 
 - API: `HELLOMYME_ENV=production`, `HELLOMYME_CAREER_MAP_DATA_LAYERS=["SEED","VERIFIED"]`

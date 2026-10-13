@@ -175,6 +175,18 @@ export default function AdminStats() {
               <Mini label="철회" value={data.interview.withdrawn} />
             </div>
           </Card>
+
+          <Card title="이력서·캡처로 시작" note={`파일은 저장하지 않아요. 비용은 정가 기준 추정치예요 (약 $${data.imports.est_cost_usd.toFixed(2)}).`}>
+            <div className="mini-kpis">
+              <Mini label="읽기 요청" value={data.imports.reads} />
+              <Mini label="로그인 전" value={data.imports.before_login} />
+              <Mini label="읽기 성공" value={data.imports.parsed} />
+              <Mini label="경력 문서 아님" value={data.imports.not_career} />
+              <Mini label="실패" value={data.imports.failed} />
+              <Mini label="미리보기까지" value={data.imports.drafts} />
+              <Mini label="로그인까지" value={data.imports.signed_up} />
+            </div>
+          </Card>
         </div>
       )}
     </main>

@@ -77,6 +77,11 @@ class AcqEducation(BaseModel):
                 "major_node_ids": (self.major_node_id,) if self.major_node_id else ()}
 
 
+# Only as written (e.g. 인턴 -> INTERN); unknown stays None. An internship never counts as the
+# first job (first_employment_rule).
+EmploymentType = Literal["FULL_TIME", "PART_TIME", "CONTRACT", "INTERN"]
+
+
 class AcqJob(BaseModel):
     organization_id: str | None = None
     organization_name: str | None = Field(default=None, max_length=200)
@@ -84,6 +89,48 @@ class AcqJob(BaseModel):
     role_raw: str | None = Field(default=None, max_length=200)
     start_year: int = Field(ge=1950, le=2100)
     end_year: int | None = Field(default=None, ge=1950, le=2100)
+    # Months and the employment type come from a resume when it shows them (MONTH precision).
+    start_month: int | None = Field(default=None, ge=1, le=12)
+    end_month: int | None = Field(default=None, ge=1, le=12)
+    employment_type: EmploymentType | None = None
+
+    @model_validator(mode="after")
+    def _months(self):
+        if self.end_year is None:
+            self.end_month = None
+        return self
+
+
+class AcqPastJob(BaseModel):
+    """Another job read from the person's resume or capture (besides the current and first job).
+    The role pick is optional: the title stays as written and waits for standardisation."""
+    organization_id: str | None = None
+    organization_name: str | None = Field(default=None, max_length=200)
+    role_node_id: str | None = None
+    role_raw: str | None = Field(default=None, max_length=200)
+    start_year: int = Field(ge=1950, le=2100)
+    start_month: int | None = Field(default=None, ge=1, le=12)
+    end_year: int | None = Field(default=None, ge=1950, le=2100)
+    end_month: int | None = Field(default=None, ge=1, le=12)
+    employment_type: EmploymentType | None = None
+    is_current: bool = False
+
+    @model_validator(mode="after")
+    def _check(self):
+        self.organization_name = (self.organization_name or "").strip() or None
+        self.role_raw = (self.role_raw or "").strip() or None
+        for ref in ("organization_id", "role_node_id"):
+            value = (getattr(self, ref) or "").strip() or None
+            if value is not None and not UUID_RE.match(value):
+                raise ValueError(f"{ref} is not an id")
+            setattr(self, ref, value)
+        if not (self.role_node_id or self.role_raw):
+            raise ValueError("role_node_id or role_raw is required")
+        if self.is_current or self.end_year is None:
+            self.end_year = self.end_month = None
+        elif (self.end_year, self.end_month or 12) < (self.start_year, self.start_month or 1):
+            raise ValueError("end before start")
+        return self
 
 
 class AcqDesiredRole(BaseModel):
@@ -132,6 +179,10 @@ class AcquisitionPayload(BaseModel):
     intents: list[AcqIntent] = Field(default_factory=list, max_length=10)
     desired_roles: list[AcqDesiredRole] = Field(default_factory=list, max_length=3)
     desired_role_status: DesiredRoleStatus | None = None
+    # From a resume or capture the person uploaded (career_import): the other jobs it showed, and
+    # which read they came from (the source type of the records written at login).
+    other_jobs: list[AcqPastJob] = Field(default_factory=list, max_length=12)
+    import_attempt_id: str | None = Field(default=None, pattern=UUID_RE.pattern)
 
     @model_validator(mode="after")
     def _desired(self):
@@ -458,6 +509,7 @@ def resolve_names(conn: Connection, p: AcquisitionPayload) -> AcquisitionPayload
     from hellomyme.ingest.pipeline import _lookup  # shared deterministic matcher
 
     p = _resolve_desired(conn, p, _lookup)
+    p = _resolve_other_jobs(conn, p, _lookup)
     e = p.education
     if e is None:
         return p
@@ -495,6 +547,40 @@ def _resolve_desired(conn: Connection, p: AcquisitionPayload, lookup) -> Acquisi
     return p.model_copy(update={"desired_roles": out})
 
 
+def _resolve_other_jobs(conn: Connection, p: AcquisitionPayload, lookup) -> AcquisitionPayload:
+    """Jobs read from a resume: listed ids are checked; a title the role list knows exactly gets
+    its id (the title stays as written); the rest keep only the title."""
+    if not p.other_jobs:
+        return p
+    roles = load_taxonomy(conn, "ROLE")
+    out = []
+    for j in p.other_jobs:
+        if j.role_node_id and j.role_node_id not in roles.nodes:
+            raise QueryInvalid("unknown role")
+        if j.organization_id and not conn.execute(text(
+                "SELECT 1 FROM organization WHERE organization_id = CAST(:o AS uuid)"),
+                {"o": j.organization_id}).first():
+            raise QueryInvalid("unknown organization")
+        out.append(j if j.role_node_id else
+                   j.model_copy(update={"role_node_id": lookup(conn, "ROLE", j.role_raw)}))
+    return p.model_copy(update={"other_jobs": out})
+
+
+IMPORT_SOURCE_TYPES = {"LINKEDIN": "LINKEDIN_USER_UPLOAD", "RESUME": "CAREER_DOCUMENT",
+                       "OTHER": "CAREER_DOCUMENT"}
+
+
+def import_source_type(conn: Connection, attempt_id: str | None) -> str | None:
+    """The source type for rows that came from a read file (None: typed by hand)."""
+    if not attempt_id:
+        return None
+    kind = conn.execute(text(
+        """SELECT source_kind FROM import_attempt
+           WHERE import_attempt_id = CAST(:i AS uuid) AND outcome = 'PARSED'"""),
+        {"i": attempt_id}).scalar()
+    return kind and IMPORT_SOURCE_TYPES[kind]
+
+
 def unlisted(p: AcquisitionPayload) -> list[str]:
     """Which answers were typed names the list does not know (said next to the result)."""
     e = p.education
@@ -506,7 +592,13 @@ def unlisted(p: AcquisitionPayload) -> list[str]:
 
 def insight_key(p: AcquisitionPayload, target_node: str | None) -> str:
     """Entitlement key: the cohort inputs plus the target, independent of wording/order."""
-    basis = p.model_dump(mode="json", exclude={"intents", "desired_roles", "desired_role_status"})
+    basis = p.model_dump(mode="json", exclude={"intents", "desired_roles", "desired_role_status",
+                                               "other_jobs", "import_attempt_id"})
+    # Months and employment type never change the cohort; leaving them out keeps every key from
+    # before they existed unchanged.
+    for job in ("current_job", "first_job"):
+        for extra in ("start_month", "end_month", "employment_type"):
+            (basis.get(job) or {}).pop(extra, None)
     # Keep keys of payloads from before typed school names existed unchanged (an unlock bought
     # then must stay unlocked and never be charged again).
     if basis.get("education") and basis["education"].get("institution_raw") is None:
@@ -587,10 +679,10 @@ def write_acquisition_profile(conn: Connection, account_id: str, p: AcquisitionP
     source_id = conn.execute(text(
         """INSERT INTO source_record (source_type, data_layer, source_system, source_key,
                raw_payload, legal_basis)
-           VALUES ('MANUAL_INPUT', 'VERIFIED', 'HELLOMYME_APP', :k, CAST(:raw AS jsonb),
-                   'MEMBER_CONSENT')
+           VALUES (:t, 'VERIFIED', 'HELLOMYME_APP', :k, CAST(:raw AS jsonb), 'MEMBER_CONSENT')
            ON CONFLICT (source_system, source_key) DO NOTHING RETURNING source_id::text"""),
-        {"k": source_key, "raw": json.dumps(raw_payload, ensure_ascii=False, default=str)}
+        {"k": source_key, "raw": json.dumps(raw_payload, ensure_ascii=False, default=str),
+         "t": import_source_type(conn, p.import_attempt_id) or "MANUAL_INPUT"}
     ).scalar()
     if source_id is None:
         raise RuntimeError(f"source {source_key} already written")
@@ -644,11 +736,12 @@ def write_acquisition_profile(conn: Connection, account_id: str, p: AcquisitionP
             {"e": out["education_id"], "s": source_id, "f": fields})
         _log(conn, "EDUCATION", out["education_id"], account_id, source_id, fields)
 
-    jobs: list[tuple[AcqJob, bool]] = []
+    jobs: list[tuple[AcqJob | AcqPastJob, bool]] = []
     if p.first_job and not p.first_job_is_current:
         jobs.append((p.first_job, False))
     if p.current_job:
         jobs.append((p.current_job, True))
+    jobs += [(j, j.is_current) for j in p.other_jobs]
     for j, current in jobs:
         weid = _write_job(conn, person_id, account_id, source_id, j, current, roles)
         out["work_event_ids"].append(weid)
@@ -688,38 +781,54 @@ def record_desired_roles(conn: Connection, person_id: str, p: AcquisitionPayload
     return ids
 
 
-def _write_job(conn: Connection, person_id: str, account_id: str, source_id: str, j: AcqJob,
-               current: bool, roles: Taxonomy) -> str:
-    if j.role_node_id not in roles.nodes:
+def _write_job(conn: Connection, person_id: str, account_id: str, source_id: str,
+               j: AcqJob | AcqPastJob, current: bool, roles: Taxonomy) -> str:
+    if j.role_node_id and j.role_node_id not in roles.nodes:
         raise QueryInvalid(f"unknown role node {j.role_node_id}")
     org = None
     if j.organization_id:
         org = conn.execute(text(
             "SELECT organization_id::text AS id, name FROM organization "
             "WHERE organization_id::text = :o"), {"o": j.organization_id}).first()
+    end = j.end_year if (j.end_year and not current) else None
     fields = ["event_type", "role", "start_date", "is_current"]
     if org or j.organization_name:
         fields.append("organization")
-    if j.end_year and not current:
+    if end:
         fields.append("end_date")
+    mapped = [bool(j.role_node_id), bool(org or not j.organization_name)]
     weid = conn.execute(text(
         """INSERT INTO work_event (person_id, event_type, organization_raw, organization_id,
-               role_raw, role_taxonomy_node_id, start_date, start_date_precision, end_date,
-               end_date_precision, is_current, data_layer, verification_level,
+               role_raw, role_taxonomy_node_id, employment_type, start_date, start_date_precision,
+               end_date, end_date_precision, is_current, data_layer, verification_level,
                normalization_status, last_verified_at)
-           VALUES (:p, 'EMPLOYMENT', :or, CAST(:oid AS uuid), :rr, CAST(:r AS uuid), :sd,
-                   'YEAR', :ed, :ep, :cur, 'VERIFIED', 'SELF_REPORTED', :ns, now())
+           VALUES (:p, 'EMPLOYMENT', :or, CAST(:oid AS uuid), :rr, CAST(:r AS uuid), :et, :sd,
+                   :sp, :ed, :ep, :cur, 'VERIFIED', 'SELF_REPORTED', :ns, now())
            RETURNING work_event_id::text"""),
         {"p": person_id, "or": j.organization_name or (org and org.name),
-         "oid": org and org.id, "rr": j.role_raw or roles.nodes[j.role_node_id]["label"],
-         "r": j.role_node_id, "sd": date(j.start_year, 1, 1),
-         "ed": date(j.end_year, 1, 1) if (j.end_year and not current) else None,
-         "ep": "YEAR" if (j.end_year and not current) else None, "cur": current,
-         "ns": "MAPPED" if (org or not j.organization_name) else "PARTIAL"}).scalar_one()
+         "oid": org and org.id,
+         "rr": j.role_raw or (roles.nodes[j.role_node_id]["label"] if j.role_node_id else None),
+         "r": j.role_node_id, "et": j.employment_type,
+         # Unknown stays unknown: a year without a month is 1 Jan with YEAR precision.
+         "sd": date(j.start_year, j.start_month or 1, 1),
+         "sp": "MONTH" if j.start_month else "YEAR",
+         "ed": date(end, (j.end_month or 1) if end else 1, 1) if end else None,
+         "ep": None if not end else ("MONTH" if j.end_month else "YEAR"), "cur": current,
+         "ns": "MAPPED" if all(mapped) else ("PARTIAL" if any(mapped) else "UNMAPPED")}).scalar_one()
     conn.execute(text(
         """INSERT INTO work_event_source (work_event_id, source_id, supported_fields,
                is_primary) VALUES (:w, :s, :f, true)"""),
         {"w": weid, "s": source_id, "f": fields})
+    # Names the lists do not know (a typed company, a title read from a resume) wait for
+    # standardisation; the raw text stays on the record as written.
+    for kind, raw, known in (("ORGANIZATION", j.organization_name, org),
+                             ("ROLE", j.role_raw, j.role_node_id)):
+        if raw and not known:
+            conn.execute(text(
+                """INSERT INTO mapping_queue (entity_kind, raw_value) VALUES (:k, :r)
+                   ON CONFLICT (entity_kind, normalized_key)
+                   DO UPDATE SET occurrences = mapping_queue.occurrences + 1"""),
+                {"k": kind, "r": raw})
     _log(conn, "WORK_EVENT", weid, account_id, source_id, fields)
     return weid
 

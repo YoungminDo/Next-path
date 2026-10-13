@@ -9,7 +9,7 @@ export type FunnelEvent =
   | "login_clicked" | "signup_completed" | "result_step_viewed" | "result_left"
   | "intent_selected" | "unlock_purchased" | "school_requested" | "desired_role_selected"
   | "interview_step_viewed" | "interview_skipped" | "interview_code_sent" | "interview_submitted"
-  | "interview_withdrawn";
+  | "interview_withdrawn" | "import_viewed" | "import_uploaded" | "import_parsed" | "import_confirmed";
 
 const TOUCH = "hellomyme.touch";
 

@@ -14,6 +14,7 @@ dependencies = [
     "httpx>=0.27",
     "openpyxl>=3.1",
     "jsonschema>=4.22",
+    "anthropic>=1.13.0",
 ]
 
 [dependency-groups]

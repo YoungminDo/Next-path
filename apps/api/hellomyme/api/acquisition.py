@@ -1,13 +1,23 @@
 """Acquisition API: student/professional flows before login, the awaited result after login."""
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Response
 from pydantic import BaseModel, Field
 
-from hellomyme.api.deps import Account, AnonSession, AppSettings, AsOf, Conn, IdempotencyKey
+from hellomyme.api.deps import (
+    Account,
+    AnonSession,
+    AppSettings,
+    AsOf,
+    Conn,
+    IdempotencyKey,
+    OptionalAccount,
+    optional_account,
+)
+from hellomyme.db import get_engine
 from hellomyme.domain import acquisition as acq
-from hellomyme.domain import drafts, interview, ledger
+from hellomyme.domain import career_import, drafts, interview, ledger
 from hellomyme.domain.career_input import member_person_id
 from hellomyme.domain.career_query import QueryInvalid
 from hellomyme.domain.policies import PolicyMissing, active_unlock_policy
@@ -72,7 +82,12 @@ class DraftRequest(BaseModel):
 
 @router.post("/draft")
 def save_draft(body: DraftRequest, conn: Conn, settings: AppSettings, anon: AnonSession):
-    payload = _run(lambda: acq.resolve_names(conn, body.payload.stamp_intents(datetime.now(UTC))))
+    payload = body.payload
+    # A draft may only point at a read this browser made (its rows become that source's records).
+    if payload.import_attempt_id and not career_import.attempt_belongs(
+            conn, payload.import_attempt_id, None, anon):
+        payload = payload.model_copy(update={"import_attempt_id": None})
+    payload = _run(lambda: acq.resolve_names(conn, payload.stamp_intents(datetime.now(UTC))))
     try:
         saved = drafts.save_draft(conn, anon, payload, settings.anonymous_draft_ttl_hours,
                                   body.draft_id, internal=body.internal)
@@ -189,6 +204,69 @@ def add_job(body: JobRequest, conn: Conn, account_id: Account, key: IdempotencyK
                                 written["work_event_id"])
         reward = r and {"ledger_id": r.ledger_id, "amount": r.amount}
     return {**written, "reward": reward}
+
+
+# --- resume / capture import (before or after login; docs/10 §이력서·캡처) -----------------
+
+def import_extractor(settings: AppSettings) -> career_import.Extractor | None:
+    return career_import.get_extractor(settings)
+
+
+Extractor = Annotated[career_import.Extractor | None, Depends(import_extractor)]
+MaybeAnon = Annotated[str | None, Header(alias="X-Anonymous-Session")]
+
+
+def _import(fn):
+    try:
+        return _run(fn)
+    except career_import.ImportFailed as exc:
+        raise HTTPException(exc.status, {"message": exc.message}) from exc
+
+
+@router.get("/import")
+def import_status(conn: Conn, settings: AppSettings, account_id: OptionalAccount,
+                  extractor: Extractor, anon: MaybeAnon = None):
+    return career_import.status(conn, settings, account_id, anon, extractor)
+
+
+class ImportFile(BaseModel):
+    media_type: str = Field(max_length=40)
+    data: str = Field(max_length=4_400_000)  # base64
+
+
+class ParseRequest(BaseModel):
+    files: list[ImportFile] = Field(min_length=1, max_length=career_import.MAX_FILES)
+    consent: Literal[True]  # the overseas-transfer notice, ticked by the person
+    consent_text_version: str = Field(min_length=1, max_length=64)
+    internal: bool = False
+
+
+@router.post("/import/parse")
+def import_parse(body: ParseRequest, settings: AppSettings, extractor: Extractor,
+                 authorization: Annotated[str | None, Header()] = None, anon: MaybeAnon = None):
+    """Read the person's own files into rows they check. Before login nothing is kept but the
+    attempt: the rows prefill the input form and travel with the draft. No request-wide
+    connection (the read takes 10-30 s): only short transactions inside."""
+    engine = get_engine()
+    with engine.begin() as conn:
+        account_id = optional_account(conn, authorization)
+    return _import(lambda: career_import.parse(
+        engine, settings, account_id, anon, [f.model_dump() for f in body.files],
+        body.consent_text_version, extractor, internal=body.internal))
+
+
+class ImportConfirmRequest(BaseModel):
+    import_attempt_id: str = Field(pattern=acq.UUID_RE.pattern)
+    jobs: list[acq.AcqPastJob] = Field(min_length=1, max_length=career_import.MAX_ITEMS)
+
+
+@router.post("/me/import/confirm")
+def import_confirm(body: ImportConfirmRequest, conn: Conn, account_id: Account,
+                   key: IdempotencyKey, as_of: AsOf):
+    """A member adds the jobs they ticked (already-saved ones are skipped)."""
+    person_id, _ = _member(conn, account_id, as_of)
+    return _import(lambda: career_import.confirm(conn, account_id, person_id,
+                                                 body.import_attempt_id, body.jobs, key))
 
 
 # --- user-interview opt-in (separate, optional consent; docs/10 §interview) ----------------

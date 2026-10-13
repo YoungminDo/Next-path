@@ -12,15 +12,21 @@ import {
   type Cell,
   type CohortFilters,
   type DesiredStatus,
+  type EmploymentType,
+  type ImportedEdu,
+  type ImportRead,
   type Institution,
   type InterviewStatus,
   type MyResult,
   type Node,
+  type PastJob,
   type QueryResult,
   type StepResult,
   type TeaserResult,
   type Unlisted,
 } from "@/lib/api";
+import { ImportedJobs, ImportEntry, importRows, ImportReview, ImportUpload, toPastJob } from "@/components/ImportFlow";
+import NodeSelect from "@/components/NodeSelect";
 import SearchSelect, { type Picked } from "@/components/SearchSelect";
 import { inAppBrowser, isInternal, track } from "@/lib/track";
 
@@ -28,8 +34,8 @@ import { inAppBrowser, isInternal, track } from "@/lib/track";
    every distribution, intent and path. The server enforces the same gate: before login it only
    answers the teaser. Tone: "people who stood where I stand", never "seniors". */
 type Screen =
-  | "start" | "s_edu" | "p_now" | "finding" | "gate" | "interview"
-  | "s_result" | "s_intent" | "p_next" | "p_first" | "p_similar" | "me";
+  | "start" | "upload" | "s_edu" | "p_now" | "finding" | "gate" | "interview"
+  | "s_result" | "s_intent" | "p_next" | "p_first" | "p_similar" | "me" | "m_upload" | "m_review";
 type UserType = "STUDENT" | "PROFESSIONAL";
 
 const DEV_LOGIN = process.env.NEXT_PUBLIC_ENABLE_DEV_LOGIN === "true";
@@ -57,6 +63,14 @@ type Edu = { institution_id: string; institution_raw: string; major_node_id: str
 const EMPTY_EDU: Edu = { institution_id: "", institution_raw: "", major_node_id: "", major_raw: "",
   admission_year: "", graduation_year: "" };
 
+/** The undergraduate degree if the file shows one (the cohort is built on it). */
+function pickEducation(list: ImportedEdu[]): ImportedEdu | undefined {
+  const undergrad = (e: ImportedEdu) => /학사|학부|bachelor|\bb\.?a\b|\bb\.?s\b|\bb\.?eng/i.test(e.degree ?? "");
+  const graduate = (e: ImportedEdu) => /석사|박사|master|ph\.?d|mba|대학원|graduate/i.test(`${e.degree ?? ""} ${e.school ?? ""}`);
+  return list.find(undergrad) ?? list.find((e) => !graduate(e) && /대학|university|college/i.test(e.school ?? ""))
+    ?? list.find((e) => !graduate(e)) ?? list[0];
+}
+
 /** Typed names the server could not match, with what was typed: said next to every result. */
 type Unl = { kinds: Unlisted; institution: string; major: string };
 function unlistedNote(u?: Unl): string | null {
@@ -72,7 +86,11 @@ function unlistedNote(u?: Unl): string | null {
  * "stay in my role". Nothing chosen (status null) means the question was skipped. */
 type Desired = { roles: Picked[]; status: DesiredStatus | null };
 const NO_DESIRED: Desired = { roles: [], status: null };
-type Job = { organization_name: string; role_node_id: string; start_year: string; end_year: string };
+/** Months, the written title and the employment type come only from a resume (kept until the
+    year they belong to is changed). */
+type Job = { organization_name: string; role_node_id: string; start_year: string; end_year: string;
+  organization_id?: string | null; role_raw?: string | null; start_month?: number | null;
+  end_month?: number | null; employment_type?: EmploymentType | null };
 const emptyJob: Job = { organization_name: "", role_node_id: "", start_year: "", end_year: "" };
 
 function cellLabel(c: Cell, professional: boolean) {
@@ -142,8 +160,8 @@ function conclusion(r: QueryResult & { n_directions?: number | null }, professio
     : `모두 ${ro(top.label ?? "")} 갔어요.`;
 }
 
-export default function AcquisitionFlow({ initial }: { initial?: Options }) {
-  const [screen, setScreen] = useState<Screen>("start");
+export default function AcquisitionFlow({ initial, startOn }: { initial?: Options; startOn?: "upload" }) {
+  const [screen, setScreen] = useState<Screen>(startOn ?? "start");
   const [userType, setUserType] = useState<UserType>("STUDENT");
   const [institutions, setInstitutions] = useState<Institution[]>(initial?.institutions ?? []);
   const [majors, setMajors] = useState<Node[]>(initial?.majors ?? []);
@@ -173,6 +191,12 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
   // Interview invitation (optional, after login), then the result they were waiting for.
   const [interview, setInterview] = useState<InterviewStatus>();
   const afterInterview = useRef<(() => Promise<void>) | null>(null);
+  // Resume / capture import: which read filled the form, and the other jobs it showed.
+  const [importId, setImportId] = useState<string>();
+  const [others, setOthers] = useState<ReturnType<typeof importRows>>([]);
+  const [memberRead, setMemberRead] = useState<ImportRead>();
+  const importFrom = useRef<Screen>("me");
+  const [notice, setNotice] = useState<{ screen: Screen; text: string }>();
 
   const professional = userType === "PROFESSIONAL";
   const simulation = (me?.data_basis ?? base?.data_basis ?? teaser?.data_basis) === "SIMULATION";
@@ -274,6 +298,19 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
       admission_year: params.get("adm") ?? "", graduation_year: params.get("grad") ?? "",
     };
     if (type === "pro") { setUserType("PROFESSIONAL"); setEdu(fromHero); setScreen("p_now"); }
+    if (type === "upload" || startOn === "upload") {
+      // A member opening the upload link fills in their own profile instead.
+      if (!pending.member()) { setScreen("upload"); return; }
+      acq.me().then(async (m) => {
+        await resumeMember(m);
+        importFrom.current = m.intent ? "me" : m.profile.user_type === "PROFESSIONAL" ? "p_next" : "s_result";
+        setScreen("m_upload");
+      }).catch((e) => {
+        if (e instanceof ApiError && (e.status === 401 || e.status === 404)) pending.member(null);
+        setScreen("upload");
+      });
+      return;
+    }
     if (type === "student") {
       setEdu(fromHero);
       if ((fromHero.institution_id || fromHero.institution_raw) && (fromHero.major_node_id || fromHero.major_raw)
@@ -301,13 +338,37 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /** Jobs read from a file: the earliest kept job before the current one (not an internship)
+      is the first job when it has a role; the rest go as they are. */
+  function fromFile(type: UserType) {
+    const kept = others.filter((o) => o.keep && o.x.start_year);
+    const startOf = (y: number | null, m?: number | null) => (y ?? 0) * 12 + (m ?? 1);
+    const currentStart = startOf(Number(current.start_year) || null, current.start_month);
+    const earlier = kept.filter((o) => o.x.employment_type !== "INTERN" && !o.x.is_current &&
+      (type !== "PROFESSIONAL" || startOf(o.x.start_year, o.x.start_month) <= currentStart))
+      .sort((a, b) => startOf(a.x.start_year, a.x.start_month) - startOf(b.x.start_year, b.x.start_month));
+    const first = type === "PROFESSIONAL" && earlier[0]?.role ? earlier[0] : undefined;
+    return {
+      first_job: first ? toPastJob(first.x, first.role) : null,
+      first_job_is_current: type === "PROFESSIONAL" && earlier.length === 0,
+      other_jobs: kept.filter((o) => o !== first).map((o) => toPastJob(o.x, o.role))
+        .filter((j): j is PastJob => j !== null),
+    };
+  }
+
   function payload(e: Edu, type: UserType) {
     const job = (j: Job) => ({
+      organization_id: j.organization_id ?? null,
       organization_name: j.organization_name || null,
       role_node_id: j.role_node_id,
+      role_raw: j.role_raw ?? null,
       start_year: Number(j.start_year),
       end_year: j.end_year ? Number(j.end_year) : null,
+      start_month: j.start_month ?? null,
+      end_month: j.end_year ? j.end_month ?? null : null,
+      employment_type: j.employment_type ?? null,
     });
+    const file = importId ? fromFile(type) : null;
     return {
       user_type: type,
       education: {
@@ -319,8 +380,10 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
         graduation_year: Number(e.graduation_year),
       },
       current_job: type === "PROFESSIONAL" && current.role_node_id ? job(current) : null,
-      first_job: null,
-      first_job_is_current: false,
+      first_job: file?.first_job ? { ...file.first_job, role_node_id: file.first_job.role_node_id! } : null,
+      first_job_is_current: file?.first_job_is_current ?? false,
+      other_jobs: file?.other_jobs ?? [],
+      import_attempt_id: importId ?? null,
       intents: [],
       desired_roles: desiredRef.current.roles.map((r) => ({ role_node_id: r.id, role_raw: r.id ? null : r.label })),
       // KEEP_CURRENT is a professional's answer: a student who switched type keeps nothing of it.
@@ -369,7 +432,12 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
       major_listed: Boolean(e.major_node_id) || !(d.unlisted ?? []).includes("major"),
       admission_year: Number(e.admission_year), graduation_year: Number(e.graduation_year),
       current_role_node_id: type === "PROFESSIONAL" ? current.role_node_id || null : null,
+      from_file: Boolean(importId),
     });
+    if (importId) {
+      track("import_confirmed", { member: false, user_type: type, other_jobs: others.filter((o) => o.keep).length,
+                                  roles_picked: others.filter((o) => o.keep && o.role).length });
+    }
     const t = await acq.teaser(d.draft_id);
     setTeaser(t);
     track("login_wall_viewed", { user_type: type, effective_n: t.base.effective_n,
@@ -460,6 +528,54 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
     edu.admission_year && edu.graduation_year &&
     Number(edu.admission_year) <= Number(edu.graduation_year);
 
+  /** Fill the form from a read file; the person checks it on the same screen as typing by hand. */
+  function applyRead(r: ImportRead) {
+    markStarted();
+    const cur = r.experiences.find((x) => x.is_current && x.employment_type !== "INTERN" && x.start_year);
+    const e = pickEducation(r.education);
+    const inst = e?.suggested_institution_id && institutions.some((i) => i.id === e.suggested_institution_id)
+      ? e.suggested_institution_id : "";
+    const major = e?.suggested_major_node_id && majors.some((m) => m.node_id === e.suggested_major_node_id)
+      ? e.suggested_major_node_id : "";
+    setEdu({
+      institution_id: inst, institution_raw: inst ? "" : e?.school ?? "",
+      major_node_id: major, major_raw: major ? "" : e?.major ?? "",
+      admission_year: e?.start_year ? String(e.start_year) : "",
+      graduation_year: e?.end_year ? String(e.end_year) : "",
+    });
+    const listed = new Set(roles.map((n) => n.node_id));
+    if (cur) {
+      setCurrent({
+        organization_name: cur.company ?? "", organization_id: cur.suggested_organization_id,
+        role_node_id: cur.suggested_role_node_id && listed.has(cur.suggested_role_node_id) ? cur.suggested_role_node_id : "",
+        role_raw: cur.title, start_year: String(cur.start_year), start_month: cur.start_month, end_year: "",
+        employment_type: cur.employment_type,
+      });
+    }
+    setOthers(importRows(r, roles, cur ? [cur] : []));
+    setImportId(r.import_attempt_id);
+    setUserType(cur ? "PROFESSIONAL" : "STUDENT");
+    setScreen(cur ? "p_now" : "s_edu");
+  }
+
+  // A member fills in the rest of their career from a file, then sees the result again.
+  const openImport = () => { importFrom.current = screen; setNotice(undefined); setScreen("m_upload"); };
+  const memberAdded = (added: number) => run(async () => {
+    const back = importFrom.current;
+    setMe(await acq.me());
+    if (back === "p_next" || back === "s_result") setBase(await acq.meStep(professional ? "next_roles" : "first_roles"));
+    setNotice({ screen: back, text: added ? `경력 ${added}개를 더했어요. 더한 경력으로 다시 계산했어요.`
+      : "새로 더할 경력이 없었어요. 이미 모두 있어요." });
+    setMemberRead(undefined);
+    setScreen(back);
+  })();
+  const profile = me?.profile as { first_job?: unknown; first_job_is_current?: boolean } | undefined;
+  const hasFirst = Boolean(profile?.first_job) || profile?.first_job_is_current === true;
+  const toSimilar = run(async () => {
+    setSimilar(profile?.first_job_is_current ? undefined : await acq.meStep("similar_paths"));
+    setScreen("p_similar");
+  });
+
   const submitInput = run(() => toTeaser(edu, userType));
   const kakao = async () => {
     track("login_clicked", { user_type: userType, provider: "KAKAO" });
@@ -507,8 +623,10 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
   });
 
   const back: Partial<Record<Screen, Screen>> = {
-    s_edu: "start", p_now: "start", gate: professional ? "p_now" : "s_edu",
-    s_intent: "s_result", p_first: "p_next", p_similar: "p_first",
+    upload: "start", s_edu: importId ? "upload" : "start", p_now: importId ? "upload" : "start",
+    gate: professional ? "p_now" : "s_edu",
+    s_intent: "s_result", p_first: "p_next", p_similar: hasFirst ? "p_next" : "p_first",
+    m_upload: importFrom.current, m_review: "m_upload",
   };
   backRef.current = back;
   const goBack = () => {
@@ -533,6 +651,7 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
         ) : <a className="brand" href="/">nextpath</a>}
       </header>
       {error && <p className="error" role="alert">{error}</p>}
+      {notice?.screen === screen && <p className="notice" role="status">{notice.text}</p>}
 
       {screen === "start" && (
         <section className="screen">
@@ -546,8 +665,21 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
               지금 일하고 있어요
             </button>
           </div>
+          <button className="option upload-option" onClick={() => setScreen("upload")}>
+            <b>이력서·링*드인 캡처로 시작하기</b>
+            <small>기존 만들어둔 이력서, 링*드인 캡처 등을 올리시면 됩니다</small>
+          </button>
         </section>
       )}
+
+      {screen === "upload" && (
+        <ImportUpload member={false} onRead={applyRead} onManual={() => setScreen("start")} />
+      )}
+      {screen === "m_upload" && (
+        <ImportUpload member onRead={(r) => { setMemberRead(r); setScreen("m_review"); }}
+                      onManual={() => setScreen(importFrom.current)} />
+      )}
+      {screen === "m_review" && memberRead && <ImportReview read={memberRead} roles={roles} onDone={memberAdded} />}
 
       {screen === "finding" && (
         <section className="screen" aria-busy="true">
@@ -561,6 +693,7 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
         <section className="screen">
           <Progress value={0.33} />
           <h2>{professional ? "학교와 지금 하는 일을 알려주세요" : "학교와 전공을 알려주세요"}</h2>
+          {importId && <p className="hint">올린 파일에서 읽은 내용이에요. 틀린 곳은 고쳐 주세요.</p>}
           <Field label="학교">
             <SearchSelect ariaLabel="학교" noun="학교" placeholder="학교 검색 (예: 고려대, ㄱㄹㄷ)"
                           items={institutions.map((i) => ({ id: i.id, label: i.name, keywords: i.aliases ?? [] }))}
@@ -595,6 +728,13 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
           {professional && (
             <JobFields job={current} roles={roles} onChange={(j) => { markStarted(); setCurrent(j); }}
                        labels={{ role: "지금 직무", start: "입사" }} />
+          )}
+          {importId && others.length > 0 && (
+            <>
+              <h3 className="imported-title">파일에서 읽은 다른 경력</h3>
+              <p className="hint">남길 경력만 체크해 주세요. 로그인하면 내 경력으로 저장돼요.</p>
+              <ImportedJobs rows={others} roles={roles} onChange={setOthers} />
+            </>
           )}
           <p className="hint">입력한 내용은 나와 비슷한 사람을 찾는 데만 써요. 다른 사람에게 보이지 않아요.</p>
           <button className="cta" disabled={busy || !eduReady || (professional && !(current.role_node_id && current.start_year))}
@@ -673,9 +813,10 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
           <Bars r={base.result} professional={professional} />
           {conclusion(base.result, professional) && <p className="conclusion">{conclusion(base.result, professional)}</p>}
           <Share r={base.result} professional={professional} />
-          <button className="cta" disabled={base.result.suppressed && !professional}
-                  onClick={() => setScreen(professional ? "p_first" : "s_intent")}>
-            {professional ? "첫 직장도 넣고 더 비슷한 사람 보기" : "이 중에 끌리는 길이 있어요"}
+          <button className="cta" disabled={busy || (base.result.suppressed && !professional)}
+                  onClick={() => (professional && hasFirst ? toSimilar() : setScreen(professional ? "p_first" : "s_intent"))}>
+            {professional ? (hasFirst ? "나와 같은 경로를 걸은 사람 보기" : "첫 직장도 넣고 더 비슷한 사람 보기")
+              : "이 중에 끌리는 길이 있어요"}
           </button>
         </section>
       )}
@@ -724,7 +865,7 @@ export default function AcquisitionFlow({ initial }: { initial?: Options }) {
       )}
 
       {screen === "me" && me && <MyScreen me={me} busy={busy} onUnlock={unlock} onChangeIntent={changeIntent}
-                                          onInterview={openInterview} />}
+                                          onInterview={openInterview} onImport={openImport} />}
       {simulation && (RESULT_SCREENS.has(screen) || screen === "gate") && (
         <p className="beta-note">베타 · 실제 기록이 모이기 전까지 결과는 예시 데이터로 계산돼요</p>
       )}
@@ -756,24 +897,6 @@ function YearSelect({ value, onChange }: { value: string; onChange: (v: string) 
   );
 }
 
-function NodeSelect({ nodes, value, onChange }: { nodes: Node[]; value: string; onChange: (v: string) => void }) {
-  const groups = useMemo(() => {
-    const g = new Map<string, Node[]>();
-    nodes.forEach((n) => g.set(n.parent_label ?? "", [...(g.get(n.parent_label ?? "") ?? []), n]));
-    return [...g.entries()];
-  }, [nodes]);
-  return (
-    <select value={value} onChange={(e) => onChange(e.target.value)}>
-      <option value="">선택</option>
-      {groups.map(([parent, list]) => (
-        <optgroup key={parent} label={parent}>
-          {list.map((n) => <option key={n.node_id} value={n.node_id}>{n.label}</option>)}
-        </optgroup>
-      ))}
-    </select>
-  );
-}
-
 function JobFields(props: {
   job: Job; roles: Node[]; onChange: (j: Job) => void; withEnd?: boolean;
   labels: { role: string; start: string; end?: string };
@@ -790,7 +913,7 @@ function JobFields(props: {
     <>
       <Field label="회사 (선택)">
         <input list={listId} value={job.organization_name} placeholder="회사명"
-               onChange={(e) => onChange({ ...job, organization_name: e.target.value })} />
+               onChange={(e) => onChange({ ...job, organization_name: e.target.value, organization_id: null })} />
         <datalist id={listId}>{orgs.map((o) => <option key={o.id} value={o.name} />)}</datalist>
       </Field>
       <Field label={props.labels.role}>
@@ -798,11 +921,11 @@ function JobFields(props: {
       </Field>
       <div className="pair">
         <Field label={props.labels.start}>
-          <YearSelect value={job.start_year} onChange={(v) => onChange({ ...job, start_year: v })} />
+          <YearSelect value={job.start_year} onChange={(v) => onChange({ ...job, start_year: v, start_month: null })} />
         </Field>
         {props.withEnd && (
           <Field label={props.labels.end ?? "종료"}>
-            <YearSelect value={job.end_year} onChange={(v) => onChange({ ...job, end_year: v })} />
+            <YearSelect value={job.end_year} onChange={(v) => onChange({ ...job, end_year: v, end_month: null })} />
           </Field>
         )}
       </div>
@@ -892,8 +1015,9 @@ function months(m: number) {
   return `${(m / 12).toFixed(1)}년`;
 }
 
-function MyScreen({ me, busy, onUnlock, onChangeIntent, onInterview }: {
+function MyScreen({ me, busy, onUnlock, onChangeIntent, onInterview, onImport }: {
   me: MyResult; busy: boolean; onUnlock: () => void; onChangeIntent: () => void; onInterview: () => void;
+  onImport: () => void;
 }) {
   const p = me.intent_paths.paths;
   const professional = me.profile.user_type === "PROFESSIONAL";
@@ -951,7 +1075,7 @@ function MyScreen({ me, busy, onUnlock, onChangeIntent, onInterview }: {
           <button className="cta ghost" onClick={onChangeIntent}>다른 길도 보기</button>
         </>
       )}
-      <p className="hint">한 걸음 먼저 간 사람과의 연결은 가입하고 인증한 사람들로 준비 중이에요.</p>
+      <ImportEntry onOpen={onImport} />
       <InterviewEntry onOpen={onInterview} />
     </section>
   );
