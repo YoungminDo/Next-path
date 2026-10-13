@@ -394,3 +394,60 @@ def test_what_was_read_is_kept_only_with_the_separate_consent(engine, ids):  # n
             "SELECT count(*) FROM import_experience WHERE import_attempt_id = CAST(:a AS uuid)"),
             {"a": kept["import_attempt_id"]}).scalar_one()
     assert left == 0
+
+
+def test_why_a_read_failed_is_kept_for_the_team(engine, ids):  # noqa: F811
+    """The real reader against a stand-in API that refuses the request: the person sees the
+    generic line, the attempt keeps the API's status, error type and message (no file data)."""
+    import json
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+    from types import SimpleNamespace
+
+    import anthropic
+    from pydantic import SecretStr
+
+    from hellomyme.domain.career_import import ClaudeExtractor
+
+    class Refuse(BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.rfile.read(int(self.headers.get("content-length", 0)))
+            self.send_response(400)
+            self.send_header("content-type", "application/json")
+            self.send_header("request-id", "req_test")
+            self.end_headers()
+            self.wfile.write(json.dumps({"type": "error", "error": {
+                "type": "invalid_request_error",
+                "message": "Your credit balance is too low to access the Anthropic API."}}).encode())
+
+        def log_message(self, *args):
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Refuse)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        reader = ClaudeExtractor(
+            SimpleNamespace(career_import_model="test-model", anthropic_api_key=SecretStr("x")),
+            client=anthropic.Anthropic(api_key="x", max_retries=0, timeout=5,
+                                       base_url=f"http://127.0.0.1:{server.server_port}"))
+        c = app_with(reader)
+        r = c.post("/acq/import/parse", headers={**anon(), **login(c, "import-why")}, json=body())
+        assert r.status_code == 502
+        assert r.json()["detail"]["message"].startswith("파일을 읽지 못했어요")
+    finally:
+        server.shutdown()
+    with engine.begin() as conn:
+        outcome, reason = conn.execute(text(
+            """SELECT a.outcome, a.failure_reason FROM import_attempt a
+               JOIN account_identity ai USING (account_id)
+               WHERE ai.provider_subject = 'import-why'""")).one()
+    assert outcome == "FAILED"
+    assert reason == ("api 400 invalid_request_error: Your credit balance is too low to access the "
+                      "Anthropic API. (request req_test)")
+
+    broken = app_with(Broken())
+    broken.post("/acq/import/parse", headers={**anon(), **login(broken, "import-why-2")}, json=body())
+    with engine.begin() as conn:
+        assert conn.execute(text(
+            """SELECT a.failure_reason FROM import_attempt a JOIN account_identity ai USING (account_id)
+               WHERE ai.provider_subject = 'import-why-2'""")).scalar_one() == "reader failed: ValueError"

@@ -127,6 +127,9 @@
   - 보유 기간 3년(`HELLOMYME_CAREER_IMPORT_RETENTION_DAYS`). 지난 행은 업로드 API가 호출될 때 지운다.
   - 입력 폼을 끝까지 제출한 사람은 동의와 별개로 기존처럼 초안(`anonymous_draft`)에도 남는다.
 - **끄기:** Render에서 `ANTHROPIC_API_KEY`를 지우면 업로드 화면이 "직접 입력"으로 바뀐다.
+- **실패 이유 (migration 0035):** 읽기가 실패하면 사람에게는 같은 안내 한 줄만 보이고, `import_attempt.failure_reason`에
+  이유가 남는다(API 상태·오류 종류·메시지, 또는 내부 오류 이름, 300자 이내, 파일 내용 없음).
+  `SELECT created_at, outcome, failure_reason FROM import_attempt ORDER BY created_at DESC LIMIT 20;`
 - **저장 위치:** `import_attempt`(읽기 1회 = 1행, 결과·토큰·출처 종류), 통계 동의 시 `import_experience`/`import_education`, 확인된 경력은 `work_event` +
   `source_record`(`LINKEDIN_USER_UPLOAD` 또는 `CAREER_DOCUMENT`), 초안은 `anonymous_draft.payload_json.other_jobs`.
 - **이벤트:** `import_viewed` → `import_uploaded` → `import_parsed` → `import_confirmed`(member true/false).

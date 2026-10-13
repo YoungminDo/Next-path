@@ -111,6 +111,8 @@ SYSTEM = (
 class Usage(BaseModel):
     input_tokens: int | None = None
     output_tokens: int | None = None
+    # Why a read failed, for the team (import_attempt.failure_reason): never file contents.
+    failure: str | None = Field(default=None, max_length=300)
 
 
 class Extractor(Protocol):
@@ -147,21 +149,24 @@ class ClaudeExtractor:
                 # A safety decline is retried server-side on the model Anthropic recommends.
                 betas=["server-side-fallback-2026-07-01"], fallbacks="default")
         except anthropic.APIStatusError as exc:
-            log.error("career import: Claude API error %s (request %s)", exc.status_code,
-                      getattr(exc, "request_id", None))
-            return None, "FAILED", Usage()
-        except anthropic.APIConnectionError:
-            log.error("career import: Claude API unreachable")
-            return None, "FAILED", Usage()
-        except Exception:  # e.g. an answer cut off mid-JSON fails the SDK's own validation
+            error = exc.body.get("error", {}) if isinstance(exc.body, dict) else {}
+            error = error if isinstance(error, dict) else {}
+            reason = (f"api {exc.status_code} {error.get('type') or ''}: "
+                      f"{error.get('message') or ''} (request {getattr(exc, 'request_id', None)})")
+            log.error("career import: Claude API error %s", reason)
+            return None, "FAILED", Usage(failure=reason[:300])
+        except anthropic.APIConnectionError as exc:
+            log.error("career import: Claude API unreachable (%s)", type(exc).__name__)
+            return None, "FAILED", Usage(failure=f"api unreachable: {type(exc).__name__}")
+        except Exception as exc:  # e.g. an answer cut off mid-JSON fails the SDK's own validation
             log.exception("career import: unreadable answer")
-            return None, "FAILED", Usage()
+            return None, "FAILED", Usage(failure=f"unreadable answer: {type(exc).__name__}")
         usage = Usage(input_tokens=response.usage.input_tokens,
                       output_tokens=response.usage.output_tokens)
         if response.stop_reason == "refusal":
             return None, "REFUSED", usage
         if response.stop_reason == "max_tokens" or response.parsed_output is None:
-            return None, "FAILED", usage
+            return None, "FAILED", usage.model_copy(update={"failure": f"stop {response.stop_reason}"})
         out = response.parsed_output
         return out, "PARSED" if out.is_career_document else "NOT_CAREER", usage
 
@@ -339,17 +344,17 @@ def _parse(engine: Engine, settings: Settings, account_id: str | None,
 
     try:
         extraction, outcome, usage = extractor.extract(files)
-    except Exception:  # never leave the attempt open
+    except Exception as exc:  # never leave the attempt open
         log.exception("career import: reader failed")
-        extraction, outcome, usage = None, "FAILED", Usage()
+        extraction, outcome, usage = None, "FAILED", Usage(failure=f"reader failed: {type(exc).__name__}")
 
     with engine.begin() as conn:
         conn.execute(text(
             """UPDATE import_attempt SET outcome = :o, source_kind = :k, input_tokens = :i,
-                   output_tokens = :t, experiences = :e, finished_at = now()
+                   output_tokens = :t, experiences = :e, failure_reason = :f, finished_at = now()
                WHERE import_attempt_id = CAST(:id AS uuid)"""),
             {"o": outcome, "k": extraction and extraction.source_kind, "i": usage.input_tokens,
-             "t": usage.output_tokens, "id": attempt_id,
+             "t": usage.output_tokens, "id": attempt_id, "f": usage.failure,
              "e": len(extraction.experiences) if extraction else None})
     if outcome == "NOT_CAREER":
         raise ImportFailed(422, "이력서나 링*드인 캡처가 아닌 것 같아요. 경력이 보이는 파일을 올려 주세요")
