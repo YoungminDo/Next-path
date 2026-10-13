@@ -295,3 +295,56 @@ def test_unlock_key_unchanged_for_payloads_without_typed_school(ids):  # noqa: F
         "first_job_is_current": False, "gender_code": None}
     old = hashlib.sha256(json.dumps({"p": old_basis, "t": "T"}, sort_keys=True).encode()).hexdigest()
     assert insight_key(p, "T") == old
+
+
+def test_a_returning_member_sees_what_changes_and_decides(client, engine, ids):  # noqa: F811
+    """A student who now works answers again: login shows before/after (nothing applied yet); on
+    "이걸로 바꾸기" the new answers become the profile, old records withdrawn, not overwritten."""
+    h = anon()
+    auth, person_id = merge(client, h, save(client, h, student(ids)), "acq-returning")
+
+    def merge_again(payload):
+        h2 = anon()
+        d = save(client, h2, payload)
+        r = client.post("/auth/merge-draft", json={"draft_id": d, "consent_policy_version": "v1"},
+                        headers={**auth, **h2, "Idempotency-Key": uuid.uuid4().hex})
+        assert r.status_code == 200 and r.json()["merged"] is False, r.text
+        return d, r.json()["changes"]
+
+    pro = {"user_type": "PROFESSIONAL", "education": {
+        "institution_raw": "목록밖대학교", "major_node_id": ids["M3"],
+        "admission_year": 2017, "graduation_year": 2021},
+        "current_job": {"organization_name": "새회사", "role_node_id": ids["R3B"], "start_year": 2023}}
+    draft, changes = merge_again(pro)
+    assert [c["field"] for c in changes] == ["user_type", "education", "current_job"]
+    assert changes[0] == {"field": "user_type", "before": "학생", "after": "직장인"}
+    assert changes[1]["after"].startswith("목록밖대학교 · 경영학 · 2017–2021")
+    assert changes[2]["before"] is None and changes[2]["after"].startswith("새회사 · 데이터 분석 · 2023~")
+    assert client.get("/acq/me", headers=auth).json()["profile"]["user_type"] == "STUDENT"  # not yet
+
+    other = login(client, "acq-returning-other")
+    assert client.post("/acq/me/apply-draft", json={"draft_id": draft},
+                       headers=other).status_code == 404
+    r = client.post("/acq/me/apply-draft", json={"draft_id": draft}, headers=auth)
+    assert r.status_code == 200 and r.json()["applied"] == ["current_job", "education", "user_type"]
+    assert client.post("/acq/me/apply-draft", json={"draft_id": draft},
+                       headers=auth).json()["applied"] == []  # once per draft
+    profile = client.get("/acq/me", headers=auth).json()["profile"]
+    assert profile["user_type"] == "PROFESSIONAL"
+    assert profile["education"]["admission_year"] == 2017
+    assert profile["current_job"]["role_node_id"] == ids["R3B"]
+
+    # Same company and start year, another role: a correction (the old job is withdrawn).
+    fixed = {**pro, "current_job": {**pro["current_job"], "role_node_id": ids["R3"]}}
+    draft2, changes = merge_again(fixed)
+    assert [c["field"] for c in changes] == ["current_job"]
+    assert client.post("/acq/me/apply-draft", json={"draft_id": draft2},
+                       headers=auth).json()["applied"] == ["current_job"]
+    _, same = merge_again(fixed)
+    assert same == []  # nothing left to change
+    with engine.begin() as conn:
+        rows = conn.execute(text(
+            """SELECT 'edu' AS k, retracted_at IS NOT NULL AS gone FROM education WHERE person_id = :p
+               UNION ALL SELECT 'job', retracted_at IS NOT NULL FROM work_event WHERE person_id = :p"""),
+            {"p": person_id}).all()
+    assert sorted(map(tuple, rows)) == [("edu", False), ("edu", True), ("job", False), ("job", True)]

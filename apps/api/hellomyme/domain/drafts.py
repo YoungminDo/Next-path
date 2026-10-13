@@ -6,7 +6,7 @@ import hashlib
 import json
 import threading
 import time
-from datetime import timedelta
+from datetime import date, timedelta
 
 from pydantic import BaseModel
 from sqlalchemy import Connection, text
@@ -15,6 +15,7 @@ from hellomyme.domain import ledger
 from hellomyme.domain.acquisition import (
     AcquisitionPayload,
     is_acquisition_payload,
+    profile_changes,
     record_desired_roles,
     write_acquisition_profile,
 )
@@ -89,7 +90,7 @@ CAREER_CONSENTS = ("PRIVACY_PROCESSING", "CAREER_DATA_AGGREGATION")
 
 
 def merge_draft(conn: Connection, account_id: str, draft_id: str, anonymous_session: str,
-                consent_policy_version: str) -> dict:
+                consent_policy_version: str, as_of: date | None = None) -> dict:
     row = load_draft(conn, draft_id, anonymous_session, for_update=True)
     if row.claimed_account_id:
         if row.claimed_account_id != account_id:
@@ -113,6 +114,8 @@ def merge_draft(conn: Connection, account_id: str, draft_id: str, anonymous_sess
         # no duplicate records). The new answers stay in the draft, now linked to the account,
         # and a new desired-role answer is added to their history.
         payload = AcquisitionPayload.model_validate(row.payload_json)
+        # What the new answers would change: shown before/after, applied only if they say so.
+        changes = profile_changes(conn, existing, payload, as_of) if as_of else []
         record_desired_roles(conn, existing, payload, draft_id)
         added = {"rewards": []}
         if payload.import_attempt_id:
@@ -121,7 +124,7 @@ def merge_draft(conn: Connection, account_id: str, draft_id: str, anonymous_sess
             added = add_draft_jobs(conn, account_id, existing, payload, draft_id)
         _claim(conn, draft_id, account_id, existing)
         return {"person_id": existing, "merged": False, "linked": True,
-                "rewards": added["rewards"]}
+                "rewards": added["rewards"], "changes": changes}
 
     if is_acquisition_payload(row.payload_json):
         written = write_acquisition_profile(
@@ -144,6 +147,17 @@ def merge_draft(conn: Connection, account_id: str, draft_id: str, anonymous_sess
         rewards.append(ledger.grant_reward(conn, account_id, action, "WORK_EVENT", weid))
     return {"person_id": written["person_id"], "merged": True,
             "rewards": [{"ledger_id": r.ledger_id, "amount": r.amount} for r in rewards if r]}
+
+
+def claimed_payload(conn: Connection, draft_id: str, account_id: str) -> AcquisitionPayload | None:
+    """The answers of a draft this account claimed at login (None for anyone else's)."""
+    row = conn.execute(text(
+        """SELECT payload_json FROM anonymous_draft
+           WHERE draft_id::text = :d AND claimed_account_id = CAST(:a AS uuid)"""),
+        {"d": draft_id, "a": account_id}).first()
+    if row is None or not is_acquisition_payload(row.payload_json):
+        return None
+    return AcquisitionPayload.model_validate(row.payload_json)
 
 
 def _claim(conn: Connection, draft_id: str, account_id: str, person_id: str) -> None:

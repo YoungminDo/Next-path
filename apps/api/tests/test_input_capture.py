@@ -104,7 +104,7 @@ def test_login_links_the_draft_once_and_a_returning_member_gets_no_second_profil
     later = post(client, h2, {**student(ids), "desired_role_status": "NONE"}).json()
     _, linked = merge(client, h2, later["draft_id"], "capture-member")
     assert linked == {"person_id": merged["person_id"], "merged": False, "linked": True,
-                      "rewards": []}
+                      "rewards": [], "changes": []}
     abandoned = post(client, anon(), student(ids)).json()  # never logs in
 
     with engine.begin() as conn:

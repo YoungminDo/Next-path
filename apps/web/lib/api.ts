@@ -125,6 +125,8 @@ export type TeaserResult = {
   unlisted?: Unlisted;
 };
 export type DesiredRole = { role_node_id: string | null; role_raw: string | null };
+/** What a returning member's new answers would change in their profile (labels for display). */
+export type ProfileChange = { field: "user_type" | "education" | "current_job"; before: string | null; after: string | null };
 export type DesiredStatus = "CHOSEN" | "NONE" | "UNSURE" | "KEEP_CURRENT";
 export type InterviewStatus = {
   enabled: boolean;
@@ -173,6 +175,9 @@ export const acq = {
   teaser: (draftId: string) =>
     call<TeaserResult>(`/acq/draft/${draftId}/result`, { method: "POST", body: JSON.stringify({ step: "teaser" }) }),
   me: () => call<MyResult>("/acq/me"),
+  /** A returning member applies the answers they just gave (shown before/after at login). */
+  applyDraft: (draftId: string) => call<{ applied: string[] }>("/acq/me/apply-draft", {
+    method: "POST", body: JSON.stringify({ draft_id: draftId }) }),
   meStep: (step: AcqStep) => call<StepResult>(`/acq/me/step/${step}`),
   addJob: (job: unknown) =>
     call<{ work_event_id: string | null; replayed: boolean }>("/acq/me/jobs", {
@@ -239,7 +244,7 @@ export const api = {
   teaser: (draftId: string) =>
     call<Teaser>("/career/draft/query", { method: "POST", body: JSON.stringify({ draft_id: draftId }) }),
   mergeDraft: (draftId: string, consentPolicyVersion: string) =>
-    call<{ person_id: string }>("/auth/merge-draft", {
+    call<{ person_id: string; merged: boolean; changes?: ProfileChange[] }>("/auth/merge-draft", {
       method: "POST",
       headers: { "Idempotency-Key": `merge-${draftId}` },
       body: JSON.stringify({ draft_id: draftId, consent_policy_version: consentPolicyVersion }),

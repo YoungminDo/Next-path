@@ -20,6 +20,7 @@ import {
   type MyResult,
   type Node,
   type PastJob,
+  type ProfileChange,
   type QueryResult,
   type StepResult,
   type TeaserResult,
@@ -35,7 +36,8 @@ import { inAppBrowser, isInternal, track } from "@/lib/track";
    answers the teaser. Tone: "people who stood where I stand", never "seniors". */
 type Screen =
   | "start" | "upload" | "s_edu" | "p_now" | "finding" | "gate" | "interview"
-  | "s_result" | "s_intent" | "p_next" | "p_first" | "p_similar" | "me" | "m_upload" | "m_review";
+  | "s_result" | "s_intent" | "p_next" | "p_first" | "p_similar" | "me" | "m_upload" | "m_review"
+  | "m_changes";
 type UserType = "STUDENT" | "PROFESSIONAL";
 
 const DEV_LOGIN = process.env.NEXT_PUBLIC_ENABLE_DEV_LOGIN === "true";
@@ -192,6 +194,8 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
   const desiredSaving = useRef<Promise<unknown> | null>(null);
   // Interview invitation (optional, after login), then the result they were waiting for.
   const [interview, setInterview] = useState<InterviewStatus>();
+  // A returning member's new answers that differ from their profile: they choose at login.
+  const [changes, setChanges] = useState<{ draftId: string; items: ProfileChange[] }>();
   const afterInterview = useRef<(() => Promise<void>) | null>(null);
   // Resume / capture import: which read filled the form, and the other jobs it showed.
   const [importId, setImportId] = useState<string>();
@@ -475,9 +479,10 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
   async function finishLogin() {
     const saved = pending.draftId();
     const version = pending.consentVersion();
+    let differs: ProfileChange[] = [];
     if (saved && version) {
       try {
-        await api.mergeDraft(saved, version);
+        differs = (await api.mergeDraft(saved, version)).changes ?? [];
       } catch (e) {
         // 409: this account already has a profile; continue with it.
         if (!(e instanceof ApiError && e.status === 409)) throw e;
@@ -486,6 +491,22 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
       pending.consentVersion(null);
     }
     track("signup_completed", { merged_draft: Boolean(saved && version) });
+    if (saved && differs.length) {
+      // Already a member with other answers on record: show before/after, they decide.
+      setChanges({ draftId: saved, items: differs });
+      setScreen("m_changes");
+      return;
+    }
+    await afterLogin();
+  }
+
+  const decideChanges = (apply: boolean) => run(async () => {
+    if (apply && changes) await acq.applyDraft(changes.draftId);
+    setChanges(undefined);
+    await afterLogin();
+  })();
+
+  async function afterLogin() {
     let m: MyResult;
     try {
       m = await acq.me();
@@ -812,6 +833,24 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
         </section>
       )}
 
+      {screen === "m_changes" && changes && (
+        <section className="screen">
+          <h2>지난번과 달라진 정보가 있어요</h2>
+          <p className="sub">방금 입력한 내용으로 바꿀까요? 바꿔도 지난 기록은 지우지 않고 남겨둬요.</p>
+          <ul className="changes">
+            {changes.items.map((c) => (
+              <li key={c.field}>
+                <b>{CHANGE_LABELS[c.field]}</b>
+                <span className="before">지난번: {c.before ?? "없음"}</span>
+                <span className="after">이번: {c.after ?? "없음"}</span>
+              </li>
+            ))}
+          </ul>
+          <button className="cta" disabled={busy} onClick={() => decideChanges(true)}>이걸로 바꾸기</button>
+          <button className="cta ghost" disabled={busy} onClick={() => decideChanges(false)}>지난번 그대로 볼게요</button>
+        </section>
+      )}
+
       {screen === "interview" && interview && (
         <InterviewStep status={interview} userType={userType} onDone={leaveInterview} onSkip={() => leaveInterview()} />
       )}
@@ -880,6 +919,10 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
     </main>
   );
 }
+
+const CHANGE_LABELS: Record<ProfileChange["field"], string> = {
+  user_type: "지금 상태", education: "학교·전공", current_job: "지금 하는 일",
+};
 
 function friendly(e: ApiError) {
   if (e.status === 402) return "튜브가 부족해요. 프로필을 채우면 튜브를 받을 수 있어요.";

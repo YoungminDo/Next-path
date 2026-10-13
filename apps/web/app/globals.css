@@ -430,3 +430,8 @@ body { word-break: keep-all; overflow-wrap: break-word; }
 .policy-link { color: var(--sub); font-size: 12px; text-align: center; margin: 16px 0 0; }
 .policy-link a { color: inherit; }
 .lfoot a { color: inherit; }
+/* Returning member: before/after of the answers that differ from the profile. */
+.changes { list-style: none; padding: 0; margin: 16px 0; display: grid; gap: 10px; }
+.changes li { display: grid; gap: 2px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
+.changes .before { color: var(--sub); font-size: 13px; text-decoration: line-through; }
+.changes .after { font-weight: 600; }

@@ -3,7 +3,7 @@ from typing import Literal
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, Field
 
-from hellomyme.api.deps import Account, AnonSession, AppSettings, Conn, IdempotencyKey
+from hellomyme.api.deps import Account, AnonSession, AppSettings, AsOf, Conn, IdempotencyKey
 from hellomyme.auth import sessions
 from hellomyme.auth.providers import AuthError, AuthUnavailable, get_provider
 from hellomyme.domain import drafts
@@ -41,11 +41,11 @@ class MergeDraftRequest(BaseModel):
 
 @router.post("/merge-draft")
 def merge_draft(body: MergeDraftRequest, conn: Conn, account_id: Account,
-                anon: AnonSession, _key: IdempotencyKey):
+                anon: AnonSession, _key: IdempotencyKey, as_of: AsOf):
     # Idempotency comes from the draft itself: a claimed draft returns its first result.
     try:
         return drafts.merge_draft(conn, account_id, body.draft_id, anon,
-                                  body.consent_policy_version)
+                                  body.consent_policy_version, as_of=as_of)
     except drafts.DraftNotFound as exc:
         raise HTTPException(404, "draft not found or expired") from exc
     except drafts.DraftConflict as exc:

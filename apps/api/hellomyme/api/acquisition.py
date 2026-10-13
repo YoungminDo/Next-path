@@ -275,6 +275,23 @@ def import_confirm(body: ImportConfirmRequest, conn: Conn, account_id: Account,
                                                  body.import_attempt_id, body.jobs, key))
 
 
+class ApplyDraftRequest(BaseModel):
+    draft_id: str = Field(min_length=1, max_length=64)
+
+
+@router.post("/me/apply-draft")
+def apply_draft(body: ApplyDraftRequest, conn: Conn, account_id: Account, as_of: AsOf):
+    """A returning member chose "이걸로 바꾸기": their new answers (a draft already linked to this
+    account at login) become their profile; the old records are withdrawn, not overwritten."""
+    person_id, _ = _member(conn, account_id, as_of)
+    payload = drafts.claimed_payload(conn, body.draft_id, account_id)
+    if payload is None:
+        raise HTTPException(404, "draft not found for this account")
+    applied = _run(lambda: acq.apply_profile_changes(conn, account_id, person_id, body.draft_id,
+                                                     payload, as_of))
+    return {"applied": applied}
+
+
 # --- user-interview opt-in (separate, optional consent; docs/10 §interview) ----------------
 
 def _interview(fn):

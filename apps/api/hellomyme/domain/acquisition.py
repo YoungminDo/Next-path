@@ -835,42 +835,8 @@ def write_acquisition_profile(conn: Connection, account_id: str, p: AcquisitionP
            "work_event_ids": [], "current_work_event_ids": [], "intent_event_ids": []}
 
     if p.education:
-        e = p.education
-        if e.major_node_id and e.major_node_id not in majors.nodes:
-            raise QueryInvalid(f"unknown major node {e.major_node_id}")
-        inst_name = e.institution_id and conn.execute(text(
-            "SELECT name FROM institution WHERE institution_id::text = :i"),
-            {"i": e.institution_id}).scalar()
-        inst_id = e.institution_id if inst_name else None
-        major_raw = e.major_raw or (majors.nodes[e.major_node_id]["label"] if e.major_node_id else None)
-        mapped = [bool(inst_id), bool(e.major_node_id)]
-        out["education_id"] = conn.execute(text(
-            """INSERT INTO education (person_id, institution_raw, institution_id, major_raw,
-                   major_taxonomy_node_id, admission_year, admission_date_precision,
-                   graduation_year, graduation_date_precision, data_layer, verification_level,
-                   normalization_status, last_verified_at)
-               VALUES (:p, :ir, CAST(:iid AS uuid), :mr, CAST(:m AS uuid), :ay, 'YEAR', :gy,
-                       'YEAR', 'VERIFIED', 'SELF_REPORTED', :ns, now())
-               RETURNING education_id::text"""),
-            {"p": person_id, "ir": inst_name or e.institution_raw, "iid": inst_id,
-             "mr": major_raw, "m": e.major_node_id,
-             "ay": e.admission_year, "gy": e.graduation_year,
-             "ns": "MAPPED" if all(mapped) else ("PARTIAL" if any(mapped) else "UNMAPPED")}).scalar_one()
-        # Typed names nobody has standardised yet wait in the mapping queue (raw stays as typed).
-        for kind, raw, known in (("INSTITUTION", e.institution_raw, inst_id),
-                                 ("MAJOR", e.major_raw, e.major_node_id)):
-            if raw and not known:
-                conn.execute(text(
-                    """INSERT INTO mapping_queue (entity_kind, raw_value) VALUES (:k, :r)
-                       ON CONFLICT (entity_kind, normalized_key)
-                       DO UPDATE SET occurrences = mapping_queue.occurrences + 1"""),
-                    {"k": kind, "r": raw})
-        fields = ["institution", "major", "admission_year", "graduation_year"]
-        conn.execute(text(
-            """INSERT INTO education_source (education_id, source_id, supported_fields, is_primary)
-               VALUES (:e, :s, :f, true)"""),
-            {"e": out["education_id"], "s": source_id, "f": fields})
-        _log(conn, "EDUCATION", out["education_id"], account_id, source_id, fields)
+        out["education_id"] = _write_education(conn, person_id, account_id, source_id,
+                                               p.education, majors)
 
     jobs: list[tuple[AcqJob | AcqPastJob, bool]] = []
     if p.first_job and not p.first_job_is_current:
@@ -887,6 +853,159 @@ def write_acquisition_profile(conn: Connection, account_id: str, p: AcquisitionP
     out["intent_event_ids"] = record_intents(conn, person_id, p, draft_id)
     out["desired_role_ids"] = record_desired_roles(conn, person_id, p, draft_id)
     return out
+
+
+def _write_education(conn: Connection, person_id: str, account_id: str, source_id: str,
+                     e: AcqEducation, majors: Taxonomy) -> str:
+    """One SELF_REPORTED education row with its source; typed names go to the mapping queue."""
+    if e.major_node_id and e.major_node_id not in majors.nodes:
+        raise QueryInvalid(f"unknown major node {e.major_node_id}")
+    inst_name = e.institution_id and conn.execute(text(
+        "SELECT name FROM institution WHERE institution_id::text = :i"),
+        {"i": e.institution_id}).scalar()
+    inst_id = e.institution_id if inst_name else None
+    major_raw = e.major_raw or (majors.nodes[e.major_node_id]["label"] if e.major_node_id else None)
+    mapped = [bool(inst_id), bool(e.major_node_id)]
+    education_id = conn.execute(text(
+        """INSERT INTO education (person_id, institution_raw, institution_id, major_raw,
+               major_taxonomy_node_id, admission_year, admission_date_precision,
+               graduation_year, graduation_date_precision, data_layer, verification_level,
+               normalization_status, last_verified_at)
+           VALUES (:p, :ir, CAST(:iid AS uuid), :mr, CAST(:m AS uuid), :ay, 'YEAR', :gy,
+                   'YEAR', 'VERIFIED', 'SELF_REPORTED', :ns, now())
+           RETURNING education_id::text"""),
+        {"p": person_id, "ir": inst_name or e.institution_raw, "iid": inst_id,
+         "mr": major_raw, "m": e.major_node_id,
+         "ay": e.admission_year, "gy": e.graduation_year,
+         "ns": "MAPPED" if all(mapped) else ("PARTIAL" if any(mapped) else "UNMAPPED")}).scalar_one()
+    # Typed names nobody has standardised yet wait in the mapping queue (raw stays as typed).
+    for kind, raw, known in (("INSTITUTION", e.institution_raw, inst_id),
+                             ("MAJOR", e.major_raw, e.major_node_id)):
+        if raw and not known:
+            conn.execute(text(
+                """INSERT INTO mapping_queue (entity_kind, raw_value) VALUES (:k, :r)
+                   ON CONFLICT (entity_kind, normalized_key)
+                   DO UPDATE SET occurrences = mapping_queue.occurrences + 1"""),
+                {"k": kind, "r": raw})
+    fields = ["institution", "major", "admission_year", "graduation_year"]
+    conn.execute(text(
+        """INSERT INTO education_source (education_id, source_id, supported_fields, is_primary)
+           VALUES (:e, :s, :f, true)"""),
+        {"e": education_id, "s": source_id, "f": fields})
+    _log(conn, "EDUCATION", education_id, account_id, source_id, fields)
+    return education_id
+
+
+# --- a returning member's new answers ------------------------------------------------------
+# A member who answers again (e.g. a student who now works) sees what would change and decides;
+# nothing is overwritten: an applied change is a new record, the old one is withdrawn
+# (retracted_at), and a job that started later than the current one is a move, not a correction.
+
+USER_TYPE_LABELS = {"STUDENT": "학생", "JOB_SEEKER": "취업 준비", "PROFESSIONAL": "직장인"}
+
+
+def _profile_ids(conn: Connection, person_id: str, as_of: date) -> tuple[str | None, dict | None]:
+    """The education and current job member_payload compares with (same choice as there)."""
+    edu = conn.execute(text(
+        """SELECT education_id::text FROM canonical_education WHERE person_id = :p
+             AND (major_taxonomy_node_id IS NOT NULL OR major_raw IS NOT NULL)
+             AND (institution_id IS NOT NULL OR institution_raw IS NOT NULL)
+             AND admission_year IS NOT NULL AND graduation_year IS NOT NULL
+           ORDER BY graduation_year DESC LIMIT 1"""), {"p": person_id}).scalar()
+    job = conn.execute(text(
+        """SELECT w.work_event_id::text AS id, w.start_date FROM canonical_work_event w
+           WHERE w.person_id = :p AND w.start_date <= :d AND (w.end_date IS NULL OR w.end_date > :d)
+             AND w.role_taxonomy_node_id IS NOT NULL
+           ORDER BY w.start_date DESC LIMIT 1"""), {"p": person_id, "d": as_of}).first()
+    return edu, (dict(job._mapping) if job else None)
+
+
+def _edu_label(conn: Connection, e: AcqEducation | None) -> str | None:
+    if e is None:
+        return None
+    school = e.institution_raw or (e.institution_id and conn.execute(text(
+        "SELECT name FROM institution WHERE institution_id::text = :i"), {"i": e.institution_id}).scalar())
+    majors = load_taxonomy(conn, "MAJOR")
+    major = e.major_raw if not e.major_node_id else majors.nodes.get(e.major_node_id, {}).get("label")
+    return f"{school or '학교 미입력'} · {major or '전공 미입력'} · {e.admission_year}–{e.graduation_year}"
+
+
+def _job_label(conn: Connection, j: AcqJob | None) -> str | None:
+    if j is None:
+        return None
+    role = load_taxonomy(conn, "ROLE").nodes.get(j.role_node_id, {}).get("label") or j.role_raw
+    return f"{j.organization_name or '회사 미입력'} · {role or '직무 미입력'} · {j.start_year}~"
+
+
+def _key(s: str | None) -> str:
+    return "".join(ch for ch in (s or "").casefold() if ch.isalnum())
+
+
+def profile_changes(conn: Connection, person_id: str, p: AcquisitionPayload, as_of: date) -> list[dict]:
+    """What the new answers would change in the member's profile, as before/after lines."""
+    cur = member_payload(conn, person_id, as_of)
+    if cur is None:
+        return []
+    changes = []
+    if cur.user_type != p.user_type:
+        changes.append({"field": "user_type", "before": USER_TYPE_LABELS.get(cur.user_type),
+                        "after": USER_TYPE_LABELS.get(p.user_type)})
+
+    def edu_key(e: AcqEducation | None):
+        return e and (e.institution_id or _key(e.institution_raw), e.major_node_id or _key(e.major_raw),
+                      e.admission_year, e.graduation_year)
+    if p.education and edu_key(cur.education) != edu_key(p.education):
+        changes.append({"field": "education", "before": _edu_label(conn, cur.education),
+                        "after": _edu_label(conn, p.education)})
+
+    def job_key(j: AcqJob | None):
+        return j and (j.role_node_id, _key(j.organization_name), j.start_year)
+    if p.is_professional and p.current_job and job_key(cur.current_job) != job_key(p.current_job):
+        changes.append({"field": "current_job", "before": _job_label(conn, cur.current_job),
+                        "after": _job_label(conn, p.current_job)})
+    return changes
+
+
+def apply_profile_changes(conn: Connection, account_id: str, person_id: str, draft_id: str,
+                          p: AcquisitionPayload, as_of: date) -> list[str]:
+    """Apply what profile_changes shows, once per draft (a replay changes nothing)."""
+    changes = {c["field"] for c in profile_changes(conn, person_id, p, as_of)}
+    if not changes:
+        return []
+    source_id = conn.execute(text(
+        """INSERT INTO source_record (source_type, data_layer, source_system, source_key,
+               raw_payload, legal_basis)
+           VALUES (:t, 'VERIFIED', 'HELLOMYME_APP', :k, CAST(:raw AS jsonb), 'MEMBER_CONSENT')
+           ON CONFLICT (source_system, source_key) DO NOTHING RETURNING source_id::text"""),
+        {"k": f"draft:{draft_id}:profile",
+         "t": import_source_type(conn, p.import_attempt_id) or "MANUAL_INPUT",
+         "raw": json.dumps(p.model_dump(mode="json"), ensure_ascii=False)}).scalar()
+    if source_id is None:
+        return []
+    old_edu, old_job = _profile_ids(conn, person_id, as_of)
+    if "user_type" in changes:
+        conn.execute(text("UPDATE person SET declared_stage = :s WHERE person_id = :p"),
+                     {"s": p.user_type, "p": person_id})
+    if "education" in changes:
+        if old_edu:
+            conn.execute(text("UPDATE education SET retracted_at = now() WHERE education_id = :e"),
+                         {"e": old_edu})
+        _write_education(conn, person_id, account_id, source_id, p.education, load_taxonomy(conn, "MAJOR"))
+    if "current_job" in changes:
+        j = p.current_job
+        # Started no later than the job on record: a correction of it. Later: a move (both stay).
+        if old_job and j.start_year <= old_job["start_date"].year:
+            conn.execute(text("UPDATE work_event SET retracted_at = now() WHERE work_event_id = :w"),
+                         {"w": old_job["id"]})
+        # Already on record (e.g. added from the same file at login): not written twice.
+        same = conn.execute(text(
+            """SELECT organization_raw FROM work_event
+               WHERE person_id = :p AND retracted_at IS NULL AND role_taxonomy_node_id = CAST(:r AS uuid)
+                 AND extract(year FROM start_date) = :y"""),
+            {"p": person_id, "r": j.role_node_id, "y": j.start_year}).scalars().all()
+        if _key(j.organization_name) not in {_key(o) for o in same}:
+            _write_job(conn, person_id, account_id, source_id, j, True, load_taxonomy(conn, "ROLE"))
+    return sorted(changes)
 
 
 DESIRED_SURFACE = {"STUDENT": "STUDENT_PREVIEW", "JOB_SEEKER": "STUDENT_PREVIEW",
