@@ -116,7 +116,7 @@ export default function AdminStats() {
             <Kpi label="인터뷰 신청" value={data.interview.applied_in_range} sub={`누적 ${fmt(data.interview.applied)}명`} />
           </section>
 
-          <Card title="퍼널" note="단계마다 따로 셉니다. /start로 바로 들어온 사람은 랜딩을 거치지 않아 100%를 넘을 수 있어요."
+          <Card title="퍼널" note="방문 = 랜딩을 본 사람 + /start·/upload로 바로 들어온 사람(인앱에서 휴대폰 브라우저로 넘어간 같은 사람은 한 번). 슬랙 가입 알림과 같은 기준이고, 단계는 따로 세서 100%를 넘을 수 있어요."
                 table={<Table head={["단계", "사람", "방문 대비", "이전 단계 대비"]} rows={f.map((s, i) => [
                   s.label, fmt(s.people), pct(s.people, f[0]?.people ?? 0), i ? pct(s.people, f[i - 1].people) : "–"])} />}>
             <Bars items={f.map((s, i) => ({ label: s.label, value: s.people,
@@ -161,7 +161,7 @@ export default function AdminStats() {
               c.channel, fmt(c.landing), fmt(c.input_completed), fmt(c.signup), fmt(c.result), pct(c.input_completed, c.landing)])} />
           </Card>
 
-          <Card title="광고 캠페인" note="utm_campaign이 붙은 첫 방문 기준. 가입 전환율 = 신규 가입 ÷ 방문. 가입당 비용은 Meta 광고비 ÷ 신규 가입으로 계산해요 (docs/11).">
+          <Card title="광고 캠페인" note="utm_campaign이 붙은 첫 방문 기준(방문은 퍼널과 같은 기준). 가입 전환율 = 신규 가입 ÷ 방문. 가입당 비용은 Meta 광고비 ÷ 신규 가입으로 계산해요 (docs/11).">
             <Table text={2} head={["캠페인", "소스", "방문", "입력", "로그인 클릭", "신규 가입", "가입 전환율"]}
               rows={data.campaigns.map((c) => [c.campaign, c.source ?? "–", fmt(c.visits), fmt(c.inputs),
                 fmt(c.login_clicks), fmt(c.new_members), pct(c.new_members, c.visits)])} />

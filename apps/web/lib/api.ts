@@ -46,8 +46,16 @@ function local(key: string, value?: string | null): string | null {
   }
 }
 
+// The id this page has already used. Instagram's in-app browser can load the landing ahead of the tap
+// and then hand the page fresh storage: without this the next event would start a second "browser"
+// for the same person (docs/10 §방문).
+let pageSession: string | null = null;
+
 export function anonymousSession(): string {
-  return local(KEYS.anon) ?? local(KEYS.anon, crypto.randomUUID().replace(/-/g, ""))!;
+  const saved = local(KEYS.anon);
+  pageSession = saved ?? pageSession ?? crypto.randomUUID().replace(/-/g, "");
+  if (saved !== pageSession) local(KEYS.anon, pageSession);
+  return pageSession;
 }
 
 export const pending = {

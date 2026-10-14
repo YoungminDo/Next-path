@@ -1,5 +1,6 @@
 /** Funnel events for the demand test (POST /analytics/events through the same-origin proxy).
- * Anonymous: a random session id, first-touch utm/referrer (and whether an ad click id came along), never names or free text about a
+ * Anonymous: a random session id, first-touch utm/referrer (and whether an ad click id came along, or the
+ * answers were handed over from an in-app browser), never names or free text about a
  * person. Visiting once with ?internal=1 marks this browser as the team's, so the funnel
  * query can leave it out. Tracking never breaks the page: every failure is swallowed. */
 import { anonymousSession } from "@/lib/api";
@@ -41,6 +42,9 @@ function store(key: string, value?: string): string | null {
   }
 }
 
+// This page's first touch, for when the in-app browser swaps the storage under it (see anonymousSession).
+let pageTouch: Record<string, string> | null = null;
+
 /** First visit's channel, kept so later steps (and the login round trip) carry it. */
 function attribution(): Record<string, string> {
   try {
@@ -48,7 +52,11 @@ function attribution(): Record<string, string> {
     if (params.get("internal") === "1") store(INTERNAL, "1");
     if (params.get("internal") === "0") localStorage.removeItem(INTERNAL);
     const saved = store(TOUCH);
-    if (saved) return JSON.parse(saved);
+    if (saved) return (pageTouch = JSON.parse(saved) as Record<string, string>);
+    if (pageTouch) {
+      store(TOUCH, JSON.stringify(pageTouch));
+      return pageTouch;
+    }
     const touch: Record<string, string> = {};
     for (const k of ["utm_source", "utm_medium", "utm_campaign", "utm_content", "ref"]) {
       const v = params.get(k);
@@ -64,8 +72,10 @@ function attribution(): Record<string, string> {
     // Meta adds fbclid to real ad clicks only (its ad review opens the page without it). Only the fact
     // is kept, never the id, so paid visits can be told from review visits (docs/10 §사람이 아닌 방문).
     if (params.get("fbclid")) touch.fbclid = "1";
+    // The phone's browser opened from an in-app browser with the answers: the same person, not a new visit.
+    if (params.get("handoff") === "1") touch.handoff = "1";
     store(TOUCH, JSON.stringify(touch));
-    return touch;
+    return (pageTouch = touch);
   } catch {
     return {};
   }

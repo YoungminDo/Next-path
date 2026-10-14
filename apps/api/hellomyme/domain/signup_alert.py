@@ -15,7 +15,7 @@ import httpx
 from sqlalchemy import Connection, text
 
 from hellomyme.config import Settings
-from hellomyme.domain.admin_stats import not_a_person
+from hellomyme.domain.admin_stats import not_a_person, visits
 
 log = logging.getLogger(__name__)
 
@@ -87,8 +87,8 @@ def signup_message(conn: Connection, draft_id: str, anonymous_session: str,
     if draft.imported:
         channel.append("이력서로 시작")
 
-    # Sign-up rate (가입 전환율): today's new members over today's visiting browsers, and for the
-    # way this member came (campaign, else first source) new members over its visiting browsers.
+    # Sign-up rate (가입 전환율): today's new members over today's visits, and for the way this member
+    # came (campaign, else first source) new members over its visits; 방문 as on /admin (visits()).
     by_campaign = bool(touch.get("utm_campaign"))
     key = touch.get("utm_campaign") if by_campaign else (
         touch.get("utm_source") or touch.get("in_app") or touch.get("referrer"))
@@ -97,10 +97,12 @@ def signup_message(conn: Connection, draft_id: str, anonymous_session: str,
                SELECT DISTINCT anonymous_session_id AS sid FROM analytics.event
                WHERE anonymous_session_id IS NOT NULL AND properties->>'internal' = 'true'),
            ev AS (
-               SELECT anonymous_session_id AS sid, properties, received_at FROM analytics.event e
+               SELECT anonymous_session_id AS sid, event_name, properties, received_at
+               FROM analytics.event e
                WHERE anonymous_session_id IS NOT NULL AND NOT """ + not_a_person() + """
                  AND coalesce(properties->>'internal', 'false') <> 'true'
-                 AND anonymous_session_id NOT IN (SELECT sid FROM team)),
+                 AND anonymous_session_id NOT IN (SELECT sid FROM team))""" + visits("daily", per_day=True)
+        + visits("ever") + """,
            touch AS (
                SELECT DISTINCT ON (sid) sid,
                       CASE WHEN CAST(:by_campaign AS boolean) THEN properties->>'utm_campaign'
@@ -111,10 +113,10 @@ def signup_message(conn: Connection, draft_id: str, anonymous_session: str,
                SELECT DISTINCT ON (d.claimed_account_id) d.session_id, d.internal
                FROM anonymous_draft d JOIN account a ON a.account_id = d.claimed_account_id
                WHERE a.status = 'ACTIVE' ORDER BY d.claimed_account_id, d.claimed_at)
-           SELECT (SELECT count(DISTINCT sid) FROM ev
-                   WHERE (received_at AT TIME ZONE 'Asia/Seoul')::date
-                         = (now() AT TIME ZONE 'Asia/Seoul')::date) AS today_visitors,
-                  (SELECT count(*) FROM touch WHERE key IS NOT DISTINCT FROM CAST(:key AS text)) AS visitors,
+           SELECT (SELECT count(*) FROM daily
+                   WHERE day = (now() AT TIME ZONE 'Asia/Seoul')::date) AS today_visitors,
+                  (SELECT count(*) FROM touch WHERE key IS NOT DISTINCT FROM CAST(:key AS text)
+                     AND sid IN (SELECT sid FROM ever)) AS visitors,
                   (SELECT count(*) FROM members m
                    JOIN touch t ON encode(sha256(convert_to(t.sid, 'UTF8')), 'hex') = m.session_id
                    WHERE NOT m.internal AND t.key IS NOT DISTINCT FROM CAST(:key AS text)) AS members"""),

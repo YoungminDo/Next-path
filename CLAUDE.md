@@ -8,7 +8,7 @@ Will later merge into Hello My Me. Read `docs/` before large changes:
 `03_DEPLOYMENT.md` (deploy status and steps), `07_SERVICE_DESIGN.html` (service design),
 `08_DATA_MOAT.md` (which source data is the moat; migration 0019), `09_INGESTION_PIPELINE.md`
 (capture → AI JSON → checks → field review → SEED; migration 0022), `10_DEMAND_TEST.md` (funnel
-events from `web/lib/track.ts`, migration 0024, `scripts/funnel.sql`; inputs as data + desired roles 0026,
+events from `web/lib/track.ts`, migration 0024, `scripts/funnel.sql`; one 방문 definition `admin_stats.visits` (§방문); inputs as data + desired roles 0026,
 interview phone opt-in 0027; resume/capture import 0030: `domain/career_import.py`, web `components/ImportFlow.tsx`,
 `/upload`), `11_META_ADS.md` (per-audience Meta campaigns, utm_campaign `np_<date>_<audience>`, pixel `web/lib/pixel.ts`,
 dataset NEXTPATH웹 in `lib/pixel-id.ts`, `NEXT_PUBLIC_META_PIXEL_ID=off` turns it off: PageView/Lead/CompleteRegistration, no properties). Team dashboard `/admin` (`api/admin.py`, `domain/admin_stats.py`, web `components/admin/`) is for

@@ -30,9 +30,9 @@ def client_with(slack) -> TestClient:
     return TestClient(app)
 
 
-def touch(c, h, **props):
+def touch(c, h, event_name="landing_viewed", **props):
     r = c.post("/analytics/events", json={
-        "event_name": "landing_viewed", "occurred_at": datetime.now(UTC).isoformat(),
+        "event_name": event_name, "occurred_at": datetime.now(UTC).isoformat(),
         "anonymous_session_id": h["X-Anonymous-Session"], "properties": props})
     assert r.status_code == 202, r.text
 
@@ -54,6 +54,8 @@ def test_a_new_member_is_announced_once_with_the_channel_only(ids):  # noqa: F81
     touch(c, anon(), utm_source="insta", utm_campaign=f"fall_*promo*{tag}")  # a visitor who left
     touch(c, anon(), utm_source="insta", utm_campaign=f"fall_*promo*{tag}", utm_medium="paid_social",
           referrer="www.facebook.com")  # Meta's ad review: not a person, not in the rate
+    touch(c, anon(), "career_input_started", utm_source="insta", utm_campaign=f"fall_*promo*{tag}",
+          path="/")  # no landing first: the same person under a second id, not a second visit
     draft = save(c, h, student(ids))
     auth = login(c, "alert-new")
     assert merge(c, h, draft, auth)["merged"] is True

@@ -1,7 +1,7 @@
 -- nextpath 수요 테스트 퍼널 (docs/10_DEMAND_TEST.md)
 -- Supabase → SQL Editor 에 이 파일 전체를 붙여넣고 Run. 읽기만 하고 아무것도 바꾸지 않습니다.
 -- 기간은 params 의 t_from / t_to 만 바꾸면 됩니다 (기본: 오늘 0시(한국 시간)부터 지금까지).
--- 사람 수 = 브라우저(익명 세션) 수. 팀이 ?internal=1 로 한 번 연 브라우저와 사람이 아닌 방문(Meta 검토 등)은 빠집니다.
+-- 사람 수 = 브라우저(익명 세션) 수, 방문은 아래 visit 기준. 팀이 ?internal=1 로 한 번 연 브라우저와 사람이 아닌 방문(Meta 검토 등)은 빠집니다.
 -- 시각은 서버가 받은 시각(received_at) 기준. 채널: utm_source → 인앱 앱(instagram 등) → referrer.
 
 WITH params AS (
@@ -9,7 +9,7 @@ WITH params AS (
          now() AS t_to
 ),
 ev AS (
-  SELECT e.event_name, e.properties, e.occurred_at,
+  SELECT e.event_name, e.properties, e.occurred_at, e.received_at,
          coalesce(e.anonymous_session_id, e.account_id::text) AS sid
   FROM analytics.event e CROSS JOIN params p
   WHERE e.received_at >= p.t_from AND e.received_at < p.t_to
@@ -19,9 +19,18 @@ ev AS (
               OR coalesce(e.properties->>'referrer', '') LIKE '%facebook.com')
              AND e.properties->>'in_app' IS NULL AND e.properties->>'fbclid' IS NULL))
 ),
+-- 방문 (docs/10 §방문): 기간 안 첫 이벤트가 랜딩이거나 /start·/upload 로 바로 들어온 브라우저.
+-- 인앱 브라우저가 답을 넘겨준 휴대폰 브라우저(handoff)와, 랜딩 중간 단계로 시작한 브라우저(인스타 인앱이
+-- 미리 연 랜딩의 저장소가 바뀐 같은 사람)는 새 방문이 아닙니다. /admin·슬랙 알림과 같은 기준.
+visit AS (
+  SELECT sid FROM (
+    SELECT DISTINCT ON (sid) sid, event_name, properties->>'path' AS path, properties ? 'handoff' AS handoff
+    FROM ev ORDER BY sid, received_at) f
+  WHERE event_name = 'landing_viewed' OR (path IN ('/start', '/upload') AND NOT handoff)
+),
 steps (ord, step, event_name, screens) AS (
   VALUES
-    (1,  '1. 랜딩 방문',                 'landing_viewed',        NULL::text[]),
+    (1,  '1. 방문',                     'landing_viewed',        NULL::text[]),  -- visit 기준
     (2,  '2. 입력 시작',                 'career_input_started',  NULL),
     (3,  '3. 학교 정보 입력 완료',        'career_input_completed', NULL),
     (4,  '4. 미리보기(몇 명·몇 갈래) 확인', 'login_wall_viewed',     NULL),
@@ -33,7 +42,8 @@ steps (ord, step, event_name, screens) AS (
     (10, '10. 깊은 분석 열기(튜브)',       'unlock_purchased',      NULL)
 ),
 counts AS (
-  SELECT s.ord, s.step, count(DISTINCT ev.sid) AS people
+  SELECT s.ord, s.step,
+         CASE WHEN s.ord = 1 THEN (SELECT count(*) FROM visit) ELSE count(DISTINCT ev.sid) END AS people
   FROM steps s
   LEFT JOIN ev ON ev.event_name = s.event_name
               AND (s.screens IS NULL OR ev.properties->>'screen' = ANY (s.screens))
@@ -41,7 +51,7 @@ counts AS (
 )
 SELECT step AS "단계",
        people AS "사람 수",
-       round(100.0 * people / nullif(first_value(people) OVER (ORDER BY ord), 0), 1) AS "랜딩 대비 %",
+       round(100.0 * people / nullif(first_value(people) OVER (ORDER BY ord), 0), 1) AS "방문 대비 %",
        round(100.0 * people / nullif(lag(people) OVER (ORDER BY ord), 0), 1) AS "이전 단계 대비 %"
 FROM counts ORDER BY ord;
 
@@ -52,7 +62,7 @@ FROM counts ORDER BY ord;
 WITH params AS (
   SELECT (date_trunc('day', now() AT TIME ZONE 'Asia/Seoul')) AT TIME ZONE 'Asia/Seoul' AS t_from, now() AS t_to
 ), ev AS (
-  SELECT e.event_name, e.properties, coalesce(e.anonymous_session_id, e.account_id::text) AS sid
+  SELECT e.event_name, e.properties, e.received_at, coalesce(e.anonymous_session_id, e.account_id::text) AS sid
   FROM analytics.event e CROSS JOIN params p
   WHERE e.received_at >= p.t_from AND e.received_at < p.t_to
     AND coalesce(e.properties->>'internal', 'false') <> 'true'
@@ -60,13 +70,18 @@ WITH params AS (
          OR ((coalesce(e.properties->>'utm_medium', '') = 'paid_social'
               OR coalesce(e.properties->>'referrer', '') LIKE '%facebook.com')
              AND e.properties->>'in_app' IS NULL AND e.properties->>'fbclid' IS NULL))
+), visit AS (  -- 방문: 맨 위 퍼널과 같은 기준
+  SELECT sid FROM (
+    SELECT DISTINCT ON (sid) sid, event_name, properties->>'path' AS path, properties ? 'handoff' AS handoff
+    FROM ev ORDER BY sid, received_at) f
+  WHERE event_name = 'landing_viewed' OR (path IN ('/start', '/upload') AND NOT handoff)
 ), channel AS (
   SELECT DISTINCT ON (sid) sid,
          coalesce(properties->>'utm_source', properties->>'in_app', properties->>'referrer', '(직접 방문)') AS ch
   FROM ev ORDER BY sid, (properties ? 'utm_source') DESC
 )
 SELECT c.ch AS "채널",
-       count(DISTINCT c.sid) FILTER (WHERE e.event_name = 'landing_viewed') AS "방문",
+       count(DISTINCT c.sid) FILTER (WHERE c.sid IN (SELECT sid FROM visit)) AS "방문",
        count(DISTINCT c.sid) FILTER (WHERE e.event_name = 'career_input_completed') AS "입력 완료",
        count(DISTINCT c.sid) FILTER (WHERE e.event_name = 'signup_completed') AS "로그인",
        count(DISTINCT c.sid) FILTER (WHERE e.event_name = 'result_step_viewed') AS "결과 확인"

@@ -16,7 +16,7 @@ DAYS = {"today": 1, "7d": 7, "30d": 30, "all": None}
 
 # (key, label, event, screens) in funnel order; screens narrows result_step_viewed.
 FUNNEL = (
-    ("landing", "랜딩 방문", "landing_viewed", None),
+    ("landing", "방문", "landing_viewed", None),  # counted by visits(), not by the event alone
     ("input_started", "입력 시작", "career_input_started", None),
     ("input_completed", "학교 정보 입력 완료", "career_input_completed", None),
     ("preview", "미리보기 확인", "login_wall_viewed", None),
@@ -44,6 +44,28 @@ def not_a_person(e: str = "e") -> str:
         OR ((coalesce({e}.properties->>'utm_medium', '') = 'paid_social'
              OR coalesce({e}.properties->>'referrer', '') LIKE '%facebook.com')
             AND {e}.properties->>'in_app' IS NULL AND {e}.properties->>'fbclid' IS NULL))"""
+
+
+def visits(name: str = "visit", per_day: bool = False) -> str:
+    """방문 (docs/10 §방문, one definition for /admin, the sign-up alert and scripts/funnel.sql): a browser
+    counts once per period (or per Korean day) when its first event there is an arrival: the landing
+    shown (landing_viewed), or /start or /upload opened directly, except the phone's own browser that
+    an in-app browser handed the answers to (`handoff`, the same person). A browser whose first event is
+    a later step on the landing is no arrival either: Instagram's in-app browser can load the landing
+    ahead of the tap and then give the page fresh storage, so the person's next steps come under a
+    second id while the landing view went out under the first.
+    Appends `<name> (sid, day)` to a query that has the `ev` CTE (event_name, properties, received_at)."""
+    day = "(received_at AT TIME ZONE 'Asia/Seoul')::date"
+    per = f"sid, {day}" if per_day else "sid"
+    return f"""
+    , {name}_first AS (
+        SELECT DISTINCT ON ({per}) sid, {day} AS day, event_name,
+               properties->>'path' AS path, properties ? 'handoff' AS handoff
+        FROM ev ORDER BY {per}, received_at),
+    {name} AS (
+        SELECT sid, day FROM {name}_first
+        WHERE event_name = 'landing_viewed' OR (path IN ('/start', '/upload') AND NOT handoff))
+"""
 
 
 _EVENTS = """
@@ -85,30 +107,35 @@ def stats(conn: Connection, rng: Range, with_team: bool) -> dict:
     t_from = window_start(conn, rng)
     p = {"t_from": t_from, "with_team": with_team}
 
-    counts = conn.execute(text(_EVENTS + "SELECT " + ", ".join(
+    steps = ", ".join(
         f"count(DISTINCT sid) FILTER (WHERE event_name = '{ev}'"
         + (f" AND properties->>'screen' IN ({', '.join(repr(s) for s in screens)})" if screens else "")
-        + f") AS {key}" for key, _, ev, screens in FUNNEL) + " FROM ev"), p).one()._mapping
+        + f") AS {key}" for key, _, ev, screens in FUNNEL[1:])
+    counts = conn.execute(text(_EVENTS + visits() + "SELECT (SELECT count(*) FROM visit) AS landing, "
+                               + steps + " FROM ev"), p).one()._mapping
     funnel = [{"key": key, "label": label, "people": counts[key]} for key, label, _, _ in FUNNEL]
 
-    daily = _rows(conn, _EVENTS + """
-        SELECT (received_at AT TIME ZONE 'Asia/Seoul')::date AS day,
-               count(DISTINCT sid) FILTER (WHERE event_name = 'landing_viewed') AS landing,
-               count(DISTINCT sid) FILTER (WHERE event_name = 'career_input_completed') AS input_completed,
-               count(DISTINCT sid) FILTER (WHERE event_name = 'signup_completed') AS signup
-        FROM ev GROUP BY 1 ORDER BY 1""", p)
+    daily = _rows(conn, _EVENTS + visits(per_day=True) + """
+        SELECT day, coalesce(v.landing, 0) AS landing, d.input_completed, d.signup
+        FROM (SELECT (received_at AT TIME ZONE 'Asia/Seoul')::date AS day,
+                     count(DISTINCT sid) FILTER (WHERE event_name = 'career_input_completed')
+                         AS input_completed,
+                     count(DISTINCT sid) FILTER (WHERE event_name = 'signup_completed') AS signup
+              FROM ev GROUP BY 1) d
+        LEFT JOIN (SELECT day, count(*) AS landing FROM visit GROUP BY 1) v USING (day)
+        ORDER BY 1""", p)
     daily = _fill_days(daily, t_from and conn.execute(text(
         "SELECT (CAST(:t AS timestamptz) AT TIME ZONE 'Asia/Seoul')::date"), {"t": t_from}).scalar_one(),
         conn.execute(text("SELECT (now() AT TIME ZONE 'Asia/Seoul')::date")).scalar_one())
 
-    channels = _rows(conn, _EVENTS + """
+    channels = _rows(conn, _EVENTS + visits() + """
         , channel AS (
             SELECT DISTINCT ON (sid) sid,
                    coalesce(properties->>'utm_source', properties->>'in_app', properties->>'referrer',
                             '(직접 방문)') AS channel
             FROM ev ORDER BY sid, (properties ? 'utm_source') DESC, received_at)
         SELECT c.channel,
-               count(DISTINCT c.sid) FILTER (WHERE e.event_name = 'landing_viewed') AS landing,
+               count(DISTINCT c.sid) FILTER (WHERE c.sid IN (SELECT sid FROM visit)) AS landing,
                count(DISTINCT c.sid) FILTER (WHERE e.event_name = 'career_input_completed')
                    AS input_completed,
                count(DISTINCT c.sid) FILTER (WHERE e.event_name = 'signup_completed') AS signup,
@@ -119,7 +146,7 @@ def stats(conn: Connection, rng: Range, with_team: bool) -> dict:
     # Ad campaigns (utm_campaign, docs/11): the funnel per campaign, and new members = accounts
     # whose first linked answers came from a browser of that campaign (가입 전환율 = 신규 가입 ÷ 방문;
     # 가입당 비용 = Meta 광고비 ÷ 신규 가입).
-    campaigns = _rows(conn, _EVENTS + """
+    campaigns = _rows(conn, _EVENTS + visits() + """
         , touch AS (
             SELECT DISTINCT ON (sid) sid, properties->>'utm_source' AS source,
                    properties->>'utm_campaign' AS campaign
@@ -133,7 +160,7 @@ def stats(conn: Connection, rng: Range, with_team: bool) -> dict:
             FROM touch t JOIN members m ON m.session_id = encode(sha256(convert_to(t.sid, 'UTF8')), 'hex')
             WHERE NOT m.internal GROUP BY 1, 2)
         SELECT t.source, t.campaign,
-               count(DISTINCT t.sid) AS visits,  -- any page, so ads that open /start count too
+               count(DISTINCT t.sid) FILTER (WHERE t.sid IN (SELECT sid FROM visit)) AS visits,
                count(DISTINCT t.sid) FILTER (WHERE e.event_name = 'career_input_completed') AS inputs,
                count(DISTINCT t.sid) FILTER (WHERE e.event_name = 'login_clicked') AS login_clicks,
                coalesce(max(j.new_members), 0) AS new_members

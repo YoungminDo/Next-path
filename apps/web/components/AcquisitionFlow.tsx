@@ -170,10 +170,12 @@ function conclusion(r: QueryResult & { n_directions?: number | null }, professio
 }
 
 /** The address an in-app browser hands to the phone's browser: the same answers the landing passes
- *  (/start reads them on load) plus the campaign tags, so nothing has to be typed twice. */
+ *  (/start reads them on load) plus the campaign tags, so nothing has to be typed twice; `handoff`
+ *  tells the statistics it is the same person, not a new visit. */
 function handoffUrl(e: Edu, type: UserType, cur: Job): string {
   const q = new URLSearchParams();
   new URLSearchParams(window.location.search).forEach((v, k) => { if (k.startsWith("utm_")) q.set(k, v); });
+  q.set("handoff", "1");
   q.set("type", type === "PROFESSIONAL" ? "pro" : "student");
   const put = (k: string, v: string) => { if (v) q.set(k, v); };
   put("inst", e.institution_id); put("inst_raw", e.institution_raw);
@@ -319,7 +321,7 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
     // and years never travel further (shared links, the Meta pixel's page address).
     if (["inst", "inst_raw", "major", "major_raw", "adm", "grad", "role", "start"].some((k) => params.has(k))) {
       const keep = new URLSearchParams();
-      params.forEach((v, k) => { if (k === "type" || k.startsWith("utm_")) keep.set(k, v); });
+      params.forEach((v, k) => { if (k === "type" || k === "handoff" || k.startsWith("utm_")) keep.set(k, v); });
       const q = keep.toString();
       window.history.replaceState(null, "", window.location.pathname + (q ? `?${q}` : ""));
     }
