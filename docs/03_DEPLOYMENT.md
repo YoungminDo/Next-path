@@ -71,7 +71,7 @@ HELLOMYME_DATABASE_URL='<위 URL>' uv run hellomyme-import-preseed /path/to/HELL
 | `APP_ORIGIN` | `https://nextpath.da-sh.io` |
 | `NEXT_PUBLIC_ENABLE_DEV_LOGIN` | `false` |
 | `NEXT_PUBLIC_CONSENT_POLICY_VERSION` | `career_terms_v1` |
-| `NEXT_PUBLIC_META_PIXEL_ID` | (선택) Meta 픽셀 ID. 넣으면 광고 측정과 개인정보처리방침 픽셀 항목이 켜진다 (docs/11). 공개값 |
+| `NEXT_PUBLIC_META_PIXEL_ID` | (선택) 넣지 않으면 코드의 NEXTPATH웹 픽셀을 쓴다. 다른 ID로 바꾸거나 `off` 로 끈다 (docs/11). 공개값 |
 
 `ENABLE_DEV_LOGIN` 은 넣지 않습니다(운영 빌드에서는 넣어도 무시됨).
 

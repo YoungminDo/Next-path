@@ -1,11 +1,10 @@
-/** Meta pixel for ad measurement (docs/11): off unless NEXT_PUBLIC_META_PIXEL_ID is set, and never
- * for the team's own browsers (?internal=1). Only three standard events, no personal data:
+/** Meta pixel for ad measurement (docs/11): dataset NEXTPATH웹 (lib/pixel-id.ts), never for the
+ * team's own browsers (?internal=1). Only three standard events, no personal data:
  * PageView (landing), Lead (answers entered), CompleteRegistration (a new member). Automatic
  * event detection is off, so the pixel reads no button text or page content; pages that carry
  * answers in the address are cleaned before anything is sent (AcquisitionFlow). */
+import { META_PIXEL_ID as PIXEL_ID } from "@/lib/pixel-id";
 import { isInternal } from "@/lib/track";
-
-const PIXEL_ID = process.env.NEXT_PUBLIC_META_PIXEL_ID;
 
 type Fbq = ((...args: unknown[]) => void) & { queue?: unknown[][]; loaded?: boolean; version?: string;
   callMethod?: (...args: unknown[]) => void; push?: unknown };

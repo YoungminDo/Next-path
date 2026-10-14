@@ -1,14 +1,15 @@
 import Link from "next/link";
 
 import BusinessInfo from "@/components/BusinessInfo";
+import { META_PIXEL_ID } from "@/lib/pixel-id";
 
 /* Privacy policy for nextpath (개인정보 보호법 §30). Every item, period and processor here is what
    the service actually does (docs/10, docs/03); change this page in the same commit as the code. */
 export const metadata = { title: "nextpath · 개인정보처리방침" };
 
 const EFFECTIVE = "2026년 10월 13일";
-// The Meta pixel section appears only when the pixel is on (NEXT_PUBLIC_META_PIXEL_ID, lib/pixel.ts).
-const PIXEL = Boolean(process.env.NEXT_PUBLIC_META_PIXEL_ID);
+// The Meta pixel section appears only while the pixel is on (lib/pixel-id.ts).
+const PIXEL = Boolean(META_PIXEL_ID);
 const CONTACT = "branden@da-sh.io";
 
 export default function Privacy() {

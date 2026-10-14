@@ -70,8 +70,12 @@ utm_source=meta&utm_medium=paid_social&utm_campaign=np_1014_pro&utm_content={{ad
   2. 설정 → "코드 없이 자동으로 이벤트 추적"을 **끈다**. 새 "자동 이벤트" 항목이 있으면 그것도 끈다
      ([Pixelflow](https://docs.pixelflow.so/turn-off-automatic-event-tracking-in-meta-biywn),
      [Jon Loomer](https://www.jonloomer.com/meta-automatic-events-feature/)).
-  3. 픽셀 ID를 Vercel Production 환경변수 `NEXT_PUBLIC_META_PIXEL_ID` 에 넣고 재배포한다. ID는 공개값이라 비밀이 아니다.
-- 꺼져 있으면(변수 없음) 스크립트를 아예 불러오지 않는다. 개인정보처리방침의 픽셀 항목도 변수가 있을 때만 보인다.
+  3. 데이터 세트 **NEXTPATH웹 (ID `1422190370051636`, 2026-10-14 생성)** 을 쓴다. ID는 코드(`web/lib/pixel-id.ts`)에 들어 있다.
+     공개값이라 비밀이 아니다. FACE커리어 웹 픽셀과 섞지 않는다(이벤트 의미가 달라 CPA가 흐려짐).
+- Vercel 환경변수 `NEXT_PUBLIC_META_PIXEL_ID` 로 다른 ID를 넣을 수 있고, `off` 로 두면 끈다(재배포 필요).
+  끄면 스크립트를 아예 불러오지 않고, 개인정보처리방침의 픽셀 항목도 사라진다.
+- 데이터 세트 설정: 자동 고급 매칭 끔, 자동 이벤트 끔, 트래픽 권한 허용 목록 `nextpath.da-sh.io`.
+  전환 API 게이트웨이는 연결하지 않는다(방침에 없는 처리 경로). 붙일 때는 eventID로 중복이 제거된다.
 - 보내는 이벤트는 세 가지뿐이다:
   - `PageView`: 랜딩 화면
   - `Lead`: 정보 입력 완료. `eventID = lead-<draft_id>`
