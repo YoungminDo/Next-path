@@ -122,7 +122,9 @@ utm_source=meta&utm_medium=paid_social&utm_campaign=np_1014_pro&utm_content={{ad
 소재: `docs/ads/np_1014/nextpath_{student,seeker,pro}_{4x5,9x16}.png` (예시 숫자에 "예시" 표시).
 API로 만들 때 필요한 것:
 - 환경 네트워크 허용: `graph.facebook.com`
-- 환경 비밀: `META_ADS_TOKEN` (ads_management 권한, FACE 프로젝트와 같은 이름)
+- 토큰: 시스템 사용자 `nextpath-ads`(앱 `nextpath웹`, ads_management·ads_read·business_management)의 토큰을
+  클라우드 환경의 **네트워크 시크릿**으로 넣는다(허용 웹사이트 `graph.facebook.com`, 헤더 `Authorization: Bearer`).
+  프록시가 요청에 붙이므로 코드에 `access_token` 을 넣지 않는다. 세션에는 토큰 값이 보이지 않는다.
 - 광고 계정: DA-SH (`act_1102865001932830`)
 - 데이터 세트: NEXTPATH웹 `1422190370051636`
 
