@@ -35,12 +35,12 @@ export type Audience = "student" | "seeker" | "pro";
 const HERO: Record<Audience, { eyebrow: string; h1: [string, string, string]; lead: string }> = {
   student: {
     eyebrow: "학교 · 전공 · 학번만 고르면",
-    h1: ["나와 같은 자리에 있었던 사람들은 ", "어디로", " 갔을까?"],
+    h1: ["나와 같은 과 사람들, 커리어 시작은 ", "어디서", " 했을까?"],
     lead: "추천이 아니라, 같은 학교·전공·시기에 시작한 사람들이 간 길을 보여드려요.",
   },
   seeker: {
     eyebrow: "학교 · 전공 · 학번만 고르면",
-    h1: ["먼저 간 사람들은 ", "어디서", " 시작했을까?"],
+    h1: ["먼저 간 사람들, 커리어 시작은 ", "어디서", " 했을까?"],
     lead: "감으로 지원하기 전에, 같은 학교·전공으로 먼저 간 사람들의 첫 직장을 확인해 보세요.",
   },
   pro: {
