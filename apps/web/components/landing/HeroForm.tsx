@@ -16,8 +16,9 @@ import { YEARS } from "@/lib/years";
 type Tab = "student" | "pro";
 
 
-export default function HeroForm(props: { institutions: Institution[]; majors: Node[]; roles: Node[] }) {
-  const [tab, setTab] = useState<Tab>("student");
+export default function HeroForm(props: { institutions: Institution[]; majors: Node[]; roles: Node[];
+                                          initialTab?: Tab }) {
+  const [tab, setTab] = useState<Tab>(props.initialTab ?? "student");
   const [job, setJob] = useState({ role: "", start: "" });
   const [institutions, setInstitutions] = useState(props.institutions);
   const [majors, setMajors] = useState<Node[]>(props.majors);
@@ -103,11 +104,12 @@ export default function HeroForm(props: { institutions: Institution[]; majors: N
       </div>
       <SearchSelect inputId="hero-inst" ariaLabel="학교" noun="학교" placeholder="학교 검색 (예: 고려대, ㄱㄹㄷ)"
                     items={institutions.map((i) => ({ id: i.id, label: i.name, keywords: i.aliases ?? [] }))}
-                    value={inst} onChange={(v) => picked("school", v)} invalid={tried && !inst} />
+                    value={inst} onChange={(v) => picked("school", v)} invalid={tried && !inst} onType={touched} />
       <SearchSelect inputId="hero-major" ariaLabel="전공" noun="전공" placeholder="전공 검색 (예: 경영, 컴퓨터)"
                     items={majors.map((n) => ({ id: n.node_id, label: n.label, group: n.parent_label,
                                                 keywords: n.aliases ?? [] }))}
-                    value={major} onChange={(v) => picked("major", v)} invalid={tried && !major} suggestSimilar />
+                    value={major} onChange={(v) => picked("major", v)} invalid={tried && !major} suggestSimilar
+                    onType={touched} />
       <div className="pair">
         <select id="hero-adm" aria-label="입학 연도" value={years.adm} aria-invalid={tried && !years.adm}
                 onChange={(e) => { touched(); setYears({ ...years, adm: e.target.value }); }}>

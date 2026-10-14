@@ -12,7 +12,7 @@ export type FunnelEvent =
   | "interview_step_viewed" | "interview_skipped" | "interview_code_sent" | "interview_submitted"
   | "interview_withdrawn" | "import_viewed" | "import_uploaded" | "import_parsed" | "import_confirmed"
   | "payment_started" | "payment_failed" | "credit_purchased"
-  | "checkout_viewed" | "checkout_completed" | "checkout_cancelled";
+  | "checkout_viewed" | "checkout_completed" | "checkout_cancelled" | "login_consent_missing";
 
 const TOUCH = "hellomyme.touch";
 

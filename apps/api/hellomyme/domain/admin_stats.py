@@ -290,6 +290,15 @@ def stats(conn: Connection, rng: Range, with_team: bool) -> dict:
                count(DISTINCT sid) FILTER (WHERE event_name = 'checkout_cancelled') AS cancelled
         FROM ev"""), p).one()._mapping
 
+    # The login gate (docs/10 §로그인 동의): Kakao pressed before the consent box was ticked, and how
+    # many of those went on to press it again with the box ticked.
+    gate = conn.execute(text(_EVENTS + """
+        , asked AS (SELECT DISTINCT sid FROM ev WHERE event_name = 'login_consent_missing')
+        SELECT count(*) AS consent_missing,
+               count(*) FILTER (WHERE sid IN (SELECT sid FROM ev WHERE event_name = 'login_clicked'))
+                   AS then_clicked
+        FROM asked"""), p).one()._mapping
+
     return {
         "range": rng, "with_team": with_team,
         "since": t_from.isoformat() if t_from else None,
@@ -299,6 +308,7 @@ def stats(conn: Connection, rng: Range, with_team: bool) -> dict:
         "interview": {**dict(interview), **dict(shown)},
         "imports": imports,
         "pay": {"cards": cards, "checkout": dict(checkout)},
+        "gate": dict(gate),
     }
 
 

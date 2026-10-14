@@ -31,6 +31,8 @@ export type AdminStats = {
       paid: number; paid_krw: number }[];
     checkout: { started: number; viewed: number; completed: number; cancelled: number };
   };
+  /** The login gate: Kakao pressed before the consent box was ticked, and then pressed with it. */
+  gate: { consent_missing: number; then_clicked: number };
 };
 
 /** 401: not logged in. 403: logged in, not on the admin list (the body says the account id). */

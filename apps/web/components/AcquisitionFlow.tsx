@@ -49,7 +49,8 @@ type UserType = "STUDENT" | "PROFESSIONAL";
 
 const DEV_LOGIN = process.env.NEXT_PUBLIC_ENABLE_DEV_LOGIN === "true";
 const RESULT_SCREENS = new Set<Screen>(["s_result", "s_intent", "p_next", "p_first", "p_similar", "me"]);
-const CONSENT_VERSION = process.env.NEXT_PUBLIC_CONSENT_POLICY_VERSION ?? "career_terms_v1";
+// Names the consent wording on the login screen (docs/10 §로그인 동의); a new wording is a new version.
+const CONSENT_VERSION = "career_terms_v2";
 
 const INTERVIEW_SKIPPED = "hellomyme.interview_skipped";
 // The version of the interview consent wording shown in InterviewStep; change both together.
@@ -202,6 +203,8 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
   const [base, setBase] = useState<StepResult>();
   const [similar, setSimilar] = useState<StepResult>();
   const [consent, setConsent] = useState(false);
+  const [consentAsked, setConsentAsked] = useState(false); // pressed Kakao before ticking the box
+  const consentBox = useRef<HTMLInputElement>(null);
   const [me, setMe] = useState<MyResult>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
@@ -665,7 +668,17 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
   });
 
   const submitInput = run(() => toTeaser(edu, userType));
+  // The button stays pressable: before the box is ticked it points to the box instead of doing nothing.
+  const needConsent = () => {
+    if (consent) return false;
+    setConsentAsked(true);
+    track("login_consent_missing", { user_type: userType });
+    consentBox.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+    consentBox.current?.focus({ preventScroll: true });
+    return true;
+  };
   const kakao = async () => {
+    if (needConsent()) return;
     track("login_clicked", { user_type: userType, provider: "KAKAO" });
     setBusy(true);
     await settle(flushDesired(), 1500); // a desired role picked a moment ago is saved first
@@ -909,18 +922,23 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
               <p className="sub">어디로 갔는지는 로그인하면 바로 보여드려요. 입력한 내용은 그대로 이어져요.</p>
               <DesiredPicker roles={[...middleRoles, ...roles]} professional={professional}
                              value={desired} onChange={changeDesired} />
-              <label className="check">
-                <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
+              <label className={consentAsked && !consent ? "check ask" : "check"}>
+                <input ref={consentBox} type="checkbox" checked={consent}
+                       onChange={(e) => setConsent(e.target.checked)} />
                 <span>
-                  입력한 학교·경력 정보를 HMM 계정과 연결해 결과 제공과 익명 통계에 쓰는 것에 동의해요.
-                  {" "}<a href="/privacy" target="_blank" rel="noreferrer">개인정보처리방침</a>
+                  입력한 학교·경력을 내 계정에 저장하고, 내 결과와 누군지 알 수 없는 통계에만 쓰는 데 동의해요.
+                  {" "}<a href="/privacy" target="_blank" rel="noreferrer">자세히</a>
                 </span>
               </label>
-              <button className="cta kakao" disabled={!consent || busy} onClick={() => void kakao()}>카카오로 3초 만에 보기</button>
+              {consentAsked && !consent && (
+                <p className="consent-ask" role="alert">위 동의에 체크하면 바로 보여드려요</p>
+              )}
+              <button className="cta kakao" disabled={busy} onClick={() => void kakao()}>카카오로 3초 만에 보기</button>
               {app && app !== "kakaotalk" && (
                 <p className="hint">로그인이 잘 안 되면 화면 위 ⋯ 메뉴에서 ‘외부 브라우저로 열기’를 눌러 주세요. 입력한 내용은 그대로 이어져요.</p>
               )}
-              {DEV_LOGIN && <button className="cta ghost" disabled={!consent || busy} onClick={devLogin}>개발용 로그인</button>}
+              {DEV_LOGIN && <button className="cta ghost" disabled={busy}
+                                    onClick={() => { if (!needConsent()) devLogin(); }}>개발용 로그인</button>}
             </>
           )}
         </section>

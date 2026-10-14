@@ -182,6 +182,8 @@ EventName = Literal[
     "payment_started", "payment_failed",
     # The payment-intent test checkout (migration 0038)
     "checkout_viewed", "checkout_completed", "checkout_cancelled",
+    # The Kakao button pressed before the consent box was ticked (migration 0040)
+    "login_consent_missing",
 ]
 
 

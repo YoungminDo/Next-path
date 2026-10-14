@@ -67,6 +67,10 @@ h4 { font-size: 14px; margin: 0 0 8px; }
 .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .check { display: flex; gap: 8px; align-items: flex-start; font-size: 14px; }
 .check input { margin-top: 4px; accent-color: var(--mint); }
+/* Kakao pressed before the box was ticked: point at the box (AcquisitionFlow needConsent). */
+.check.ask { outline: 2px solid var(--danger); outline-offset: 6px; border-radius: 8px; }
+.check.ask input { outline: 2px solid var(--danger); outline-offset: 1px; }
+.consent-ask { margin: -2px 0 0; color: var(--danger); font-size: 13px; font-weight: 600; }
 
 .cta { margin-top: 8px; padding: 15px; border-radius: 14px; border: 0; background: var(--mint); color: var(--on-mint); font-weight: 800; font-size: 15px; cursor: pointer; }
 .cta:disabled { opacity: 0.45; cursor: not-allowed; }
@@ -307,6 +311,15 @@ body { word-break: keep-all; overflow-wrap: break-word; }
 .hero-copy { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .reward { margin-top: -36px; }
 @media (max-width: 720px) { .hero { grid-template-columns: 1fr; gap: 24px; } .reward { margin-top: -28px; } }
+/* Phones (Instagram's browser shows about 390×700): the form's button belongs on the first screen,
+   so the space above the headline and around the lead is tighter there. */
+@media (max-width: 720px) {
+  .lnav + .hero { margin-top: -44px; padding-top: 0; gap: 16px; }
+  .hero .lead { font-size: 16px; margin-top: 10px; }
+  .hero .reasons { margin-top: 10px; }
+  .landing h1 { font-size: 28px; }
+  .heroform { padding: 16px; gap: 8px; }
+}
 .sticky-cta[hidden] { display: none !important; }
 .heroform-warn { margin: 0; background: var(--caution-bg); color: var(--caution); border-radius: 10px; padding: 10px 12px; font-size: 13px; }
 

@@ -122,6 +122,7 @@ export default function AdminStats() {
             <Bars items={f.map((s, i) => ({ label: s.label, value: s.people,
               end: `${fmt(s.people)}명 · ${pct(s.people, f[0]?.people ?? 0)}`,
               detail: i ? `이전 단계 대비 ${pct(s.people, f[i - 1].people)}` : "첫 단계" }))} />
+            <p className="hint">동의 체크 전에 카카오를 누른 사람 {fmt(data.gate.consent_missing)}명 · 그중 체크하고 다시 누른 사람 {fmt(data.gate.then_clicked)}명</p>
           </Card>
 
           <Card title="날짜별 추이" table={<Table head={["날짜", ...SERIES.map((s) => s.label)]}

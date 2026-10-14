@@ -84,6 +84,7 @@ export default function SearchSelect(props: {
   invalid?: boolean;
   suggestSimilar?: boolean; // when nothing matches, offer entries that start the same way
   clearOnPick?: boolean; // an "add one more" box: empty again (and still focused) after a pick
+  onType?: () => void; // a letter typed (before anything is picked)
 }) {
   const { items, value, onChange, placeholder, ariaLabel, noun } = props;
   const [query, setQuery] = useState(value?.label ?? "");
@@ -165,7 +166,7 @@ export default function SearchSelect(props: {
           setOpen(true);
           setActive(0);
         }}
-        onChange={(e) => { setQuery(e.target.value); setOpen(true); setActive(0); }}
+        onChange={(e) => { setQuery(e.target.value); setOpen(true); setActive(0); props.onType?.(); }}
         onBlur={() => {
           frozen.current = open ? options : [];
           setClosing(open);

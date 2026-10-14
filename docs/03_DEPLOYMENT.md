@@ -70,7 +70,7 @@ HELLOMYME_DATABASE_URL='<위 URL>' uv run hellomyme-import-preseed /path/to/HELL
 | `HMM_ID_BASE_URL` | `https://id.da-sh.io` |
 | `APP_ORIGIN` | `https://nextpath.da-sh.io` |
 | `NEXT_PUBLIC_ENABLE_DEV_LOGIN` | `false` |
-| `NEXT_PUBLIC_CONSENT_POLICY_VERSION` | `career_terms_v1` |
+| ~~`NEXT_PUBLIC_CONSENT_POLICY_VERSION`~~ | 더 이상 읽지 않는다(10/14~). 동의 버전은 문구와 함께 코드에 있다(docs/10 §로그인 동의). 남아 있어도 무시된다 |
 | `NEXT_PUBLIC_META_PIXEL_ID` | (선택) 넣지 않으면 코드의 NEXTPATH웹 픽셀을 쓴다. 다른 ID로 바꾸거나 `off` 로 끈다 (docs/11). 공개값 |
 
 `ENABLE_DEV_LOGIN` 은 넣지 않습니다(운영 빌드에서는 넣어도 무시됨).

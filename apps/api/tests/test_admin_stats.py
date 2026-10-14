@@ -31,6 +31,7 @@ def test_only_listed_accounts_see_the_numbers(engine, ids):  # noqa: F811
     for sid, extra in ((visitor, {}), (team, {"internal": True})):
         event(c, "landing_viewed", sid, utm_source=f"insta{tag}", **extra)
         event(c, "career_input_completed", sid, **extra)
+        event(c, "login_consent_missing", sid, **extra)  # pressed Kakao before ticking consent
         payload = {**student(ids), "education": {**student(ids)["education"], "institution_id": None,
                                                  "institution_raw": f"대시보드{tag}대학교"},
                    "desired_role_status": "NONE"}
@@ -50,6 +51,7 @@ def test_only_listed_accounts_see_the_numbers(engine, ids):  # noqa: F811
     assert school == {"name": f"대시보드{tag}대학교", "listed": False, "people": 1}
     assert funnel["landing"] >= 1 and len(body["daily"]) == 1
     assert any(s["status"] == "NONE" for s in body["desired_status"])
+    assert body["gate"]["consent_missing"] >= 1 and "then_clicked" in body["gate"]
 
     with_team = c.get("/admin/stats", headers=auth, params={"range": "today", "with_team": True}).json()
     assert next(s for s in with_team["schools"] if s["name"] == f"대시보드{tag}대학교")["people"] == 2

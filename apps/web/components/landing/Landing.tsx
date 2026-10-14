@@ -29,10 +29,32 @@ const FREE = [
   { b: "한 걸음 먼저 간 사람에게 묻기", s: "곧 열려요", tag: "준비 중", soon: true },
 ];
 
-export default function Landing({ options }: { options: Options }) {
+// The first screen speaks to the audience the ad spoke to (docs/11: utm_campaign np_<date>_<audience>);
+// next.config.ts sends those visits to /for/<audience>, the address stays the same.
+export type Audience = "student" | "seeker" | "pro";
+const HERO: Record<Audience, { eyebrow: string; h1: [string, string, string]; lead: string }> = {
+  student: {
+    eyebrow: "학교 · 전공 · 학번만 고르면",
+    h1: ["나와 같은 자리에 있었던 사람들은 ", "어디로", " 갔을까?"],
+    lead: "추천이 아니라, 같은 학교·전공·시기에 시작한 사람들이 간 길을 보여드려요.",
+  },
+  seeker: {
+    eyebrow: "학교 · 전공 · 학번만 고르면",
+    h1: ["먼저 간 사람들은 ", "어디서", " 시작했을까?"],
+    lead: "감으로 지원하기 전에, 같은 학교·전공으로 먼저 간 사람들의 첫 직장을 확인해 보세요.",
+  },
+  pro: {
+    eyebrow: "지금 직무와 학교 · 전공을 고르면",
+    h1: ["같은 직무였던 사람들은 다음에 ", "어디로", " 갔을까?"],
+    lead: "추천이 아니라, 나와 비슷한 경력의 사람들이 다음에 옮긴 길을 보여드려요.",
+  },
+};
+
+export default function Landing({ options, audience = "student" }: { options: Options; audience?: Audience }) {
+  const hero = HERO[audience];
   return (
     <div className="landing">
-      <TrackView name="landing_viewed" />
+      <TrackView name="landing_viewed" variant={audience === "student" ? undefined : audience} />
       <nav className="lnav">
         <a className="brand" href="/">nextpath</a>
         <a className="lnav-cta" href="#hero-form">무료로 시작</a>
@@ -40,15 +62,15 @@ export default function Landing({ options }: { options: Options }) {
 
       <header className="hero">
         <div className="hero-copy">
-          <p className="eyebrow">학교 · 전공 · 학번만 고르면</p>
-          <h1>나와 같은 자리에 있었던 사람들은 <em>어디로</em> 갔을까?</h1>
-          <p className="lead">같은 학교, 같은 전공, 비슷한 시기에 시작한 사람들이 간 길을 보여드려요. 답답했던 내 방향, 이 중에 있을지도 몰라요.</p>
+          <p className="eyebrow">{hero.eyebrow}</p>
+          <h1>{hero.h1[0]}<em>{hero.h1[1]}</em>{hero.h1[2]}</h1>
+          <p className="lead">{hero.lead}</p>
           <ul className="reasons">
-            <li>추천이 아니라, 같은 출발점의 사람들이 간 길이에요</li>
             <li>로그인은 카카오로 3초, 무료예요</li>
           </ul>
         </div>
-        <HeroForm institutions={options.institutions} majors={options.majors} roles={options.roles} />
+        <HeroForm institutions={options.institutions} majors={options.majors} roles={options.roles}
+                  initialTab={audience === "pro" ? "pro" : "student"} />
       </header>
 
       <a className="reward" href="#hero-form">
