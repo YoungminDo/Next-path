@@ -20,11 +20,13 @@ const WORRIES = [
   "영업에서 기획으로 옮긴 사람, 얼마나 걸렸을까?",
 ];
 
+// What a login gets, as the service does it (docs/10 §유료 카드와 결제, /terms): the map and the path are free,
+// sign-up gives 1 튜브 (one more card), every further card is 1 튜브 = 990원.
 const FREE = [
-  { b: "내 진로 지도", s: "나와 같은 출발점의 사람들이 나뉜 길 전부" },
-  { b: "궁금한 길의 실제 경로", s: "어떤 순서로, 몇 년 만에 갔는지" },
-  { b: "깊은 분석 3번", s: "가입하면 3튜브 지급 · 도착한 회사 규모·산업" },
-  { b: "한 걸음 먼저 간 사람에게 묻기", s: "곧 열려요", soon: true },
+  { b: "내 진로 지도", s: "나와 같은 출발점의 사람들이 나뉜 길 전부", tag: "무료" },
+  { b: "궁금한 길의 실제 경로", s: "어떤 순서로, 몇 년 만에 갔는지", tag: "무료" },
+  { b: "깊은 분석 카드 1장", s: "가입하면 1튜브 지급 · 회사 규모·근속 같은 분석", tag: "가입 선물" },
+  { b: "한 걸음 먼저 간 사람에게 묻기", s: "곧 열려요", tag: "준비 중", soon: true },
 ];
 
 export default function Landing({ options }: { options: Options }) {
@@ -51,7 +53,7 @@ export default function Landing({ options }: { options: Options }) {
 
       <a className="reward" href="#hero-form">
         <span className="badge">100% 지급</span>
-        <span><b>지금 가입하면 3튜브</b> · 깊은 분석을 3번 무료로 열어볼 수 있어요</span>
+        <span><b>지금 가입하면 1튜브</b> · 깊은 분석 카드 1장을 무료로 열어볼 수 있어요</span>
         <span aria-hidden="true">›</span>
       </a>
 
@@ -70,13 +72,13 @@ export default function Landing({ options }: { options: Options }) {
       <section className="lsec offer">
         <div className="offer-copy">
           <p className="eyebrow">로그인 한 번으로</p>
-          <h2>이걸 전부 무료로 받아요</h2>
-          <p className="sub">드는 건 카카오 로그인 3초와 고르기 4번이에요.</p>
+          <h2>여기까지 무료로 받아요</h2>
+          <p className="sub">드는 건 카카오 로그인 3초와 고르기 4번이에요. 카드를 더 열 때만 1장에 990원이에요.</p>
         </div>
         <ul className="ticket">
           {FREE.map((f) => (
             <li key={f.b} className={f.soon ? "soon" : ""}>
-              <b>{f.b}</b><span>{f.s}</span><em>{f.soon ? "준비 중" : "무료"}</em>
+              <b>{f.b}</b><span>{f.s}</span><em>{f.tag}</em>
             </li>
           ))}
         </ul>
@@ -120,7 +122,7 @@ export default function Landing({ options }: { options: Options }) {
         <p className="eyebrow">자주 묻는 질문</p>
         <h2>궁금한 점</h2>
         <div className="faq">
-          <details><summary>정말 무료인가요?</summary><p>네. 내 진로 지도와 궁금한 길의 경로는 무료예요. 회사 규모·산업 같은 깊은 분석은 튜브로 여는데, 가입하면 3튜브를 바로 드려요. 튜브는 지금 돈으로 팔지 않아요.</p></details>
+          <details><summary>정말 무료인가요?</summary><p>내 진로 지도와 궁금한 길의 경로는 무료예요. 회사 규모·근속 같은 깊은 분석 카드는 1장에 1튜브로 여는데, 가입하면 1튜브를 바로 드려요. 그다음 카드는 1장에 990원이에요. 자세한 내용은 <a href="/terms">이용약관</a>에 있어요.</p></details>
           <details><summary>왜 로그인해야 하나요?</summary><p>학교·전공·경력처럼 민감할 수 있는 정보를 다루기 때문에, 본인 확인과 동의를 받은 뒤에 결과를 보여드려요. 로그인하면 입력한 내용이 저장돼서 다시 쓰지 않아도 돼요.</p></details>
           <details><summary>내 정보가 다른 사람에게 보이나요?</summary><p>아니요. 결과는 모두 익명 통계이고, 5명 미만 그룹은 숨겨요. 학교·회사·연도는 나와 비슷한 사람을 찾는 데만 써요.</p></details>
           <details><summary>데이터는 어디서 오나요?</summary><p>가입하고 경력을 입력·인증한 사람들의 기록으로 계산해요. 지금은 베타라서, 실제 기록이 충분히 모이기 전까지는 예시 데이터로 계산한 결과를 보여드려요.</p></details>
