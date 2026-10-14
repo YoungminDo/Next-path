@@ -11,6 +11,9 @@ type Fbq = ((...args: unknown[]) => void) & { queue?: unknown[][]; loaded?: bool
 type PixelEvent = "PageView" | "Lead" | "CompleteRegistration";
 
 let ready = false;
+// fbevents.js loading state, so callers can wait until queued events have left (pixelSettled).
+let script: "none" | "loading" | "loaded" | "failed" = "none";
+let loadedAt = 0;
 
 function load(): Fbq | null {
   const w = window as unknown as { fbq?: Fbq; _fbq?: Fbq };
@@ -29,7 +32,12 @@ function load(): Fbq | null {
     const s = document.createElement("script");
     s.async = true;
     s.src = "https://connect.facebook.net/en_US/fbevents.js";
+    s.onload = () => { script = "loaded"; loadedAt = Date.now(); };
+    s.onerror = () => { script = "failed"; };
+    script = "loading";
     document.head.appendChild(s);
+  } else if (script === "none") {
+    script = "loaded"; // someone else's pixel code already runs on this page
   }
   if (!ready) {
     w.fbq!("set", "autoConfig", false, PIXEL_ID);
@@ -51,4 +59,22 @@ export function pixel(event: PixelEvent, eventId?: string) {
   } catch {
     /* measurement never breaks the product */
   }
+}
+
+/** Resolves once no queued pixel event can still read the page address: right away when the pixel is
+ *  off or never started, otherwise at least 1 s from now and 3 s after fbevents.js loaded (or as soon
+ *  as it failed to load). If the script is still loading after 15 s it never resolves, so whatever the
+ *  caller wanted to put in the address is simply skipped. */
+export function pixelSettled(): Promise<void> {
+  if (!pixelEnabled() || script === "none" || script === "failed") return Promise.resolve();
+  const start = Date.now();
+  return new Promise((resolve) => {
+    const tick = () => {
+      const now = Date.now();
+      if (script === "failed" && now - start >= 1000) return resolve();
+      if (script === "loaded" && now - start >= 1000 && now - loadedAt >= 3000) return resolve();
+      if (now - start < 15000) setTimeout(tick, 250);
+    };
+    tick();
+  });
 }

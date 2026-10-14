@@ -31,7 +31,7 @@ import {
 import { ImportedJobs, ImportEntry, importRows, ImportReview, ImportUpload, toPastJob } from "@/components/ImportFlow";
 import NodeSelect from "@/components/NodeSelect";
 import SearchSelect, { type Picked } from "@/components/SearchSelect";
-import { pixel } from "@/lib/pixel";
+import { pixel, pixelSettled } from "@/lib/pixel";
 import { inAppBrowser, isInternal, track } from "@/lib/track";
 import BusinessInfo from "@/components/BusinessInfo";
 import ResultCards, { OpenButton } from "@/components/ResultCards";
@@ -167,6 +167,20 @@ function conclusion(r: QueryResult & { n_directions?: number | null }, professio
   return dirs > 1
     ? `가장 많이 간 길은 ${top.label}(${pct(top.share)}%)이지만, 나머지 ${100 - pct(top.share)}%는 다른 ${dirs - 1}가지 길을 골랐어요.`
     : `모두 ${ro(top.label ?? "")} 갔어요.`;
+}
+
+/** The address an in-app browser hands to the phone's browser: the same answers the landing passes
+ *  (/start reads them on load) plus the campaign tags, so nothing has to be typed twice. */
+function handoffUrl(e: Edu, type: UserType, cur: Job): string {
+  const q = new URLSearchParams();
+  new URLSearchParams(window.location.search).forEach((v, k) => { if (k.startsWith("utm_")) q.set(k, v); });
+  q.set("type", type === "PROFESSIONAL" ? "pro" : "student");
+  const put = (k: string, v: string) => { if (v) q.set(k, v); };
+  put("inst", e.institution_id); put("inst_raw", e.institution_raw);
+  put("major", e.major_node_id); put("major_raw", e.major_raw);
+  put("adm", e.admission_year); put("grad", e.graduation_year);
+  if (type === "PROFESSIONAL") { put("role", cur.role_node_id); put("start", cur.start_year); }
+  return `${window.location.pathname}?${q}`;
 }
 
 export default function AcquisitionFlow({ initial, startOn }: { initial?: Options; startOn?: "upload" }) {
@@ -465,6 +479,11 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
     setDraftId(d.draft_id);
     setUnl({ kinds: d.unlisted ?? [], institution: e.institution_raw, major: e.major_raw });
     pixel("Lead", `lead-${d.draft_id}`);
+    // In-app browsers (Instagram etc.) may need "외부 브라우저로 열기" to log in, which opens the current
+    // address: the answers go back into it, but only once the pixel's events have left with the clean one.
+    if (app && app !== "kakaotalk") {
+      void pixelSettled().then(() => window.history.replaceState(null, "", handoffUrl(e, type, cur)));
+    }
     track("career_input_completed", {
       user_type: type,
       institution_id: e.institution_id || null,
