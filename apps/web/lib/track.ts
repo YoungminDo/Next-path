@@ -1,5 +1,5 @@
 /** Funnel events for the demand test (POST /analytics/events through the same-origin proxy).
- * Anonymous: a random session id, first-touch utm/referrer, never names or free text about a
+ * Anonymous: a random session id, first-touch utm/referrer (and whether an ad click id came along), never names or free text about a
  * person. Visiting once with ?internal=1 marks this browser as the team's, so the funnel
  * query can leave it out. Tracking never breaks the page: every failure is swallowed. */
 import { anonymousSession } from "@/lib/api";
@@ -61,10 +61,23 @@ function attribution(): Record<string, string> {
     // In-app browsers often send no referrer: the app itself tells where the visit came from.
     const app = inAppBrowser();
     if (app) touch.in_app = app;
+    // Meta adds fbclid to real ad clicks only (its ad review opens the page without it). Only the fact
+    // is kept, never the id, so paid visits can be told from review visits (docs/10 §사람이 아닌 방문).
+    if (params.get("fbclid")) touch.fbclid = "1";
     store(TOUCH, JSON.stringify(touch));
     return touch;
   } catch {
     return {};
+  }
+}
+
+/** Automated browsers and crawlers (Meta's ad review, link checkers): kept, but left out of statistics. */
+function automated(): boolean {
+  try {
+    if (navigator.webdriver) return true;
+    return /bot|crawler|spider|facebookexternalhit|facebot|headlesschrome|lighthouse/i.test(navigator.userAgent);
+  } catch {
+    return false;
   }
 }
 
@@ -86,6 +99,7 @@ export function track(name: FunnelEvent, properties: Record<string, unknown> = {
         path: window.location.pathname,
         mobile: window.matchMedia("(max-width: 640px)").matches,
         ...(store(INTERNAL) === "1" ? { internal: true } : {}),
+        ...(automated() ? { bot: true } : {}),
       },
     });
     // keepalive lets the last event of a page (result_left) still arrive while it unloads.

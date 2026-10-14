@@ -67,8 +67,12 @@ def test_campaigns_count_visits_inputs_and_new_members(engine, ids):  # noqa: F8
     admin = login(c, f"admin-{uuid.uuid4().hex[:6]}")
     account_id = c.get("/admin/stats", headers=admin).json()["detail"]["account_id"]
     tag = f"np_{uuid.uuid4().hex[:6]}_student"
-    joiner, looker, team = (uuid.uuid4().hex for _ in range(3))
-    for sid, extra in ((joiner, {}), (looker, {}), (team, {"internal": True})):
+    joiner, looker, team, clicker, review, bot = (uuid.uuid4().hex for _ in range(6))
+    paid = {"utm_medium": "paid_social"}
+    for sid, extra in ((joiner, {}), (looker, {}), (team, {"internal": True}),
+                       (clicker, {**paid, "fbclid": "1"}),    # a real ad click: counted
+                       (review, {**paid, "referrer": "m.facebook.com"}),  # Meta's ad review: not a person
+                       (bot, {"bot": True})):                  # an automated browser
         event(c, "landing_viewed", sid, utm_source="meta", utm_campaign=tag, **extra)
     event(c, "career_input_completed", joiner, utm_source="meta", utm_campaign=tag)
     event(c, "login_clicked", joiner, utm_source="meta", utm_campaign=tag)
@@ -80,4 +84,4 @@ def test_campaigns_count_visits_inputs_and_new_members(engine, ids):  # noqa: F8
     rows = c.get("/admin/stats", headers=admin, params={"range": "today"}).json()["campaigns"]
     row = next(r for r in rows if r["campaign"] == tag)
     assert {k: row[k] for k in ("source", "visits", "inputs", "login_clicks", "new_members")} == {
-        "source": "meta", "visits": 2, "inputs": 1, "login_clicks": 1, "new_members": 1}
+        "source": "meta", "visits": 3, "inputs": 1, "login_clicks": 1, "new_members": 1}

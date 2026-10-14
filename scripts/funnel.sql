@@ -1,7 +1,7 @@
 -- nextpath 수요 테스트 퍼널 (docs/10_DEMAND_TEST.md)
 -- Supabase → SQL Editor 에 이 파일 전체를 붙여넣고 Run. 읽기만 하고 아무것도 바꾸지 않습니다.
 -- 기간은 params 의 t_from / t_to 만 바꾸면 됩니다 (기본: 오늘 0시(한국 시간)부터 지금까지).
--- 사람 수 = 브라우저(익명 세션) 수. 팀이 ?internal=1 로 한 번 연 브라우저는 빠집니다.
+-- 사람 수 = 브라우저(익명 세션) 수. 팀이 ?internal=1 로 한 번 연 브라우저와 사람이 아닌 방문(Meta 검토 등)은 빠집니다.
 -- 시각은 서버가 받은 시각(received_at) 기준. 채널: utm_source → 인앱 앱(instagram 등) → referrer.
 
 WITH params AS (
@@ -14,6 +14,10 @@ ev AS (
   FROM analytics.event e CROSS JOIN params p
   WHERE e.received_at >= p.t_from AND e.received_at < p.t_to
     AND coalesce(e.properties->>'internal', 'false') <> 'true'
+    AND NOT (coalesce(e.properties->>'bot', 'false') = 'true'  -- not a person (docs/10)
+         OR ((coalesce(e.properties->>'utm_medium', '') = 'paid_social'
+              OR coalesce(e.properties->>'referrer', '') LIKE '%facebook.com')
+             AND e.properties->>'in_app' IS NULL AND e.properties->>'fbclid' IS NULL))
 ),
 steps (ord, step, event_name, screens) AS (
   VALUES
@@ -52,6 +56,10 @@ WITH params AS (
   FROM analytics.event e CROSS JOIN params p
   WHERE e.received_at >= p.t_from AND e.received_at < p.t_to
     AND coalesce(e.properties->>'internal', 'false') <> 'true'
+    AND NOT (coalesce(e.properties->>'bot', 'false') = 'true'  -- not a person (docs/10)
+         OR ((coalesce(e.properties->>'utm_medium', '') = 'paid_social'
+              OR coalesce(e.properties->>'referrer', '') LIKE '%facebook.com')
+             AND e.properties->>'in_app' IS NULL AND e.properties->>'fbclid' IS NULL))
 ), channel AS (
   SELECT DISTINCT ON (sid) sid,
          coalesce(properties->>'utm_source', properties->>'in_app', properties->>'referrer', '(직접 방문)') AS ch
@@ -73,12 +81,20 @@ WITH params AS (
   FROM analytics.event e CROSS JOIN params p
   WHERE e.event_name = 'result_step_viewed' AND e.received_at >= p.t_from AND e.received_at < p.t_to
     AND coalesce(e.properties->>'internal', 'false') <> 'true'
+    AND NOT (coalesce(e.properties->>'bot', 'false') = 'true'  -- not a person (docs/10)
+         OR ((coalesce(e.properties->>'utm_medium', '') = 'paid_social'
+              OR coalesce(e.properties->>'referrer', '') LIKE '%facebook.com')
+             AND e.properties->>'in_app' IS NULL AND e.properties->>'fbclid' IS NULL))
     AND e.properties->>'previous' IN ('s_result','s_intent','p_next','p_first','p_similar','me')
   UNION ALL
   SELECT e.properties->>'screen', CASE WHEN e.properties->>'seconds' ~ '^[0-9]{1,6}$' THEN (e.properties->>'seconds')::int END
   FROM analytics.event e CROSS JOIN params p
   WHERE e.event_name = 'result_left' AND e.received_at >= p.t_from AND e.received_at < p.t_to
     AND coalesce(e.properties->>'internal', 'false') <> 'true'
+    AND NOT (coalesce(e.properties->>'bot', 'false') = 'true'  -- not a person (docs/10)
+         OR ((coalesce(e.properties->>'utm_medium', '') = 'paid_social'
+              OR coalesce(e.properties->>'referrer', '') LIKE '%facebook.com')
+             AND e.properties->>'in_app' IS NULL AND e.properties->>'fbclid' IS NULL))
 )
 SELECT screen AS "화면", count(*) AS "조회 수",
        percentile_cont(0.5) WITHIN GROUP (ORDER BY seconds) AS "중앙값(초)",
@@ -94,6 +110,10 @@ WITH params AS (
   FROM analytics.event e CROSS JOIN params x
   WHERE e.event_name = 'career_input_completed' AND e.received_at >= x.t_from AND e.received_at < x.t_to
     AND coalesce(e.properties->>'internal', 'false') <> 'true'
+    AND NOT (coalesce(e.properties->>'bot', 'false') = 'true'  -- not a person (docs/10)
+         OR ((coalesce(e.properties->>'utm_medium', '') = 'paid_social'
+              OR coalesce(e.properties->>'referrer', '') LIKE '%facebook.com')
+             AND e.properties->>'in_app' IS NULL AND e.properties->>'fbclid' IS NULL))
   ORDER BY e.anonymous_session_id, e.received_at DESC
 )
 SELECT 'school' AS "구분", p->>'institution_name' AS "이름",
@@ -115,6 +135,10 @@ SELECT e.properties->>'institution_name' AS "학교", e.properties->>'major_labe
 FROM analytics.event e CROSS JOIN params x
 WHERE e.event_name = 'career_input_completed' AND e.received_at >= x.t_from AND e.received_at < x.t_to
   AND coalesce(e.properties->>'internal', 'false') <> 'true'
+  AND NOT (coalesce(e.properties->>'bot', 'false') = 'true'  -- not a person (docs/10)
+       OR ((coalesce(e.properties->>'utm_medium', '') = 'paid_social'
+            OR coalesce(e.properties->>'referrer', '') LIKE '%facebook.com')
+           AND e.properties->>'in_app' IS NULL AND e.properties->>'fbclid' IS NULL))
 GROUP BY 1, 2 ORDER BY 3 DESC, 1, 2;
 
 -- [목록 밖으로 검색만 하고 떠난 이름 포함] 입력 중 직접 친 학교·전공 (많이 원한 순)
@@ -126,6 +150,10 @@ SELECT e.properties->>'kind' AS "종류", e.properties->>'name' AS "이름",
 FROM analytics.event e CROSS JOIN params p
 WHERE e.event_name = 'school_requested' AND e.received_at >= p.t_from AND e.received_at < p.t_to
   AND coalesce(e.properties->>'internal', 'false') <> 'true'
+  AND NOT (coalesce(e.properties->>'bot', 'false') = 'true'  -- not a person (docs/10)
+       OR ((coalesce(e.properties->>'utm_medium', '') = 'paid_social'
+            OR coalesce(e.properties->>'referrer', '') LIKE '%facebook.com')
+           AND e.properties->>'in_app' IS NULL AND e.properties->>'fbclid' IS NULL))
 GROUP BY 1, 2 ORDER BY 3 DESC, 2;
 
 -- ============================================================================================

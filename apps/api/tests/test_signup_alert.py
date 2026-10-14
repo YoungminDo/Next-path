@@ -52,6 +52,8 @@ def test_a_new_member_is_announced_once_with_the_channel_only(ids):  # noqa: F81
     tag = uuid.uuid4().hex[:6]
     touch(c, h, utm_source="insta<!channel>", utm_campaign=f"fall_*promo*{tag}")
     touch(c, anon(), utm_source="insta", utm_campaign=f"fall_*promo*{tag}")  # a visitor who left
+    touch(c, anon(), utm_source="insta", utm_campaign=f"fall_*promo*{tag}", utm_medium="paid_social",
+          referrer="www.facebook.com")  # Meta's ad review: not a person, not in the rate
     draft = save(c, h, student(ids))
     auth = login(c, "alert-new")
     assert merge(c, h, draft, auth)["merged"] is True

@@ -35,6 +35,17 @@ SCREEN_LABELS = {"s_result": "첫 결과 (학생)", "s_intent": "궁금한 길 �
                  "p_first": "첫 직장 입력", "p_similar": "비슷한 경로", "me": "경로 결과"}
 
 # Every query below starts from these: the window (Korean days) and who counts.
+def not_a_person(e: str = "e") -> str:
+    """Visits that are not a person (docs/10 §사람이 아닌 방문): the browser flagged itself as automated
+    (track.ts `bot`), or it came from Meta (paid utm or a facebook.com referrer) without an ad click
+    id (`fbclid`) and outside the Facebook/Instagram app: Meta's ad review opens the landing page that way.
+    Every event of a browser carries the same first-touch fields, so the test holds per event."""
+    return f"""(coalesce({e}.properties->>'bot', 'false') = 'true'
+        OR ((coalesce({e}.properties->>'utm_medium', '') = 'paid_social'
+             OR coalesce({e}.properties->>'referrer', '') LIKE '%facebook.com')
+            AND {e}.properties->>'in_app' IS NULL AND {e}.properties->>'fbclid' IS NULL))"""
+
+
 _EVENTS = """
     WITH team AS (
         SELECT DISTINCT anonymous_session_id AS sid FROM analytics.event
@@ -44,6 +55,7 @@ _EVENTS = """
                coalesce(e.anonymous_session_id, e.account_id::text, e.event_id::text) AS sid
         FROM analytics.event e
         WHERE (CAST(:t_from AS timestamptz) IS NULL OR e.received_at >= :t_from)
+          AND NOT """ + not_a_person() + """
           AND (:with_team OR (coalesce(e.properties->>'internal', 'false') <> 'true'
                AND (e.anonymous_session_id IS NULL
                     OR e.anonymous_session_id NOT IN (SELECT sid FROM team)))))

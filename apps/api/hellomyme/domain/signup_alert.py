@@ -15,6 +15,7 @@ import httpx
 from sqlalchemy import Connection, text
 
 from hellomyme.config import Settings
+from hellomyme.domain.admin_stats import not_a_person
 
 log = logging.getLogger(__name__)
 
@@ -96,8 +97,8 @@ def signup_message(conn: Connection, draft_id: str, anonymous_session: str,
                SELECT DISTINCT anonymous_session_id AS sid FROM analytics.event
                WHERE anonymous_session_id IS NOT NULL AND properties->>'internal' = 'true'),
            ev AS (
-               SELECT anonymous_session_id AS sid, properties, received_at FROM analytics.event
-               WHERE anonymous_session_id IS NOT NULL
+               SELECT anonymous_session_id AS sid, properties, received_at FROM analytics.event e
+               WHERE anonymous_session_id IS NOT NULL AND NOT """ + not_a_person() + """
                  AND coalesce(properties->>'internal', 'false') <> 'true'
                  AND anonymous_session_id NOT IN (SELECT sid FROM team)),
            touch AS (
