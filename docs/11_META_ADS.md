@@ -117,3 +117,28 @@ utm_source=meta&utm_medium=paid_social&utm_campaign=np_1014_pro&utm_content={{ad
   - 심사에서 채용으로 분류되면 나이로 나눌 수 없다. 그때는 세트를 소재별로만 나누고, 나이는 Meta 보고서의 `연령` 분석으로 본다.
 - **개인 특성 단정 문구**: 메타 정책은 인종·종교·건강·재정 상태 같은 개인 특성을 단정하는 문구를 막는다. 직무·학과는 그 목록에
   없어서 "나와 같은 직무였던 사람들"은 위험이 낮다.
+
+## 캠페인 생성 스펙 np_1014 (Marketing API로 만들 때)
+소재: `docs/ads/np_1014/nextpath_{student,seeker,pro}_{4x5,9x16}.png` (예시 숫자에 "예시" 표시).
+API로 만들 때 필요한 것:
+- 환경 네트워크 허용: `graph.facebook.com`
+- 환경 비밀: `META_ADS_TOKEN` (ads_management 권한, FACE 프로젝트와 같은 이름)
+- 광고 계정: DA-SH (`act_1102865001932830`)
+- 데이터 세트: NEXTPATH웹 `1422190370051636`
+
+모든 객체는 **PAUSED** 로 만든다. 켜는 것은 대표가 광고 관리자에서 한다.
+
+| 객체 | 값 |
+|---|---|
+| 캠페인 | `np_1014`, objective `OUTCOME_LEADS`, special_ad_categories `[]`, 캠페인 예산 없음(광고 세트 예산) |
+| 광고 세트 공통 | optimization_goal `OFFSITE_CONVERSIONS`, promoted_object `{pixel_id: 1422190370051636, custom_event_type: LEAD}`, billing `IMPRESSIONS`, bid `LOWEST_COST_WITHOUT_CAP`, 일 예산 $7(계정 통화 USD), 2026-10-15 00:00 ~ 10-19 23:59 KST, 국가 KR, 한국어, 자동 노출 위치 |
+| 광고 세트 | `student` 19–23 · `seeker` 24–28 · `pro` 29–35 (Advantage+ 타겟 끔: 연령 고정) |
+| 광고 | 세트마다 1개, 피드 4:5 · 스토리/릴스 9:16 (노출 위치별 이미지), 버튼 LEARN_MORE, 링크 `https://nextpath.da-sh.io/`, url_tags = 아래 utm |
+
+| 세트 | 제목 | 기본 문구 |
+|---|---|---|
+| student | 우리 과 선배들의 첫 직장 | 우리 과 선배들은 졸업하고 처음에 어디로 갔을까? 학교·전공만 넣으면 나와 비슷한 사람들의 첫 진로를 1분 만에 볼 수 있어요. 무료예요. |
+| seeker | 먼저 간 사람들의 첫 직장 | 감으로 지원하기 전에, 나와 같은 전공으로 먼저 간 사람들이 어디서 시작했는지 확인해 보세요. 학교·전공만 넣으면 1분이면 끝나요. 무료예요. |
+| pro | 같은 직무였던 사람들의 다음 이동 | 나와 같은 직무였던 사람들, 다음엔 어디로 갔을까? 지금 직무만 넣으면 비슷한 경력의 다음 이동을 1분 만에 볼 수 있어요. 무료예요. |
+
+문구에 "실제", "진짜 데이터"는 쓰지 않는다(위험과 확인할 것 참고).
