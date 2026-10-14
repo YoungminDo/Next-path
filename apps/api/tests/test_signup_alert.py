@@ -1,5 +1,6 @@
 """Sign-up alert to the team's Slack: once per new member, counts and channel only, never the
 team's own sign-ups, never in the way of the login."""
+import re
 import uuid
 from datetime import UTC, datetime
 
@@ -48,7 +49,9 @@ def test_a_new_member_is_announced_once_with_the_channel_only(ids):  # noqa: F81
     slack = FakeSlack()
     c = client_with(slack)
     h = anon()
-    touch(c, h, utm_source="insta<!channel>", utm_campaign="fall_*promo*")
+    tag = uuid.uuid4().hex[:6]
+    touch(c, h, utm_source="insta<!channel>", utm_campaign=f"fall_*promo*{tag}")
+    touch(c, anon(), utm_source="insta", utm_campaign=f"fall_*promo*{tag}")  # a visitor who left
     draft = save(c, h, student(ids))
     auth = login(c, "alert-new")
     assert merge(c, h, draft, auth)["merged"] is True
@@ -56,7 +59,10 @@ def test_a_new_member_is_announced_once_with_the_channel_only(ids):  # noqa: F81
     msg = slack.messages[0]
     assert msg.startswith(":tada: *nextpath 회원가입* — 학생")
     # Visitor-supplied text is inert: no mention, link or bold can be injected.
-    assert "유입 `insta !channel`" in msg and "캠페인 `fall_*promo*`" in msg
+    assert "유입 `insta !channel`" in msg and f"캠페인 `fall_*promo*{tag}`" in msg
+    # Sign-up rate: this campaign's new members over its visiting browsers (1 of 2 came back).
+    assert f"캠페인 `fall_*promo*{tag}` 50.0% (1/2명) (누적)" in msg
+    assert re.search(r"가입 전환율 · 오늘 \d+\.\d% \(\d+/[\d,]+명\)", msg)
     assert "<!channel>" not in msg and "오늘 " in msg and "누적 " in msg
     assert msg.endswith("<https://nextpath.da-sh.io/admin|대시보드에서 보기>")
     assert draft not in msg and "고려" not in msg  # no ids, no school
