@@ -10,6 +10,8 @@ export type AdminStats = {
   funnel: FunnelStep[];
   daily: Daily[];
   channels: { channel: string; landing: number; input_completed: number; signup: number; result: number }[];
+  campaigns: { source: string | null; campaign: string; visits: number; inputs: number; login_clicks: number;
+    new_members: number }[];
   dwell: { screen: string; label: string; views: number; median_seconds: number | null }[];
   inputs: { people: number; professionals: number; unlisted_school: number; unlisted_major: number; linked: number };
   schools: Named[];

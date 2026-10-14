@@ -421,6 +421,7 @@ body { word-break: keep-all; overflow-wrap: break-word; }
 .policy .brand { color: var(--mint-ink); font-weight: 800; text-decoration: none; }
 .policy h1 { font-size: 24px; margin: 12px 0 4px; }
 .policy h2 { font-size: 17px; margin: 32px 0 10px; }
+.policy h3 { font-size: 15px; margin: 18px 0 6px; }
 .policy .meta, .policy .note { color: var(--sub); font-size: 13px; }
 .policy table { display: block; overflow-x: auto; border-collapse: collapse; width: 100%; font-size: 13px; margin: 8px 0; }
 .policy th, .policy td { border: 1px solid var(--line); padding: 8px 10px; text-align: left; vertical-align: top; min-width: 120px; }

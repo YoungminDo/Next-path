@@ -57,3 +57,27 @@ def test_only_listed_accounts_see_the_numbers(engine, ids):  # noqa: F811
     assert len(week["daily"]) == 7  # empty days are zeros, not gaps
     assert c.get("/admin/stats", headers=auth, params={"range": "1y"}).status_code == 422
     assert "phone" not in out.text and visitor not in out.text  # counts only
+
+
+def test_campaigns_count_visits_inputs_and_new_members(engine, ids):  # noqa: F811
+    from tests.test_acquisition import merge, save
+
+    app = create_app()
+    c = TestClient(app)
+    admin = login(c, f"admin-{uuid.uuid4().hex[:6]}")
+    account_id = c.get("/admin/stats", headers=admin).json()["detail"]["account_id"]
+    tag = f"np_{uuid.uuid4().hex[:6]}_student"
+    joiner, looker, team = (uuid.uuid4().hex for _ in range(3))
+    for sid, extra in ((joiner, {}), (looker, {}), (team, {"internal": True})):
+        event(c, "landing_viewed", sid, utm_source="meta", utm_campaign=tag, **extra)
+    event(c, "career_input_completed", joiner, utm_source="meta", utm_campaign=tag)
+    event(c, "login_clicked", joiner, utm_source="meta", utm_campaign=tag)
+    h = {"X-Anonymous-Session": joiner}
+    merge(c, h, save(c, h, student(ids)), f"camp-{tag}")  # a new member from the campaign
+
+    app.dependency_overrides[get_settings] = lambda: Settings(env="test", auth_providers=["DEV"],
+                                                             admin_account_ids=[account_id])
+    rows = c.get("/admin/stats", headers=admin, params={"range": "today"}).json()["campaigns"]
+    row = next(r for r in rows if r["campaign"] == tag)
+    assert {k: row[k] for k in ("source", "visits", "inputs", "login_clicks", "new_members")} == {
+        "source": "meta", "visits": 2, "inputs": 1, "login_clicks": 1, "new_members": 1}

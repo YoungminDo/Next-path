@@ -7,6 +7,8 @@ import BusinessInfo from "@/components/BusinessInfo";
 export const metadata = { title: "nextpath · 개인정보처리방침" };
 
 const EFFECTIVE = "2026년 10월 13일";
+// The Meta pixel section appears only when the pixel is on (NEXT_PUBLIC_META_PIXEL_ID, lib/pixel.ts).
+const PIXEL = Boolean(process.env.NEXT_PUBLIC_META_PIXEL_ID);
 const CONTACT = "branden@da-sh.io";
 
 export default function Privacy() {
@@ -151,6 +153,22 @@ export default function Privacy() {
         로그인 유지와 이용 흐름 통계를 위해 쿠키와 브라우저 저장소(익명 세션 식별자)를 씁니다. 브라우저 설정에서 거부할 수 있으며,
         거부하면 로그인 등 일부 기능을 쓸 수 없습니다.
       </p>
+      {PIXEL && (
+        <>
+          <h3>광고 성과 측정 (Meta 픽셀)</h3>
+          <p>
+            광고를 보고 들어온 방문이 입력·가입으로 이어졌는지 재기 위해, Meta Platforms, Inc.(미국)가 사이트에서 아래 행태정보를
+            수집하도록 허용합니다. 회사는 Meta로부터 광고별 집계 숫자만 받으며, 이름·연락처·학교·전공 같은 입력 내용은 보내지
+            않습니다(입력 내용은 주소창에서도 지운 뒤 측정합니다).
+          </p>
+          <ul>
+            <li>수집 항목: 방문한 페이지 주소, 광고 클릭 식별자, 브라우저·기기 정보, IP 주소, 행동 3가지(첫 화면 방문, 정보 입력 완료, 가입 완료)</li>
+            <li>목적: 광고 성과 측정과 광고 전달 개선 · 보유 기간: Meta의 정책에 따름</li>
+            <li>거부 방법: 브라우저에서 제3자 쿠키 차단, Facebook·Instagram의 설정 &gt; 광고 기본 설정에서 활동 정보 사용 해제,
+              휴대폰의 광고 식별자 재설정·추적 제한. 거부해도 서비스는 그대로 이용할 수 있습니다.</li>
+          </ul>
+        </>
+      )}
 
       <h2>8. 만 14세 미만</h2>
       <p>서비스는 대학생 이상을 위한 것으로, 만 14세 미만의 개인정보를 받지 않습니다.</p>
@@ -167,7 +185,7 @@ export default function Privacy() {
 
       <h2>10. 방침의 변경</h2>
       <p>내용이 바뀌면 시행 7일 전부터 이 페이지에 알립니다. 이용자 권리에 중요한 변경은 30일 전부터 알립니다.</p>
-      <p className="meta">변경 이력: {EFFECTIVE} 최초 시행</p>
+      <p className="meta">변경 이력: {EFFECTIVE} 최초 시행{PIXEL && " · 2026년 10월 14일 광고 성과 측정(Meta 픽셀) 추가"}</p>
 
       <footer><BusinessInfo /></footer>
     </main>

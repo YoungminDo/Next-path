@@ -161,6 +161,12 @@ export default function AdminStats() {
               c.channel, fmt(c.landing), fmt(c.input_completed), fmt(c.signup), fmt(c.result), pct(c.input_completed, c.landing)])} />
           </Card>
 
+          <Card title="광고 캠페인" note="utm_campaign이 붙은 첫 방문 기준. 가입 전환율 = 신규 가입 ÷ 방문. 가입당 비용은 Meta 광고비 ÷ 신규 가입으로 계산해요 (docs/11).">
+            <Table text={2} head={["캠페인", "소스", "방문", "입력", "로그인 클릭", "신규 가입", "가입 전환율"]}
+              rows={data.campaigns.map((c) => [c.campaign, c.source ?? "–", fmt(c.visits), fmt(c.inputs),
+                fmt(c.login_clicks), fmt(c.new_members), pct(c.new_members, c.visits)])} />
+          </Card>
+
           <Card title="결과 화면에 머문 시간">
             <Table head={["화면", "조회", "중앙값"]} rows={data.dwell.map((d) => [
               d.label, fmt(d.views), d.median_seconds == null ? "–" : `${Math.round(d.median_seconds)}초`])} />

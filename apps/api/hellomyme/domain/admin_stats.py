@@ -104,6 +104,31 @@ def stats(conn: Connection, rng: Range, with_team: bool) -> dict:
         FROM channel c JOIN ev e USING (sid)
         GROUP BY 1 ORDER BY landing DESC, input_completed DESC LIMIT 20""", p)
 
+    # Ad campaigns (utm_campaign, docs/11): the funnel per campaign, and new members = accounts
+    # whose first linked answers came from a browser of that campaign (가입 전환율 = 신규 가입 ÷ 방문;
+    # 가입당 비용 = Meta 광고비 ÷ 신규 가입).
+    campaigns = _rows(conn, _EVENTS + """
+        , touch AS (
+            SELECT DISTINCT ON (sid) sid, properties->>'utm_source' AS source,
+                   properties->>'utm_campaign' AS campaign
+            FROM ev WHERE properties ? 'utm_campaign' ORDER BY sid, received_at),
+        members AS (
+            SELECT DISTINCT ON (d.claimed_account_id) d.session_id, d.internal
+            FROM anonymous_draft d JOIN account a ON a.account_id = d.claimed_account_id
+            WHERE a.status = 'ACTIVE' ORDER BY d.claimed_account_id, d.claimed_at),
+        joined AS (
+            SELECT t.source, t.campaign, count(*) AS new_members
+            FROM touch t JOIN members m ON m.session_id = encode(sha256(convert_to(t.sid, 'UTF8')), 'hex')
+            WHERE NOT m.internal GROUP BY 1, 2)
+        SELECT t.source, t.campaign,
+               count(DISTINCT t.sid) AS visits,  -- any page, so ads that open /start count too
+               count(DISTINCT t.sid) FILTER (WHERE e.event_name = 'career_input_completed') AS inputs,
+               count(DISTINCT t.sid) FILTER (WHERE e.event_name = 'login_clicked') AS login_clicks,
+               coalesce(max(j.new_members), 0) AS new_members
+        FROM touch t JOIN ev e USING (sid)
+        LEFT JOIN joined j ON j.campaign = t.campaign AND j.source IS NOT DISTINCT FROM t.source
+        GROUP BY 1, 2 ORDER BY visits DESC, new_members DESC LIMIT 30""", p)
+
     dwell = _rows(conn, _EVENTS + """
         , stay AS (
             SELECT properties->>'previous' AS screen,
@@ -229,7 +254,7 @@ def stats(conn: Connection, rng: Range, with_team: bool) -> dict:
     return {
         "range": rng, "with_team": with_team,
         "since": t_from.isoformat() if t_from else None,
-        "funnel": funnel, "daily": daily, "channels": channels, "dwell": dwell,
+        "funnel": funnel, "daily": daily, "channels": channels, "campaigns": campaigns, "dwell": dwell,
         "inputs": dict(inputs), "schools": schools, "majors": majors, "combos": combos,
         "desired_status": desired_status, "desired_roles": desired_roles, "backlog": backlog,
         "interview": {**dict(interview), **dict(shown)},

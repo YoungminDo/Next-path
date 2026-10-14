@@ -31,6 +31,7 @@ import {
 import { ImportedJobs, ImportEntry, importRows, ImportReview, ImportUpload, toPastJob } from "@/components/ImportFlow";
 import NodeSelect from "@/components/NodeSelect";
 import SearchSelect, { type Picked } from "@/components/SearchSelect";
+import { pixel } from "@/lib/pixel";
 import { inAppBrowser, isInternal, track } from "@/lib/track";
 import BusinessInfo from "@/components/BusinessInfo";
 import ResultCards, { OpenButton } from "@/components/ResultCards";
@@ -300,6 +301,14 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
       return;
     }
     const type = params.get("type");
+    // Answers came in the address: read them once, then keep only the campaign tags, so the school
+    // and years never travel further (shared links, the Meta pixel's page address).
+    if (["inst", "inst_raw", "major", "major_raw", "adm", "grad", "role", "start"].some((k) => params.has(k))) {
+      const keep = new URLSearchParams();
+      params.forEach((v, k) => { if (k === "type" || k.startsWith("utm_")) keep.set(k, v); });
+      const q = keep.toString();
+      window.history.replaceState(null, "", window.location.pathname + (q ? `?${q}` : ""));
+    }
     // The landing passes what was already answered: never ask for it again.
     const fromHero: Edu = {
       institution_id: params.get("inst") ?? "", institution_raw: params.get("inst_raw") ?? "",
@@ -455,6 +464,7 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
     const d = await acq.saveDraft(payload(e, type, cur), draftId, isInternal());
     setDraftId(d.draft_id);
     setUnl({ kinds: d.unlisted ?? [], institution: e.institution_raw, major: e.major_raw });
+    pixel("Lead", `lead-${d.draft_id}`);
     track("career_input_completed", {
       user_type: type,
       institution_id: e.institution_id || null,
@@ -504,9 +514,12 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
     const saved = pending.draftId();
     const version = pending.consentVersion();
     let differs: ProfileChange[] = [];
+    let newMember = false;
     if (saved && version) {
       try {
-        differs = (await api.mergeDraft(saved, version)).changes ?? [];
+        const merged = await api.mergeDraft(saved, version);
+        differs = merged.changes ?? [];
+        newMember = merged.merged;
       } catch (e) {
         // 409: this account already has a profile; continue with it.
         if (!(e instanceof ApiError && e.status === 409)) throw e;
@@ -514,7 +527,8 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
       pending.draftId(null);
       pending.consentVersion(null);
     }
-    track("signup_completed", { merged_draft: Boolean(saved && version) });
+    track("signup_completed", { merged_draft: Boolean(saved && version), new_member: newMember });
+    if (newMember) pixel("CompleteRegistration", `signup-${saved}`);
     if (saved && differs.length) {
       // Already a member with other answers on record: show before/after, they decide.
       setChanges({ draftId: saved, items: differs });
