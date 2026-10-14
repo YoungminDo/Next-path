@@ -45,7 +45,7 @@ const HERO: Record<Audience, { eyebrow: string; h1: [string, string, string]; le
   },
   pro: {
     eyebrow: "지금 직무와 학교 · 전공을 고르면",
-    h1: ["같은 직무였던 사람들은 다음에 ", "어디로", " 갔을까?"],
+    h1: ["같은 직무였던 사람들의 ", "넥스트 커리어", "는?"],
     lead: "추천이 아니라, 나와 비슷한 경력의 사람들이 다음에 옮긴 길을 보여드려요.",
   },
 };
