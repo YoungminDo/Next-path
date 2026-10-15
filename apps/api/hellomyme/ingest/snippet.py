@@ -39,6 +39,11 @@ def profile_key(url: str) -> str | None:
     return hashlib.sha256(f"linkedin:{slug}".encode()).hexdigest()
 
 
+def _has(name: str, s: str) -> bool:
+    """name appears in s as a whole word (토스 is not found in 토스뱅크)."""
+    return re.search(r"(?<![가-힣A-Za-z0-9])" + re.escape(name) + r"(?![가-힣A-Za-z0-9])", s) is not None
+
+
 def _clean(s: str | None) -> str:
     return re.sub(r"\s+", " ", s or "").strip(" .,…")
 
@@ -72,9 +77,12 @@ def to_extraction(title: str, snippet: str, submission_id: str) -> dict | None:
     t = re.sub(r"\s*\|\s*LinkedIn.*$", "", title or "", flags=re.I)
     head = [_clean(p) for p in re.split(r"\s+[-–—]\s+", t)]
     name, parts = (head[0] or None), [p for p in head[1:] if p]
+    tokens = sorted({name, *(w for w in re.split(r"[\s(),]+", name) if len(w) >= 2)} if name else set(),
+                    key=len, reverse=True)
+    mask_re = re.compile("|".join(re.escape(w) for w in tokens), re.I) if tokens else None
 
     def ev(s: str) -> list[dict]:
-        text = s.replace(name, MASK) if name else s
+        text = mask_re.sub(MASK, s) if mask_re else s
         return [{"asset_id": ASSET, "text": text[:2000]}]
 
     segments = [_clean(s) for s in re.split(r"[·|\n]", snippet) if _clean(s)]
@@ -84,7 +92,7 @@ def to_extraction(title: str, snippet: str, submission_id: str) -> dict | None:
 
     work_events = []
     for i, org in enumerate(dict.fromkeys(o for o in orgs if o), 1):
-        seg = next((s for s in segments if org in s and _RANGE.search(s)), None)
+        seg = next((s for s in segments if _has(org, s) and _RANGE.search(s)), None)
         we = {"local_id": f"W{i}", "organization_raw": org, "event_type_hint": "UNKNOWN",
               "evidence": ev(seg or (t if org in t else snippet))}
         if i == 1 and len(parts) >= 2:
@@ -98,16 +106,17 @@ def to_extraction(title: str, snippet: str, submission_id: str) -> dict | None:
         schools = [_clean(s) for s in _SCHOOL.findall(snippet)]
     educations = []
     for i, school in enumerate(dict.fromkeys(s for s in schools if s), 1):
-        seg = (next((s for s in segments if school in s and (_MAJOR.search(s) or _RANGE.search(s))), None)
-               or next((s for s in segments if school in s), snippet))
-        ed = {"local_id": f"E{i}", "institution_raw": school, "evidence": ev(seg)}
-        major = _MAJOR.search(seg)
-        if major:
-            ed["major_raw"] = major.group(1)
-        d = _dates(seg)
-        for key in ("start", "end"):
-            if d.get(key):
-                ed[key] = d[key]
+        seg = (next((s for s in segments if _has(school, s) and (_MAJOR.search(s) or _RANGE.search(s))), None)
+               or next((s for s in segments if _has(school, s)), None))
+        ed = {"local_id": f"E{i}", "institution_raw": school, "evidence": ev(seg or snippet)}
+        if seg is not None:  # a fallback to the whole snippet attaches no major or dates
+            major = _MAJOR.search(seg)
+            if major:
+                ed["major_raw"] = major.group(1)
+            d = _dates(seg)
+            for key in ("start", "end"):
+                if d.get(key):
+                    ed[key] = d[key]
         educations.append(ed)
 
     if not educations and not work_events:

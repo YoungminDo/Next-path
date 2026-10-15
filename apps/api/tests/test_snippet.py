@@ -38,7 +38,26 @@ def test_dates_only_from_the_same_segment_and_no_invented_month():
 def test_a_lone_year_is_not_attached_to_any_job():
     doc = to_extraction("Kim Lee – PM – Coupang | LinkedIn",
                         "Experience: Coupang, Naver · Seoul · 2019", "k2")
+    assert doc["work_events"]
     assert all("start" not in w for w in doc["work_events"])
+
+
+def test_segment_match_is_whole_word_so_a_similar_name_is_not_taken():
+    doc = to_extraction("A - 개발자 - 토스 | LinkedIn",
+                        "토스뱅크 2020 - 2021 · 토스 2022 - 현재", "k5")
+    job = next(w for w in doc["work_events"] if w["organization_raw"] == "토스")
+    assert job["start"] == {"value": "2022", "precision": "YEAR"}
+    assert job["is_current"] is True
+
+
+def test_name_is_masked_in_any_case_and_in_every_token():
+    doc = to_extraction("홍길동 - PM - 쿠팡 | LinkedIn", "쿠팡 2020 - 현재 홍길동님", "k6")
+    dumped = json.dumps(doc, ensure_ascii=False)
+    assert "홍길동" not in dumped and "[person_pii]님" in dumped
+
+    doc = to_extraction("Gil Hong - PM - Coupang | LinkedIn", "Coupang 2020 - Present GIL HONG", "k7")
+    dumped = json.dumps(doc, ensure_ascii=False).lower()
+    assert "gil" not in dumped and "hong" not in dumped
 
 
 def test_the_name_never_leaves_the_function():
