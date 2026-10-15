@@ -118,10 +118,12 @@
 
 - `person.display_name_raw`는 항상 `null`. 이름을 받지 않으므로 `approve` 때 동일인 후보(이름+첫 회사)도 생기지 않는다.
 - 제목의 첫 구간(이름)을 근거 문장과 `headline_raw`에서 `[person_pii]`로 바꾼 뒤 `receive()`에 넘긴다.
-  `institution_raw`·`organization_raw`·`role_raw`·`major_raw`에 이름이 들어 있으면 그 필드를 뺀다(학교는 그 학력
-  행째, 회사는 직무도 없으면 그 경력 행째). 라벨(`학력:`) 없는 학교는 학교 이름 자체(한글 한 토큰 + 대학교/대학, 또는
-  대문자로 시작하는 영단어 3개까지 + University/College)만 읽고 앞의 말("홍길동님의 프로필 보기", "LinkedIn")은 읽지
-  않는다. 근거 문장은 그 이름부터 그것에 붙인 날짜·전공까지만 인용하므로, 요약문의 다른 사람 이름은 남지 않는다.
+  가리기는 한글 이름·토큰은 어디서나(`홍길동님`), 영문 토큰은 단어 단위로만 한다(`An`이 `Coupang` 안에서 가려지지 않게).
+  `institution_raw`·`organization_raw`·`role_raw`·`major_raw`에 이름 전체나 이름 토큰(단어 단위)이 들어 있으면 그 필드를
+  뺀다(학교는 그 학력 행째, 회사는 직무도 없으면 그 경력 행째). 라벨(`학력:`) 없는 학교는 한글 한 토큰 + 대학교/대학만
+  읽고 앞의 말("홍길동님의 프로필 보기", "LinkedIn")은 읽지 않는다. 영문 학교는 `Education:` 라벨에서만 읽는다
+  (University 앞의 대문자 단어는 학교 이름만큼 자주 사람 이름이다: "Park Jisoo Korea University"). 라벨 값은 쉼표로
+  나누고 대학교/대학/학교/University/College/School/Institute가 든 부분만 학교로 둔다. 근거 문장은 그 이름부터 그것에 붙인 날짜·전공까지만 인용하므로, 요약문의 다른 사람 이름은 남지 않는다.
   제목 끝의 `- LinkedIn` 구간은 회사로 읽지 않는다. `parse_run.raw_output`은
   수정할 수 없는 원본이므로 이 단계가 이름이 남지 않게 하는 유일한 지점이다.
 - 프로필 URL은 키 있는 해시(HMAC)만 저장한다. 로그(`search_run`, stdout)에는 검색어와 개수, 실패한 예외의 클래스 이름만 남긴다.

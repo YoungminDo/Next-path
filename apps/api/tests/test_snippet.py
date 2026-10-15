@@ -116,12 +116,12 @@ def test_free_text_school_is_only_the_school_and_the_name_never_leaks():
         assert [e["institution_raw"] for e in doc["educations"]] == ["고려대학교"]
 
 
-def test_free_text_english_school_takes_at_most_three_capitalised_words():
+def test_english_free_text_before_university_is_not_kept():  # N2: English schools need a label
     doc = to_extraction("Gil Hong - PM - Coupang | LinkedIn",
                         "View Kim Minsu's profile on LinkedIn Seoul National University", "c2")
     dumped = _values(doc)
     assert "Minsu" not in dumped and "LinkedIn" not in dumped
-    assert [e["institution_raw"] for e in doc["educations"]] == ["Seoul National University"]
+    assert doc["educations"] == []
 
 
 def test_a_raw_field_holding_the_name_is_dropped():
@@ -195,3 +195,50 @@ def test_another_jobs_dates_in_the_same_segment_are_not_attached():
 def test_a_range_before_the_name_is_not_taken():
     doc = to_extraction("A - 개발자 - 토스", "2019 - 2022 토스", "i2c")
     assert "start" not in doc["work_events"][0]
+
+
+# --- re-check N1: a Latin name token masks whole words only --------------------------------
+
+def test_a_short_latin_name_token_does_not_eat_organizations_or_schools():
+    doc = to_extraction("Jae Han - Shinhan Bank | LinkedIn",
+                        "Experience: Shinhan Bank, Hanwha · Education: Hankuk University", "n1a")
+    assert doc is not None
+    assert [w["organization_raw"] for w in doc["work_events"]] == ["Shinhan Bank", "Hanwha"]
+    assert [e["institution_raw"] for e in doc["educations"]] == ["Hankuk University"]
+    assert doc["person"]["headline_raw"] == "Shinhan Bank"
+
+    doc = to_extraction("Yuna An - Coupang | LinkedIn", "Coupang 2021 - Present", "n1b")
+    assert doc["work_events"][0]["organization_raw"] == "Coupang"
+    assert doc["work_events"][0]["evidence"][0]["text"] == "Coupang 2021 - Present"
+    assert doc["person"]["headline_raw"] == "Coupang"
+
+    doc = to_extraction("Minji Ko - Kakao | LinkedIn", "Education: Korea University", "n1c")
+    assert [e["institution_raw"] for e in doc["educations"]] == ["Korea University"]
+
+
+def test_latin_name_tokens_are_still_masked_as_whole_words_and_hangul_names_inside_words():
+    doc = to_extraction("Yuna An - Coupang | LinkedIn", "Coupang AN Yuna 2021 - Present", "n1d")
+    text = doc["work_events"][0]["evidence"][0]["text"]
+    assert text == f"Coupang {MASK} {MASK} 2021 - Present"
+    doc = to_extraction("홍길동 - PM - 쿠팡 | LinkedIn", "쿠팡 홍길동님 2020 - 현재", "n1e")
+    assert "홍길동" not in _values(doc) and f"{MASK}님" in _values(doc)
+
+
+# --- re-check N2: English schools only from an Education: label ----------------------------
+
+def test_english_free_text_is_never_read_as_a_school():
+    for title in ("Gil Hong - PM - Coupang | LinkedIn", "홍길동 - PM - 쿠팡 | LinkedIn"):
+        for snippet in ("Recommended Park Jisoo Korea University", "Gildong Hong Korea University"):
+            doc = to_extraction(title, snippet, "n2")
+            assert doc["educations"] == [], (title, snippet)
+            assert "Jisoo" not in _values(doc) and "Gildong" not in _values(doc)
+
+
+def test_a_labelled_education_list_keeps_only_school_parts():
+    doc = to_extraction("이영희 | LinkedIn", "학력: 김철수 교수 연구실, 고려대학교", "n3a")
+    assert [e["institution_raw"] for e in doc["educations"]] == ["고려대학교"]
+    assert "김철수" not in _values(doc)
+    doc = to_extraction("Lee Kim | LinkedIn",
+                        "Education: Seoul National University, Hana Academy School, Prof Kim Lab", "n3b")
+    assert [e["institution_raw"] for e in doc["educations"]] == [
+        "Seoul National University", "Hana Academy School"]

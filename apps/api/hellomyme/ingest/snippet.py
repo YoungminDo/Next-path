@@ -33,10 +33,12 @@ _RANGE = re.compile(_POINT.format(p="s") + r"\s*[-–~]\s*(?:(?P<now>Present|현
 _EXPERIENCE = re.compile(r"(?:Experience|경력)\s*[:：]\s*([^·|\n]+)")
 _EDUCATION = re.compile(r"(?:Education|학력)\s*[:：]\s*([^·|\n]+)")
 # Free text (no 학력:/Education: label): only the school name itself, never the words before it
-# (a name, "님의 프로필 보기", "LinkedIn"): one Hangul token ending in 대학교/대학, or up to three
-# capitalised words ending in University/College.
-_SCHOOL = re.compile(r"(?<![가-힣])[가-힣]+(?:대학교|대학)"
-                     r"|(?<![A-Za-z])(?:(?!LinkedIn\b)[A-Z][A-Za-z.&'-]*\s+){0,3}(?:University|College)\b")
+# (a name, "님의 프로필 보기", "LinkedIn"): one Hangul token ending in 대학교/대학. English schools
+# are read only from an Education: label, because capitalised words before "University" are as
+# often a name ("Park Jisoo Korea University") as part of the school.
+_SCHOOL = re.compile(r"(?<![가-힣])[가-힣]+(?:대학교|대학)")
+# A labelled education list keeps only the parts that name a school.
+_SCHOOLISH = re.compile(r"대학교|대학|학교|University|College|School|Institute", re.I)
 _MAJOR = re.compile(r"([가-힣]+(?:학과|학부|전공))")
 
 
@@ -50,6 +52,18 @@ def profile_key(url: str, secret: bytes) -> str | None:
         return None
     slug = urllib.parse.unquote(m.group(1)).strip().lower()
     return hmac.new(secret, f"linkedin:{slug}".encode(), hashlib.sha256).hexdigest()
+
+
+def _whole(w: str) -> str:
+    return r"(?<![가-힣A-Za-z0-9])" + re.escape(w) + r"(?![가-힣A-Za-z0-9])"
+
+
+def _token(w: str) -> str:
+    """Masking pattern for one name token: Hangul anywhere (홍길동님 is masked), a Latin token only
+    as a whole word (An is not masked inside Coupang)."""
+    if re.search(r"[가-힣]", w):
+        return re.escape(w)
+    return r"(?<![A-Za-z])" + re.escape(w) + r"(?![A-Za-z])"
 
 
 def _has(name: str, s: str) -> bool:
@@ -106,10 +120,15 @@ def to_extraction(title: str, snippet: str, submission_id: str) -> dict | None:
     name, parts = (head[0] or None), [p for p in head[1:] if p]
     tokens = sorted({w for w in [name, *re.split(r"[\s(),]+", name or "")] if w and len(w) >= 2},
                     key=len, reverse=True)
-    mask_re = re.compile("|".join(re.escape(w) for w in tokens), re.I) if tokens else None
+    mask_re = re.compile("|".join(_token(w) for w in tokens), re.I) if tokens else None
+    # dropping a field needs the whole name, or one of its tokens as a whole word
+    named_re = re.compile("|".join([_token(name)] + [_whole(w) for w in tokens]), re.I) if tokens else None
 
     def mask(s: str) -> str:
         return mask_re.sub(MASK, s) if mask_re else s
+
+    def named(s: str) -> bool:
+        return bool(named_re and named_re.search(s))
 
     def ev(s: str) -> list[dict]:
         return [{"asset_id": ASSET, "text": mask(s)[:2000]}]
@@ -119,7 +138,8 @@ def to_extraction(title: str, snippet: str, submission_id: str) -> dict | None:
     for m in _EXPERIENCE.finditer(snippet):
         orgs += [_clean(c) for c in re.split(r",|，", m.group(1)) if _clean(c)]
     orgs = list(dict.fromkeys(o for o in orgs if o))
-    schools = [_clean(m.group(1)) for m in _EDUCATION.finditer(snippet)]
+    schools = [_clean(c) for m in _EDUCATION.finditer(snippet) for c in re.split(r",|，", m.group(1))
+               if _SCHOOLISH.search(c)]
     if not schools:
         schools = [_clean(s) for s in _SCHOOL.findall(snippet)]
     schools = list(dict.fromkeys(s for s in schools if s))
@@ -164,12 +184,12 @@ def to_extraction(title: str, snippet: str, submission_id: str) -> dict | None:
     # The name never stays in a raw field: masked, and a name-bearing organization, school, role
     # or major is dropped (with its row when nothing a reviewer could use is left).
     for ed in educations:
-        if "major_raw" in ed and MASK in mask(ed["major_raw"]):
+        if "major_raw" in ed and named(ed["major_raw"]):
             del ed["major_raw"]
-    educations = [ed for ed in educations if MASK not in mask(ed["institution_raw"])]
+    educations = [ed for ed in educations if not named(ed["institution_raw"])]
     for we in work_events:
         for key in ("organization_raw", "role_raw"):
-            if key in we and MASK in mask(we[key]):
+            if key in we and named(we[key]):
                 del we[key]
     work_events = [we for we in work_events if "organization_raw" in we or "role_raw" in we]
     headline = mask(" - ".join(parts))
