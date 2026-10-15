@@ -177,3 +177,22 @@ def test_per_provider_results_count_profiles_only(conn):
     out = go(conn, [Fake("serpapi", {"q1": [
         person("a"), Result("https://www.linkedin.com/company/toss", "Toss | LinkedIn", "회사")]})])
     assert out["results"] == 1 and out["by_provider"]["serpapi"]["results"] == 1
+
+
+def test_cli_dry_run_leaves_nothing(engine, monkeypatch, capsys):
+    import sys
+
+    from hellomyme.ingest import cli, search_source
+    monkeypatch.setattr(search_source, "from_settings", lambda s: [Fake("serpapi")])
+    monkeypatch.setattr(sys, "argv", ["hellomyme-ingest", "search-run", "--dry-run"])
+    monkeypatch.setenv("HELLOMYME_PUBLIC_PROFILE_LEGAL_BASIS", "test basis")
+    cli.get_settings.cache_clear()
+    try:
+        with pytest.raises(SystemExit) as e:
+            cli.main()
+    finally:
+        cli.get_settings.cache_clear()
+    assert e.value.code == 0
+    assert '"dry_run": true' in capsys.readouterr().out
+    with engine.connect() as c:
+        assert c.execute(text("SELECT count(*) FROM search_run")).scalar_one() == 0

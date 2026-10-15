@@ -26,3 +26,26 @@ services:
         value: https://id.da-sh.io
       - key: HELLOMYME_CORS_ORIGINS
         value: '["https://nextpath.da-sh.io"]'
+  # Search ingest (docs/12): public-profile snippets -> receive() for human review, SEED statistics
+  # only. Same image as the API; daily 03:00 KST. Keys, DB URL and legal basis are set in the dashboard.
+  - type: cron
+    name: nextpath-search-ingest
+    runtime: docker
+    rootDir: apps/api
+    dockerfilePath: ./Dockerfile
+    dockerCommand: hellomyme-ingest search-run
+    region: singapore
+    plan: starter
+    schedule: "0 18 * * *"
+    branch: main
+    envVars:
+      - key: HELLOMYME_ENV
+        value: staging
+      - key: HELLOMYME_DATABASE_URL
+        sync: false
+      - key: HELLOMYME_SERPAPI_KEY
+        sync: false
+      - key: HELLOMYME_BRAVE_API_KEY
+        sync: false
+      - key: HELLOMYME_PUBLIC_PROFILE_LEGAL_BASIS
+        sync: false

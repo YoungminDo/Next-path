@@ -3,7 +3,7 @@
 > 결정(2026-10-15, owner): 검색 엔진(SerpAPI·Brave)이 보여주는 공개 프로필의 제목·요약문을 반입 파이프라인(docs/09)에
 > 넣어 **통계 재료(SEED)로만** 쓴다. 결과 화면에 사람·프로필로 보여주지 않는다(docs/09 §8 그대로).
 > 회원가입 때 본인이 입력·업로드한 경력(`SELF_REPORTED`, `career_import.py`)은 지금처럼 따로 쌓인다.
-> 상태: 설계. 구현 전.
+> 상태: 구현됨 (마이그레이션 0041, `hellomyme-ingest search-run`, render.yaml `nextpath-search-ingest`).
 
 ## 1. 결정 요약
 

@@ -9,18 +9,19 @@
   approve  <parse_run_id>         load a fully reviewed run as one SEED person
   queue    [--kind KIND]          names waiting to be standardised
   map      <mapping_id> (--ref UUID | --new NAME)
+  search-run [--dry-run]          search public-profile snippets, receive them for review (docs/12)
 """
 import argparse
 import json
 import sys
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 from sqlalchemy import text
 
 from hellomyme.config import get_settings
 from hellomyme.db import get_engine
-from hellomyme.ingest import pipeline, sheet
+from hellomyme.ingest import pipeline, search_run, search_source, sheet
 from hellomyme.ingest.pipeline import IngestError
 
 SOURCE_TYPES = ["PUBLIC_PROFILE", "LINKEDIN_USER_UPLOAD", "CAREER_DOCUMENT", "MANUAL_RESEARCH"]
@@ -73,6 +74,10 @@ def main() -> None:
     g = m.add_mutually_exclusive_group(required=True)
     g.add_argument("--ref", help="existing organization/institution id or taxonomy node id")
     g.add_argument("--new", help="create this organization/institution")
+    sr = sub.add_parser("search-run", help="search public-profile snippets, receive them for review")
+    sr.add_argument("--dry-run", action="store_true",
+                    help="search and check, then roll everything back (nothing is received or logged)")
+    sr.add_argument("--as-of", type=date.fromisoformat, default=date.today())
     args = p.parse_args()
 
     if args.cmd == "sheet":
@@ -91,6 +96,17 @@ def main() -> None:
         sheet.write_report(report, out, dry_run=args.dry_run)
         _dump({"summary": report["summary"], "report": out, "dry_run": args.dry_run})
         return
+
+    if args.cmd == "search-run":
+        settings = get_settings()
+        with get_engine().connect() as conn:
+            tx = conn.begin()
+            out = search_run.run(conn, settings=settings, providers=search_source.from_settings(settings),
+                                 as_of=args.as_of, now=datetime.now(UTC))
+            tx.rollback() if args.dry_run else tx.commit()
+        out["dry_run"] = args.dry_run
+        _dump(out)
+        sys.exit(1 if out["status"] == "FAILED" else 0)
 
     try:
         with get_engine().begin() as conn:

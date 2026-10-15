@@ -21,6 +21,7 @@
 | API Docker 이미지 | ✅ `apps/api/Dockerfile` — 로컬 빌드·기동·`/health`·운영 가드 확인 |
 | DB 생성 | ⬜ 계정 필요 |
 | API 배포 | ⬜ 계정 필요 (`render.yaml` 준비됨) |
+| 검색 반입 크론 (`nextpath-search-ingest`) | ⬜ Blueprint 동기화 후 키·DB URL·법적 근거 입력, `search-run --dry-run` 1회 (docs/12) |
 | 웹 배포 + 도메인 | ⬜ Vercel 계정 + DNS 필요 |
 | PRE_SEED import | ⬜ DB 생성 후 |
 | 실 카카오 로그인 1회 검증 | ⬜ |
