@@ -31,7 +31,6 @@ PYTHONUTF8=1, pipeline._validator() reads the schema with the locale encoding):
 """
 import argparse
 import csv
-import hashlib
 import itertools
 import json
 import os
@@ -47,6 +46,7 @@ from pathlib import Path
 API = Path(__file__).resolve().parent.parent / "apps/api"
 sys.path.insert(0, str(API))
 from hellomyme.ingest.pipeline import _norm, check  # noqa: E402
+from hellomyme.ingest.snippet import profile_key, to_extraction  # noqa: E402
 
 REFERENCE = API / "hellomyme/reference"
 ROLES = ["백엔드 개발자", "프로덕트 매니저", "마케터", "데이터 분석가", "UX 디자이너"]
@@ -103,102 +103,6 @@ def load_reference():
     return schools, departments
 
 
-# --- snippet -> career_extraction.v1 (raw text only) -------------------------------------------
-
-MONTHS = {m: i for i, m in enumerate(
-    ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], 1)}
-POINT = (r"(?:(?P<{p}mon>[A-Za-z]{{3}})\w*\.?\s+(?P<{p}y1>(?:19|20)\d\d)"
-         r"|(?P<{p}y2>(?:19|20)\d\d)(?:\s*[.\-/년]\s*(?P<{p}m>\d{{1,2}})월?)?)")
-RANGE = re.compile(POINT.format(p="s") + r"\s*[-–~]\s*(?:(?P<now>Present|현재|재직\s*중)|"
-                   + POINT.format(p="e") + ")", re.I)
-EXPERIENCE = re.compile(r"(?:Experience|경력)\s*[:：]\s*([^·|\n]+)")
-EDUCATION = re.compile(r"(?:Education|학력)\s*[:：]\s*([^·|\n]+)")
-SCHOOL = re.compile(r"[가-힣A-Za-z ]*?(?:대학교|대학|University|College)(?:\s*\([^)]*\))?")
-MAJOR = re.compile(r"([가-힣]+(?:학과|학부|전공))")
-
-
-def _clean(s):
-    return re.sub(r"\s+", " ", s or "").strip(" .,…")
-
-
-def _point(m, p):
-    """A partial date with only the precision the text shows (docs/09 §5: never invent a month)."""
-    mon, y = m.group(p + "mon"), m.group(p + "y1") or m.group(p + "y2")
-    if not y:
-        return None
-    month = MONTHS.get((mon or "")[:3].lower()) or (int(m.group(p + "m")) if m.group(p + "m") else None)
-    if month and 1 <= month <= 12:
-        return {"value": f"{y}-{month:02d}", "precision": "MONTH"}
-    return {"value": y, "precision": "YEAR"}
-
-
-def _dates(segment):
-    m = RANGE.search(segment)
-    if not m:
-        return {}
-    out = {"start": _point(m, "s")}
-    if m.group("now"):
-        out["is_current"] = True
-    else:
-        out["end"] = _point(m, "e")
-    return out
-
-
-def to_extraction(title, snippet):
-    """One search result as career_extraction.v1. The name is never copied (display_name_raw null).
-    A date is attached only when it sits in the same snippet segment as that organization/school."""
-    segments = [_clean(s) for s in re.split(r"[·|\n]", snippet) if _clean(s)]
-    t = re.sub(r"\s*\|\s*LinkedIn.*$", "", title, flags=re.I)
-    parts = [_clean(p) for p in re.split(r"\s+[-–—]\s+", t)][1:]
-    headline = " - ".join(parts) or None
-
-    def ev(text):
-        return [{"asset_id": "S1", "text": text[:2000]}]
-
-    orgs = [parts[-1]] if parts else []
-    for m in EXPERIENCE.finditer(snippet):
-        orgs += [_clean(c) for c in re.split(r",|，", m.group(1)) if _clean(c)]
-    orgs = list(dict.fromkeys(o for o in orgs if o))
-
-    work_events = []
-    for i, org in enumerate(orgs, 1):
-        seg = next((s for s in segments if org in s and RANGE.search(s)), None)
-        we = {"local_id": f"W{i}", "organization_raw": org, "event_type_hint": "UNKNOWN",
-              "evidence": ev(seg or (t if org in t else snippet))}
-        if i == 1 and len(parts) >= 2:
-            we["role_raw"] = parts[0]
-        if seg:
-            we.update(_dates(seg))
-        work_events.append(we)
-
-    schools = [_clean(m.group(1)) for m in EDUCATION.finditer(snippet)]
-    if not schools:
-        schools = [_clean(s) for s in SCHOOL.findall(snippet)]
-    educations = []
-    for i, school in enumerate(dict.fromkeys(s for s in schools if s), 1):
-        seg = (next((s for s in segments if school in s and (MAJOR.search(s) or RANGE.search(s))), None)
-               or next((s for s in segments if school in s), snippet))
-        ed = {"local_id": f"E{i}", "institution_raw": school, "evidence": ev(seg)}
-        major = MAJOR.search(seg)
-        if major:
-            ed["major_raw"] = major.group(1)
-        d = _dates(seg)
-        if d.get("start"):
-            ed["start"] = d["start"]
-        if d.get("end"):
-            ed["end"] = d["end"]
-        educations.append(ed)
-
-    return {
-        "schema_version": "career_extraction.v1",
-        "submission_id": "snippet",
-        "assets": [{"asset_id": "S1", "page_order": 1}],
-        "person": {"display_name_raw": None, "headline_raw": headline},
-        "educations": educations,
-        "work_events": work_events,
-    }
-
-
 # --- readiness (CareerQuery terms) -------------------------------------------------------------
 
 def assess(doc, issues, schools, departments):
@@ -229,13 +133,14 @@ def run(results, as_of=None):
     schools, departments = load_reference()
     seen, rows, codes = set(), [], Counter()
     for url, title, snippet in results:
-        if "linkedin.com/in/" not in url:
-            continue
-        h = hashlib.sha256(url.split("?")[0].rstrip("/").lower().encode()).hexdigest()
-        if h in seen:
+        h = profile_key(url)
+        if h is None or h in seen:
             continue
         seen.add(h)
-        doc = to_extraction(title, snippet)
+        doc = to_extraction(title, snippet, "snippet")
+        if doc is None:
+            codes["EMPTY"] += 1
+            continue
         issues = check(doc, as_of)
         codes.update(f"{i.severity}:{i.code}" for i in issues)
         rows.append((doc, assess(doc, issues, schools, departments)))
