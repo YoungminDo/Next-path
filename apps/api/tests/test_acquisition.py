@@ -248,6 +248,16 @@ def test_similar_major_and_region_rules():
     assert similar_majors(majors, "독어독문학과") == (("F3",), "FAMILY")
     assert similar_majors(majors, "국어교육과") == (("L5",), "SIMILAR")  # starts the same way
     assert similar_majors(majors, "QA테스트학과") == ((), None)
+    # Words point to a list group when nothing in the list is named (MAJOR_WORDS).
+    groups = Taxonomy("MAJOR", "t", {
+        **majors.nodes, "G1": node("인문학", 1), "G2": node("공학", 1), "G3": node("공학", 2, "G2"),
+        "F4": node("미디어·커뮤니케이션", 2, "F0")})
+    assert similar_majors(groups, "일본학과") == (("F3",), "FAMILY")
+    assert similar_majors(groups, "철학과") == (("G1",), "FAMILY")
+    assert similar_majors(groups, "고고미술사학과") == (("G1",), "FAMILY")  # 인문학 before 미술
+    assert similar_majors(groups, "신문방송학") == (("F4",), "FAMILY")
+    assert similar_majors(groups, "건축학과") == (("G3",), "FAMILY")  # the deepest node named 공학
+    assert similar_majors(groups, "간호학과") == ((), None)  # no health group in the list
     assert similar_region("부산목록밖대학교") == "부산"
     assert similar_region("충청남도 목록밖대학") == "충남"
     assert similar_region("수원목록밖대") == "경기"

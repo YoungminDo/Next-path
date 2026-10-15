@@ -315,10 +315,46 @@ def _name_base(s: str) -> str:
     return n[:-1] if n.endswith("학") and len(n) > 2 else n
 
 
+# Words in typed major names, to the group of the major list they belong to (by label, so a longer
+# list keeps working). The list is small (20 majors in 10 families, 5 top groups), so many common
+# majors are typed (docs/10 §목록 밖 전공). Earlier groups win (고고미술사학과 is 인문학, not 미술).
+# Health majors (간호·치료·보건·체육) have no group in the list yet and stay unmatched.
+MAJOR_WORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("인문학", ("철학", "사학", "역사", "고고", "미술사", "문헌정보", "종교", "신학", "한문", "인문")),
+    ("언어·문학", ("어문", "영어", "영문", "국어", "국문", "일본", "일어", "중국", "중어", "중문", "독일",
+                "독어", "독문", "불어", "불문", "프랑스", "러시아", "노어", "스페인", "서어", "문예창작",
+                "문학")),
+    ("미디어·커뮤니케이션", ("신문방송", "언론", "방송", "저널리즘", "광고", "홍보", "엔터테인먼트",
+                       "콘텐츠", "컨텐츠")),
+    ("예술·디자인", ("영상", "영화", "연극", "연출", "공예", "미술", "음악", "무용", "패션", "사진", "만화",
+                 "애니메이션")),
+    ("경영·경제", ("금융", "재무", "회계", "세무", "무역", "벤처", "창업", "마케팅", "호텔", "관광", "물류",
+               "부동산")),
+    ("행정·정책", ("법", "경찰", "정치", "공공")),
+    ("국제·글로벌", ("통상", "외교", "지역학")),
+    ("사회·심리", ("복지", "아동", "가족", "상담", "청소년")),
+    ("수학·통계·데이터", ("데이터", "인공지능")),
+    ("자연과학", ("화학", "물리", "생물", "생명", "지구", "천문", "식품", "영양", "해양", "수산", "동물",
+              "축산", "원예", "환경", "산림", "농")),
+    ("공학", ("공학", "건축", "토목", "신소재", "재료", "반도체", "정보통신", "로봇")),
+)
+
+
+def _word_group(majors: Taxonomy, full: str) -> str | None:
+    """The list group a typed name's words point to (the deepest node with that label)."""
+    for label, words in MAJOR_WORDS:
+        if any(w in full for w in words):
+            nodes = [i for i, n in majors.nodes.items() if n["label"] == label]
+            if nodes:
+                return max(nodes, key=lambda i: (majors.nodes[i]["depth"], i))
+    return None
+
+
 def similar_majors(majors: Taxonomy, typed: str) -> tuple[tuple[str, ...], str | None]:
     """Listed majors close to a typed major: listed names inside it (글로벌경영학부 -> 경영학과),
-    else the family it names (데이터사이언스학과 -> 수학·통계·데이터), else listed names that
-    start the same way (국어교육과 -> 국어국문학과). Returns (node ids, SIMILAR | FAMILY)."""
+    else the family it names (데이터사이언스학과 -> 수학·통계·데이터), else listed names that start
+    the same way (국어교육과 -> 국어국문학과), else the group its words point to (일본학과 -> 언어·문학,
+    철학과 -> 인문학, MAJOR_WORDS). Returns (node ids, SIMILAR | FAMILY)."""
     parents = {n["parent"] for n in majors.nodes.values() if n["parent"]}
     leaves = sorted(i for i in majors.nodes if i not in parents)
     full, base = _norm_name(typed), _name_base(typed)
@@ -342,6 +378,9 @@ def similar_majors(majors: Taxonomy, typed: str) -> tuple[tuple[str, ...], str |
     best = max((shared(base, bases[i]) for i in leaves), default=0)
     if best >= 2:
         return tuple([i for i in leaves if shared(base, bases[i]) == best][:3]), "SIMILAR"
+    group = _word_group(majors, full)
+    if group:
+        return (group,), "FAMILY"
     return (), None
 
 

@@ -170,6 +170,20 @@ function conclusion(r: QueryResult & { n_directions?: number | null }, professio
     : `모두 ${ro(top.label ?? "")} 갔어요.`;
 }
 
+// Set when Kakao is pressed, cleared by a completed login; still set on the preview means the person
+// came back without logging in. Kept for 30 minutes in this tab only.
+const LOGIN_PENDING = "hellomyme.login_pending";
+function loginPending(set?: boolean): boolean {
+  try {
+    if (set === true) sessionStorage.setItem(LOGIN_PENDING, String(Date.now()));
+    if (set === false) sessionStorage.removeItem(LOGIN_PENDING);
+    const at = Number(sessionStorage.getItem(LOGIN_PENDING) || 0);
+    return at > 0 && Date.now() - at < 30 * 60 * 1000;
+  } catch {
+    return false;
+  }
+}
+
 /** The address an in-app browser hands to the phone's browser: the same answers the landing passes
  *  (/start reads them on load) plus the campaign tags, so nothing has to be typed twice; `handoff`
  *  tells the statistics it is the same person, not a new visit. */
@@ -204,12 +218,26 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
   const [similar, setSimilar] = useState<StepResult>();
   const [consent, setConsent] = useState(false);
   const [consentAsked, setConsentAsked] = useState(false); // pressed Kakao before ticking the box
+  // Pressed Kakao and came back to the preview without a login (the Kakao page did not open or
+  // was left in the in-app browser): say how to go on in the phone's own browser.
+  const [loginReturned, setLoginReturned] = useState(false);
+  const [copied, setCopied] = useState(false);
   const consentBox = useRef<HTMLInputElement>(null);
   const [me, setMe] = useState<MyResult>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [unl, setUnl] = useState<Unl>();
   const app = useMemo(() => (typeof window === "undefined" ? null : inAppBrowser()), []);
+  useEffect(() => {
+    // Back from the Kakao page can restore this page as it was (busy, button off): free it.
+    const onShow = (e: PageTransitionEvent) => {
+      if (!e.persisted) return;
+      setBusy(false);
+      if (loginPending()) setLoginReturned(true);
+    };
+    window.addEventListener("pageshow", onShow);
+    return () => window.removeEventListener("pageshow", onShow);
+  }, []);
   // Desired role (optional, on the preview): kept in a ref too, so a save always sends the latest.
   const [desired, setDesired] = useState<Desired>(NO_DESIRED);
   const desiredRef = useRef<Desired>(NO_DESIRED);
@@ -314,6 +342,7 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
     const loginError = params.get("login_error");
     const loggedIn = params.get("login") === "success";
     if (loginError || loggedIn) window.history.replaceState(null, "", window.location.pathname);
+    if (loggedIn) loginPending(false);
     if (loginError) setError(LOGIN_ERRORS[loginError] ?? `로그인에 실패했어요 (${loginError}).`);
     if (loggedIn) {
       run(finishLogin)();
@@ -507,7 +536,9 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
     }
     const t = await acq.teaser(d.draft_id);
     setTeaser(t);
-    track("login_wall_viewed", { user_type: type, effective_n: t.base.effective_n,
+    const returned = loginPending();
+    setLoginReturned(returned);
+    track("login_wall_viewed", { user_type: type, returned_from_login: returned || undefined, effective_n: t.base.effective_n,
                                  suppressed: t.base.suppressed, n_directions: t.n_directions });
     setScreen("gate");
   }
@@ -679,7 +710,8 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
   };
   const kakao = async () => {
     if (needConsent()) return;
-    track("login_clicked", { user_type: userType, provider: "KAKAO" });
+    track("login_clicked", { user_type: userType, provider: "KAKAO", again: loginReturned || undefined });
+    loginPending(true);
     setBusy(true);
     await settle(flushDesired(), 1500); // a desired role picked a moment ago is saved first
     rememberDraft();
@@ -933,8 +965,20 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
               {consentAsked && !consent && (
                 <p className="consent-ask" role="alert">위 동의에 체크하면 바로 보여드려요</p>
               )}
+              {loginReturned && (app && app !== "kakaotalk" ? (
+                <div className="login-help" role="status">
+                  <b>카카오 로그인이 안 열렸나요?</b>
+                  <p>앱 안에서는 카카오 로그인이 막힐 때가 있어요. 화면 오른쪽 위 <b>⋯</b>를 누르고
+                    <b> ‘외부 브라우저로 열기’</b>를 골라 주세요. 입력한 내용은 그대로 이어져요.</p>
+                  <button className="cta ghost" type="button" onClick={() => {
+                    void navigator.clipboard?.writeText(window.location.href).then(() => setCopied(true), () => undefined);
+                  }}>{copied ? "복사했어요 · Safari나 Chrome 주소창에 붙여 넣어 주세요" : "주소 복사해서 다른 브라우저로 열기"}</button>
+                </div>
+              ) : (
+                <p className="login-help" role="status">카카오 로그인이 끝나지 않았어요. 아래 버튼을 한 번 더 눌러 주세요.</p>
+              ))}
               <button className="cta kakao" disabled={busy} onClick={() => void kakao()}>카카오로 3초 만에 보기</button>
-              {app && app !== "kakaotalk" && (
+              {app && app !== "kakaotalk" && !loginReturned && (
                 <p className="hint">로그인이 잘 안 되면 화면 위 ⋯ 메뉴에서 ‘외부 브라우저로 열기’를 눌러 주세요. 입력한 내용은 그대로 이어져요.</p>
               )}
               {DEV_LOGIN && <button className="cta ghost" disabled={busy}
