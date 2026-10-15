@@ -74,6 +74,7 @@ def run(conn: Connection, *, settings, providers: list, as_of: date, now: dateti
         if key is None:  # a company or post page, not a person
             return
         counts["results"] += 1
+        by_provider[provider.name]["results"] += 1
         if key in seen:
             counts["replayed"] += 1
             return
@@ -82,13 +83,16 @@ def run(conn: Connection, *, settings, providers: list, as_of: date, now: dateti
         if doc is None:
             counts["empty"] += 1
             return
+        # owner decision: every field from search ingest is reviewed by a person, none auto-accepted
+        held = {("EDUCATION", e["local_id"]) for e in doc["educations"]} | {
+            ("WORK_EVENT", w["local_id"]) for w in doc["work_events"]}
         sp = conn.begin_nested()
         try:
             r = receive(conn, json.dumps(doc, ensure_ascii=False), collector=COLLECTOR,
                         source_type="PUBLIC_PROFILE", permitted_use="AGGREGATE_ONLY",
                         legal_basis=settings.public_profile_legal_basis,
                         model_version=provider.model_version, prompt_version=PROMPT_VERSION,
-                        as_of=as_of)
+                        as_of=as_of, held=held)
             sp.commit()
         except IngestError:  # already LOADED or WITHDRAWN: nothing to do
             sp.rollback()
@@ -134,7 +138,6 @@ def run(conn: Connection, *, settings, providers: list, as_of: date, now: dateti
                         raise _Stop("ALL_PROVIDERS_FAILED:" + ",".join(
                             f"{n}={v['failed']}" for n, v in by_provider.items())) from None
                     continue  # retry this query once on the other provider
-                by_provider[provider.name]["results"] += len(page)
                 for person in page:
                     take(person, provider)
                 conn.execute(text(

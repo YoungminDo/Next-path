@@ -150,3 +150,30 @@ def test_one_failing_person_does_not_stop_the_others(conn, monkeypatch):
     _ops(conn, "q1")
     out = go(conn, [Fake("serpapi", {"q1": [person("a"), person("b", "카카오"), person("c")]})])
     assert (out["status"], out["received"], out["errors"]) == ("DONE", 2, 1)
+
+
+def test_every_received_field_waits_for_a_person_even_with_a_known_school(conn):
+    tv = conn.execute(text(
+        """INSERT INTO taxonomy_version (taxonomy, version) VALUES ('INSTITUTION', 'search-run-test')
+           ON CONFLICT (taxonomy, version) DO UPDATE SET version = EXCLUDED.version
+           RETURNING taxonomy_version_id""")).scalar_one()
+    conn.execute(text("INSERT INTO institution (name, taxonomy_version_id) VALUES ('검색대학교', :v)"),
+                 {"v": tv})
+    _ops(conn, "q1")
+    edu = Result("https://kr.linkedin.com/in/e", "테스트e - 학생 | LinkedIn",
+                 "학력: 검색대학교 · 검색대학교 컴퓨터학과 2015 - 2019")
+    out = go(conn, [Fake("serpapi", {"q1": [edu, person("w")]})])
+    assert out["received"] == 2
+    rows = conn.execute(text(
+        """SELECT p.status, count(*) FILTER (WHERE f.review_status <> 'PENDING'
+                                              AND f.raw_value IS NOT NULL)
+           FROM parse_run p JOIN extraction_field f USING (parse_run_id) GROUP BY p.parse_run_id, p.status"""
+    )).all()
+    assert len(rows) == 2 and all(tuple(r) == ("NEEDS_REVIEW", 0) for r in rows)
+
+
+def test_per_provider_results_count_profiles_only(conn):
+    _ops(conn, "q1")
+    out = go(conn, [Fake("serpapi", {"q1": [
+        person("a"), Result("https://www.linkedin.com/company/toss", "Toss | LinkedIn", "회사")]})])
+    assert out["results"] == 1 and out["by_provider"]["serpapi"]["results"] == 1
