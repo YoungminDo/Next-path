@@ -62,3 +62,33 @@ def test_from_settings_keeps_only_providers_with_a_key():
         serpapi_key = None
         brave_api_key = SecretStr("b")
     assert [p.name for p in from_settings(S())] == ["brave"]
+
+
+def test_brave_null_fields_become_empty_snippet(monkeypatch):
+    _fake(monkeypatch, {"web": {"results": [
+        {"url": "https://www.linkedin.com/in/c", "title": "C", "description": None,
+         "extra_snippets": None}]}})
+    assert Brave("k").search("q", 10) == [Result("https://www.linkedin.com/in/c", "C", "")]
+
+
+def test_non_dict_body_is_a_non_fatal_search_error(monkeypatch):
+    _fake(monkeypatch, [])
+    with pytest.raises(SearchError) as e:
+        SerpApi("k").search("q", 10)
+    assert (e.value.status, e.value.fatal) == (None, False)
+
+
+def test_connection_reset_is_a_non_fatal_search_error(monkeypatch):
+    def boom(req, timeout):
+        raise ConnectionResetError("reset")
+    monkeypatch.setattr(search_source.urllib.request, "urlopen", boom)
+    with pytest.raises(SearchError) as e:
+        SerpApi("k").search("q", 10)
+    assert (e.value.status, e.value.fatal) == (None, False)
+
+
+def test_error_message_never_contains_the_serpapi_key(monkeypatch):
+    _fake(monkeypatch, status=401)
+    with pytest.raises(SearchError) as e:
+        SerpApi("k-secret").search("q", 10)
+    assert "k-secret" not in str(e.value)
