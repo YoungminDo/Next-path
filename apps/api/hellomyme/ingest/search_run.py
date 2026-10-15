@@ -6,11 +6,19 @@ every field waits for a person (docs/09 §3), and nothing is shown as a person (
 
 Providers alternate per query: a query run before starts with the provider it did not use last
 time, a never-run query takes the next one in rotation. 401/403/429 removes a provider for the
-rest of the run and the query is retried once on the other.
+rest of the run and the query is retried once on the other; any other error (a 5xx, the network,
+an unexpected response shape) counts against that query only. A run whose every query failed is
+FAILED (ALL_QUERIES_FAILED), never DONE.
+
+A person whose earlier run from this job is still under review (NEEDS_REVIEW) or reviewed (READY)
+is not received again: a changed snippet would supersede that run and throw the review away. They
+are counted as in_review. A failed person is logged by exception class only (never the message,
+which may hold snippet text).
 """
 from __future__ import annotations
 
 import json
+import logging
 from datetime import date, datetime
 
 from sqlalchemy import Connection, text
@@ -22,7 +30,9 @@ from hellomyme.ingest.snippet import PROMPT_VERSION, profile_key, to_extraction
 
 COLLECTOR = "search-cron"
 LOCK_KEY = 120041  # transaction-scoped advisory lock: one run at a time
-COUNTS = ("queries", "results", "received", "replayed", "already_loaded", "rejected", "empty", "errors")
+COUNTS = ("queries", "results", "received", "replayed", "already_loaded", "rejected", "empty", "errors",
+          "in_review")
+log = logging.getLogger(__name__)
 
 
 class _Stop(Exception):
@@ -66,7 +76,7 @@ def run(conn: Connection, *, settings, providers: list, as_of: date, now: dateti
         return _finish(conn, run_id, "SKIPPED", reason, counts, by_provider)
 
     usable, seen = list(providers), set()
-    streak = rot = 0
+    streak = rot = answered = 0
 
     def take(person, provider) -> None:
         nonlocal streak
@@ -79,15 +89,26 @@ def run(conn: Connection, *, settings, providers: list, as_of: date, now: dateti
             counts["replayed"] += 1
             return
         seen.add(key)
-        doc = to_extraction(person.title, person.snippet, key)
-        if doc is None:
-            counts["empty"] += 1
+        if conn.execute(text(
+                """SELECT 1 FROM parse_run p
+                     JOIN source_submission s USING (source_submission_id)
+                     JOIN collector c USING (collector_id)
+                    WHERE c.name = :c AND s.external_submission_id = :k
+                      AND s.status NOT IN ('LOADED','WITHDRAWN')
+                      AND p.status IN ('NEEDS_REVIEW','READY') LIMIT 1"""),
+                {"c": COLLECTOR, "k": key}).first():
+            counts["in_review"] += 1
             return
-        # owner decision: every field from search ingest is reviewed by a person, none auto-accepted
-        held = {("EDUCATION", e["local_id"]) for e in doc["educations"]} | {
-            ("WORK_EVENT", w["local_id"]) for w in doc["work_events"]}
         sp = conn.begin_nested()
         try:
+            doc = to_extraction(person.title, person.snippet, key)
+            if doc is None:
+                sp.rollback()
+                counts["empty"] += 1
+                return
+            # owner decision: every field from search ingest is reviewed by a person, none auto-accepted
+            held = {("EDUCATION", e["local_id"]) for e in doc["educations"]} | {
+                ("WORK_EVENT", w["local_id"]) for w in doc["work_events"]}
             r = receive(conn, json.dumps(doc, ensure_ascii=False), collector=COLLECTOR,
                         source_type="PUBLIC_PROFILE", permitted_use="AGGREGATE_ONLY",
                         legal_basis=settings.public_profile_legal_basis,
@@ -98,8 +119,9 @@ def run(conn: Connection, *, settings, providers: list, as_of: date, now: dateti
             sp.rollback()
             counts["already_loaded"] += 1
             return
-        except Exception:
+        except Exception as exc:
             sp.rollback()
+            log.warning("search-run: person not received: %s", type(exc).__name__)
             counts["errors"] += 1
             streak += 1
             if streak >= policy.max_consecutive_errors:
@@ -138,6 +160,11 @@ def run(conn: Connection, *, settings, providers: list, as_of: date, now: dateti
                         raise _Stop("ALL_PROVIDERS_FAILED:" + ",".join(
                             f"{n}={v['failed']}" for n, v in by_provider.items())) from None
                     continue  # retry this query once on the other provider
+                except Exception as exc:  # an unexpected shape or bug: this query only
+                    log.warning("search-run: query failed on %s: %s", provider.name, type(exc).__name__)
+                    counts["errors"] += 1
+                    break
+                answered += 1
                 for person in page:
                     take(person, provider)
                 conn.execute(text(
@@ -147,4 +174,6 @@ def run(conn: Connection, *, settings, providers: list, as_of: date, now: dateti
                 break
     except _Stop as stop:
         return _finish(conn, run_id, "FAILED", stop.reason, counts, by_provider)
+    if counts["queries"] and not answered:
+        return _finish(conn, run_id, "FAILED", "ALL_QUERIES_FAILED", counts, by_provider)
     return _finish(conn, run_id, "DONE", None, counts, by_provider)

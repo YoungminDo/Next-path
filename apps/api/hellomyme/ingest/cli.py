@@ -101,9 +101,27 @@ def main() -> None:
         settings = get_settings()
         with get_engine().connect() as conn:
             tx = conn.begin()
-            out = search_run.run(conn, settings=settings, providers=search_source.from_settings(settings),
-                                 as_of=args.as_of, now=datetime.now(UTC))
-            tx.rollback() if args.dry_run else tx.commit()
+            try:
+                out = search_run.run(conn, settings=settings,
+                                     providers=search_source.from_settings(settings),
+                                     as_of=args.as_of, now=datetime.now(UTC))
+            except Exception as exc:
+                # Everything this run did is rolled back; the crash itself is still logged as a
+                # FAILED run (class name only: the message may hold snippet text).
+                tx.rollback()
+                reason = f"EXCEPTION:{type(exc).__name__}"
+                out = {"search_run_id": None, "status": "FAILED", "reason": reason}
+                if not args.dry_run:
+                    try:
+                        with conn.begin():
+                            out["search_run_id"] = conn.execute(text(
+                                """INSERT INTO search_run (status, reason, finished_at)
+                                   VALUES ('FAILED', :r, now()) RETURNING search_run_id::text"""),
+                                {"r": reason}).scalar_one()
+                    except Exception as log_exc:  # e.g. migration 0041 not applied yet
+                        out["log_error"] = type(log_exc).__name__
+            else:
+                tx.rollback() if args.dry_run else tx.commit()
         out["dry_run"] = args.dry_run
         _dump(out)
         sys.exit(1 if out["status"] == "FAILED" else 0)

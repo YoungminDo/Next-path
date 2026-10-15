@@ -196,3 +196,83 @@ def test_cli_dry_run_leaves_nothing(engine, monkeypatch, capsys):
     assert '"dry_run": true' in capsys.readouterr().out
     with engine.connect() as c:
         assert c.execute(text("SELECT count(*) FROM search_run")).scalar_one() == 0
+
+
+# --- final review I3: a person under review is never superseded by a new snippet -----------
+
+def test_a_person_under_review_is_not_superseded_by_a_changed_snippet(conn):
+    _ops(conn, "q1")
+    go(conn, [Fake("serpapi", {"q1": [person("a")]})])
+    conn.execute(text("UPDATE search_query SET last_run_at = NULL"))
+    out = go(conn, [Fake("serpapi", {"q1": [person("a", year="2023")]})])
+    assert (out["in_review"], out["received"]) == (1, 0)
+    statuses = conn.execute(text("SELECT status FROM parse_run")).scalars().all()
+    assert statuses == ["NEEDS_REVIEW"]
+    row = conn.execute(text("SELECT in_review FROM search_run ORDER BY started_at DESC, in_review DESC "
+                            "LIMIT 1")).scalar_one()
+    assert row == 1
+
+
+# --- final review I5: failures are visible -------------------------------------------------
+
+class Broken(Fake):
+    """Raises a non-SearchError on every query not in its pages."""
+    def search(self, query, count):
+        self.calls.append(query)
+        if query not in self.pages:
+            raise TypeError("odd provider shape")
+        return self.pages[query]
+
+
+def test_every_query_failing_fails_the_run(conn):
+    _ops(conn, "q1", "q2")
+    out = go(conn, [Fake("serpapi", fail=503)])
+    assert (out["status"], out["reason"], out["errors"]) == ("FAILED", "ALL_QUERIES_FAILED", 2)
+
+
+def test_an_unexpected_provider_exception_is_a_non_fatal_query_error(conn):
+    _ops(conn, "q1", "q2")
+    out = go(conn, [Broken("serpapi")])
+    assert (out["status"], out["reason"], out["errors"]) == ("FAILED", "ALL_QUERIES_FAILED", 2)
+    # one bad query does not stop the others
+    conn.execute(text("UPDATE search_query SET last_run_at = NULL"))
+    out = go(conn, [Broken("serpapi", {"q2": [person("a")]})])
+    assert (out["status"], out["errors"], out["received"]) == ("DONE", 1, 1)
+
+
+def test_a_failed_person_is_logged_by_exception_class_only(conn, monkeypatch, caplog):
+    from hellomyme.ingest import search_run as sr
+
+    def boom(c, raw, **kw):
+        raise RuntimeError("secret detail 홍길동")
+    monkeypatch.setattr(sr, "receive", boom)
+    _ops(conn, "q1")
+    with caplog.at_level("WARNING", logger="hellomyme.ingest.search_run"):
+        out = go(conn, [Fake("serpapi", {"q1": [person("a")]})])
+    assert out["errors"] == 1
+    assert "RuntimeError" in caplog.text and "secret detail" not in caplog.text
+
+
+def test_cli_records_a_crash_as_a_failed_run(engine, monkeypatch, capsys):
+    import sys
+
+    from hellomyme.ingest import cli
+    from hellomyme.ingest import search_run as sr
+
+    def crash(conn, **kw):
+        conn.execute(text("INSERT INTO search_run DEFAULT VALUES"))
+        raise KeyError("detail that must not be stored")
+    monkeypatch.setattr(sr, "run", crash)
+    monkeypatch.setattr(sys, "argv", ["hellomyme-ingest", "search-run"])
+    cli.get_settings.cache_clear()
+    try:
+        with pytest.raises(SystemExit) as e:
+            cli.main()
+    finally:
+        cli.get_settings.cache_clear()
+    assert e.value.code == 1
+    assert "EXCEPTION:KeyError" in capsys.readouterr().out
+    with engine.begin() as c:
+        rows = c.execute(text("SELECT status, reason, finished_at IS NOT NULL FROM search_run")).all()
+        c.execute(text("DELETE FROM search_run"))
+    assert [tuple(r) for r in rows] == [("FAILED", "EXCEPTION:KeyError", True)]
