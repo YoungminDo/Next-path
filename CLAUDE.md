@@ -11,7 +11,7 @@ Will later merge into Hello My Me. Read `docs/` before large changes:
 events from `web/lib/track.ts`, migration 0024, `scripts/funnel.sql`; one 방문 definition `admin_stats.visits` (§방문); inputs as data + desired roles 0026,
 interview phone opt-in 0027; resume/capture import 0030: `domain/career_import.py`, web `components/ImportFlow.tsx`,
 `/upload`), `11_META_ADS.md` (per-audience Meta campaigns, utm_campaign `np_<date>_<audience>`, pixel `web/lib/pixel.ts`,
-dataset NEXTPATH웹 in `lib/pixel-id.ts`, `NEXT_PUBLIC_META_PIXEL_ID=off` turns it off: PageView/Lead/CompleteRegistration, no properties), `12_SEARCH_INGEST.md` (design: SerpAPI public-profile snippets → `receive()` as SEED, Render cron, human review, statistics only; yield check `scripts/linkedin_snippet_yield.py`). Team dashboard `/admin` (`api/admin.py`, `domain/admin_stats.py`, web `components/admin/`) is for
+dataset NEXTPATH웹 in `lib/pixel-id.ts`, `NEXT_PUBLIC_META_PIXEL_ID=off` turns it off: PageView/Lead/CompleteRegistration, no properties), `12_SEARCH_INGEST.md` (design: SerpAPI + Brave public-profile snippets → `receive()` as SEED, Render cron, human review, statistics only; yield check `scripts/linkedin_snippet_yield.py`). Team dashboard `/admin` (`api/admin.py`, `domain/admin_stats.py`, web `components/admin/`) is for
 accounts in `HELLOMYME_ADMIN_ACCOUNT_IDS`, counts only. Migration 0025 closes the Supabase Data API: every new table enables RLS
 (`tests/test_data_api_lock.py`).
 
