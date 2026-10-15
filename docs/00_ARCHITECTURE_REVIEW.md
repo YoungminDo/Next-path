@@ -381,7 +381,6 @@ Master Prompt의 18단계를 PR 단위로 묶음. 각 PR 착수 전 WHAT/WHY/SCH
 | **위기: 콜드스타트** | 실데이터에서도 School+Major+연도 cohort는 30명 미달 | §3.3: 20k명에서도 100% 미달 | 연도 밴드, relax, SEED 수집을 특정 학교·학과에 **집중**(넓게 얇게 X) |
 | **위기: 규제 — MY 크레딧** | 충전식 선불 크레딧은 전자금융거래법상 선불전자지급수단 해당 여부 검토 필요 | https://www.law.go.kr/법령/전자금융거래법 | 런칭 전 법률 자문. 환불·유효기간 정책을 ledger reason_type으로 표현 가능하게 설계 |
 | **위기: 규제 — 개인정보** | 경력·학력은 개인정보, SEED 공개프로필 수집도 수집 근거 필요 | 개인정보보호법 https://www.law.go.kr/법령/개인정보보호법 | PII 분리, 수집 근거를 `source_record`에 기록, 삭제권 처리 플로우 |
-| **위기: LinkedIn** | 자동 수집은 약관 위반 | LinkedIn User Agreement §8.2 https://www.linkedin.com/legal/user-agreement | Phase 2도 **본인 업로드**만. scraping 구현 금지 (Prompt와 일치) |
 | 약점: 재식별 | 작은 학교×학과×회사 조합은 30명 이상이어도 재식별 가능 | k-anonymity 한계 (Sweeney 2002) https://dataprivacylab.org/dataprivacy/projects/kanonymity/kanonymity.pdf | 조합 필터 수 제한, 회사 단위는 placeholder 제외 + 별도 threshold |
 | 약점: taxonomy 협소 | 학교 24·회사 30·직무 22 → 실사용자 입력 대부분 미매핑 | §3.1 | raw 보존 + `normalization_status=UNMAPPED` + 운영자 매핑 큐 |
 | 약점: 이벤트 타입 왜곡 | 창업이 EMPLOYMENT로 기록(D6) → 창업 경로 과소집계 | §3.2 | taxonomy v2 규칙 + PRE_SEED는 데모 용도로 한정 |

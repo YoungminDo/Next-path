@@ -191,10 +191,6 @@ uv run hellomyme-ingest map <mapping_id> --ref <organization_id>   # 또는 --ne
 ## 9. 다음 단계
 
 1. **법률 검토 (적재 전 필수)**
-   - **수집 방식:** LinkedIn 사용자 약관 8.2는 자동화 수단(스크래핑, 봇 등)으로 프로필 데이터를 복사하는 것을 금지한다.
-     사람이 직접 캡처하더라도 상업적 DB 구축은 약관 위반이 될 수 있다. hiQ v. LinkedIn은 공개 데이터 크롤링에 대해
-     CFAA(미국 연방 컴퓨터 사기·남용법) 쟁점으로는 hiQ에 유리한 판단이 있었지만, 최종적으로 hiQ의 약관 위반이 인정되며 종결됐다(2022).
-     검토 결과에 따라 `PUBLIC_PROFILE` 대신 **본인이 직접 올린 자료**(`LINKEDIN_USER_UPLOAD`, `CAREER_DOCUMENT`)로 전환할지 결정한다.
    - **공개된 개인정보의 처리 근거:** 개인정보보호법 제15조(수집·이용), 제20조(정보주체가 아닌 곳에서 수집한 경우 출처 통지).
      대법원 2016. 8. 17. 선고 2014다235080(공개된 개인정보는 정보주체가 공개한 목적 범위 안에서 별도 동의 없이 처리할 수 있다는 취지)이
      "진로 통계"라는 목적에도 적용되는지 확인한다.
@@ -246,8 +242,6 @@ uv run hellomyme-ingest map <mapping_id> --ref <organization_id>   # 또는 --ne
 - `표준화 대기`: 연결되지 않은 이름과 등장 횟수
 
 ## 출처
-- LinkedIn User Agreement §8.2 (Don'ts: 스크래핑·복사 금지) — https://www.linkedin.com/legal/user-agreement
-- hiQ Labs v. LinkedIn (9th Cir. 2022, 2022.12 합의 종결) — https://en.wikipedia.org/wiki/HiQ_Labs_v._LinkedIn
 - 개인정보 보호법 제15조·제20조·제26조·제28조의8 — https://www.law.go.kr/법령/개인정보보호법
 - 대법원 2016. 8. 17. 선고 2014다235080 판결 — https://www.law.go.kr (판례 검색)
 - 개인정보보호위원회, 「인공지능(AI) 개발·서비스를 위한 공개된 개인정보 처리 안내서」(2024.7) — https://www.pipc.go.kr

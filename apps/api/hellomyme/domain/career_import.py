@@ -9,7 +9,7 @@ the person has checked it:
   SELF_REPORTED records (source LINKEDIN_USER_UPLOAD or CAREER_DOCUMENT);
 - a member adds the jobs they tick to their profile, which widens what they can compare.
 
-Own data, uploaded by the person: no scraping (LinkedIn User Agreement §8.2, docs/00). Files are
+Own data, uploaded by the person. Files are
 never stored: they go to the model once and are dropped; names, photos and contact details are
 not extracted at all. Sending them to Anthropic (US) is an overseas transfer (PIPA §28-8): the
 consent wording version is recorded on the attempt before anything is sent. Each read costs
