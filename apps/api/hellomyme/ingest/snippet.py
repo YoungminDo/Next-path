@@ -12,6 +12,7 @@ the name to the date or major it gives, so a stranger's name elsewhere in the sn
 from __future__ import annotations
 
 import hashlib
+import hmac
 import re
 import urllib.parse
 
@@ -39,14 +40,16 @@ _SCHOOL = re.compile(r"(?<![가-힣])[가-힣]+(?:대학교|대학)"
 _MAJOR = re.compile(r"([가-힣]+(?:학과|학부|전공))")
 
 
-def profile_key(url: str) -> str | None:
-    """sha256 of the profile slug: one key per person whatever subdomain, query or case the
-    search engine returned. The URL itself is never stored."""
+def profile_key(url: str, secret: bytes) -> str | None:
+    """HMAC-SHA256 of the profile slug under a server secret: one key per person whatever
+    subdomain, query or case the search engine returned. Keyed because a slug is name-shaped
+    (gildong-hong): a plain hash could be checked against guessed names. The URL itself is never
+    stored. Changing the secret breaks dedup against earlier runs."""
     m = _PROFILE.search(url or "")
     if not m:
         return None
     slug = urllib.parse.unquote(m.group(1)).strip().lower()
-    return hashlib.sha256(f"linkedin:{slug}".encode()).hexdigest()
+    return hmac.new(secret, f"linkedin:{slug}".encode(), hashlib.sha256).hexdigest()
 
 
 def _has(name: str, s: str) -> bool:

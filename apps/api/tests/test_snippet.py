@@ -11,11 +11,24 @@ SNIPPET = ("경력: 토스, 카카오 · 토스 2022.03 - 현재 · 카카오 20
            "고려대학교 컴퓨터학과 2013 - 2019 · 홍길동님의 프로필")
 
 
+KEY = b"test-profile-key-secret"
+
+
 def test_profile_key_ignores_subdomain_query_and_case():
-    a = profile_key("https://kr.linkedin.com/in/Hong-GilDong/?trk=x")
-    b = profile_key("https://www.linkedin.com/in/hong-gildong")
+    a = profile_key("https://kr.linkedin.com/in/Hong-GilDong/?trk=x", KEY)
+    b = profile_key("https://www.linkedin.com/in/hong-gildong", KEY)
     assert a == b and len(a) == 64
-    assert profile_key("https://www.linkedin.com/company/toss") is None
+    assert profile_key("https://www.linkedin.com/company/toss", KEY) is None
+
+
+def test_profile_key_is_keyed_so_a_guessed_slug_cannot_be_checked_without_the_secret():
+    import hashlib
+    import hmac
+    url = "https://www.linkedin.com/in/gildong-hong"
+    key = profile_key(url, KEY)
+    assert key != hashlib.sha256(b"linkedin:gildong-hong").hexdigest()
+    assert key == hmac.new(KEY, b"linkedin:gildong-hong", hashlib.sha256).hexdigest()
+    assert profile_key(url, b"another-secret") != key
 
 
 def test_passes_the_pipeline_checks_without_blocks():

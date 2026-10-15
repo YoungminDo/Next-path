@@ -75,12 +75,13 @@ def run(conn: Connection, *, settings, providers: list, as_of: date, now: dateti
     if reason:
         return _finish(conn, run_id, "SKIPPED", reason, counts, by_provider)
 
+    secret = settings.profile_key_secret.get_secret_value().encode()
     usable, seen = list(providers), set()
     streak = rot = answered = 0
 
     def take(person, provider) -> None:
         nonlocal streak
-        key = profile_key(person.url)
+        key = profile_key(person.url, secret)
         if key is None:  # a company or post page, not a person
             return
         counts["results"] += 1

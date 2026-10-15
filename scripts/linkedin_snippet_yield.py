@@ -49,6 +49,8 @@ from hellomyme.ingest.pipeline import _norm, check  # noqa: E402
 from hellomyme.ingest.snippet import profile_key, to_extraction  # noqa: E402
 
 REFERENCE = API / "hellomyme/reference"
+# profile keys here only dedup within one process (nothing is stored): a random key per run
+_DEDUP_KEY = os.urandom(32)
 ROLES = ["백엔드 개발자", "프로덕트 매니저", "마케터", "데이터 분석가", "UX 디자이너"]
 ORGS = ["토스", "카카오", "네이버", "쿠팡", "삼성전자"]
 SCHOOLS = ["고려대학교", "연세대학교"]
@@ -133,7 +135,7 @@ def run(results, as_of=None):
     schools, departments = load_reference()
     seen, rows, codes = set(), [], Counter()
     for url, title, snippet in results:
-        h = profile_key(url)
+        h = profile_key(url, _DEDUP_KEY)
         if h is None or h in seen:
             continue
         seen.add(h)

@@ -5,6 +5,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DATA_LAYERS = ("PRE_SEED", "SEED", "VERIFIED")
 DEV_PHONE_HASH_SECRET = "nextpath-phone-hash-dev"
+DEV_PROFILE_KEY_SECRET = "nextpath-profile-key-dev"
 
 
 class Settings(BaseSettings):
@@ -102,6 +103,10 @@ class Settings(BaseSettings):
     brave_api_key: SecretStr | None = None
     public_profile_legal_basis: str | None = None
     public_profile_legal_reviewed: bool = False
+    # Keyed hash of a public profile's slug = the search ingest submission id (dedup across runs).
+    # A slug is name-shaped, so an unkeyed hash could be checked against guessed names. Set it
+    # once, before the first live run: changing it later breaks dedup against earlier runs.
+    profile_key_secret: SecretStr = SecretStr(DEV_PROFILE_KEY_SECRET)
 
     @field_validator("database_url")
     @classmethod
@@ -132,6 +137,9 @@ class Settings(BaseSettings):
                 raise ValueError("the log SMS provider writes codes to the log: development only")
             if self.phone_hash_secret.get_secret_value() == DEV_PHONE_HASH_SECRET:
                 raise ValueError("set HELLOMYME_PHONE_HASH_SECRET before sending verification codes")
+        if (self.env in ("staging", "production") and (self.serpapi_key or self.brave_api_key)
+                and self.profile_key_secret.get_secret_value() == DEV_PROFILE_KEY_SECRET):
+            raise ValueError("set HELLOMYME_PROFILE_KEY_SECRET before running search ingest")
         if self.sms_provider == "solapi" and not (self.solapi_api_key and self.solapi_api_secret
                                                   and self.sms_sender_number):
             raise ValueError("solapi needs api key, api secret and a registered sender number")

@@ -92,3 +92,17 @@ def test_error_message_never_contains_the_serpapi_key(monkeypatch):
     with pytest.raises(SearchError) as e:
         SerpApi("k-secret").search("q", 10)
     assert "k-secret" not in str(e.value)
+
+
+def test_profile_key_secret_must_be_set_where_search_ingest_runs_on_real_data():
+    from hellomyme.config import DEV_PROFILE_KEY_SECRET, Settings
+    live = {"career_map_data_layers": ["SEED", "VERIFIED"], "auth_providers": ["HMM_ID"]}
+    for env in ("staging", "production"):
+        for keys in ({"serpapi_key": "s"}, {"brave_api_key": "b"}):
+            with pytest.raises(ValueError, match="PROFILE_KEY_SECRET"):
+                Settings(env=env, **live, **keys)
+            with pytest.raises(ValueError, match="PROFILE_KEY_SECRET"):
+                Settings(env=env, **live, **keys, profile_key_secret=DEV_PROFILE_KEY_SECRET)
+            Settings(env=env, **live, **keys, profile_key_secret="real-secret")
+        Settings(env=env, **live)  # search ingest not configured: the default is never used
+    Settings(env="development", serpapi_key="s")  # development keeps the dev default

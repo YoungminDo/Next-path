@@ -2,6 +2,7 @@
 from datetime import UTC, date, datetime
 
 import pytest
+from pydantic import SecretStr
 from sqlalchemy import text
 
 from hellomyme.ingest.search_run import LOCK_KEY, run
@@ -13,6 +14,7 @@ AS_OF = date(2026, 10, 15)
 
 class S:
     env = "staging"
+    profile_key_secret = SecretStr("search-run-test-secret")
     public_profile_legal_basis = "test basis"
     public_profile_legal_reviewed = False
 
@@ -276,3 +278,14 @@ def test_cli_records_a_crash_as_a_failed_run(engine, monkeypatch, capsys):
         rows = c.execute(text("SELECT status, reason, finished_at IS NOT NULL FROM search_run")).all()
         c.execute(text("DELETE FROM search_run"))
     assert [tuple(r) for r in rows] == [("FAILED", "EXCEPTION:KeyError", True)]
+
+
+def test_the_submission_id_is_the_keyed_profile_key(conn):
+    import hashlib
+    import hmac
+    _ops(conn, "q1")
+    go(conn, [Fake("serpapi", {"q1": [person("a")]})])
+    ext = conn.execute(text("SELECT external_submission_id FROM source_submission s "
+                            "JOIN collector c USING (collector_id) WHERE c.name = 'search-cron'")
+                       ).scalar_one()
+    assert ext == hmac.new(b"search-run-test-secret", b"linkedin:a", hashlib.sha256).hexdigest()

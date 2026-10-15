@@ -49,3 +49,5 @@ services:
         sync: false
       - key: HELLOMYME_PUBLIC_PROFILE_LEGAL_BASIS
         sync: false
+      - key: HELLOMYME_PROFILE_KEY_SECRET
+        sync: false
