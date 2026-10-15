@@ -21,7 +21,7 @@
 | API Docker 이미지 | ✅ `apps/api/Dockerfile` — 로컬 빌드·기동·`/health`·운영 가드 확인 |
 | DB 생성 | ⬜ 계정 필요 |
 | API 배포 | ⬜ 계정 필요 (`render.yaml` 준비됨) |
-| 검색 반입 크론 (`nextpath-search-ingest`) | ⬜ Blueprint 동기화 후 키·DB URL·법적 근거 입력, `search-run --dry-run` 1회 (docs/12) |
+| 검색 반입 크론 (`nextpath-search-ingest`) | ⬜ API 배포(마이그레이션 0041·0042 적용) 후 Blueprint 동기화, 키·DB URL·법적 근거·`HELLOMYME_PROFILE_KEY_SECRET` 입력, `search-run --dry-run` 1회 (docs/12 §7) |
 | 웹 배포 + 도메인 | ⬜ Vercel 계정 + DNS 필요 |
 | PRE_SEED import | ⬜ DB 생성 후 |
 | 실 카카오 로그인 1회 검증 | ⬜ |
@@ -113,4 +113,10 @@ HELLOMYME_DATABASE_URL='<위 URL>' uv run hellomyme-import-preseed /path/to/HELL
 - API: `HELLOMYME_PHONE_HASH_SECRET` (임의의 긴 문자열; 없으면 production 기동 거부). 인터뷰 번호 인증 문자를
   보내려면 `HELLOMYME_SMS_PROVIDER=solapi` + `HELLOMYME_SOLAPI_API_KEY` / `_API_SECRET` / `HELLOMYME_SMS_SENDER_NUMBER`
   (docs/10 §진로 인터뷰). 키는 Render 환경변수에만 넣고 채팅·저장소에 붙여넣지 않습니다.
+- 검색 반입 크론(`nextpath-search-ingest`)을 production 으로 바꿀 때는 `HELLOMYME_ENV=production` 만으로는 안 됩니다:
+  `HELLOMYME_AUTH_PROVIDERS`, `HELLOMYME_CAREER_MAP_DATA_LAYERS` 를 API 서비스와 같은 production 유효값으로
+  넣어야 하고(기본값이면 설정 검증에서 시작하자마자 멈춤), 법률 검토(docs/09 §9)가 끝났으면
+  `HELLOMYME_PUBLIC_PROFILE_LEGAL_REVIEWED=true`, `HELLOMYME_PROFILE_KEY_SECRET` 은 staging 값 그대로(docs/12 §7).
+- 크론은 마이그레이션을 돌리지 않습니다(`dockerCommand` 가 `alembic upgrade head` 를 실행하는 CMD 를 대신함).
+  API 서비스 배포가 먼저 마이그레이션을 적용해야 하고, 그 전에 크론이 돌면 실패(종료 코드 1)합니다.
 - 테스트 기간 튜브 원장은 수정·삭제가 불가능하므로, 초기화가 필요하면 새 DB 로 시작하거나 REVERSAL 로 정정
