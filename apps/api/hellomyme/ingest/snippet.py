@@ -77,7 +77,7 @@ def to_extraction(title: str, snippet: str, submission_id: str) -> dict | None:
     t = re.sub(r"\s*\|\s*LinkedIn.*$", "", title or "", flags=re.I)
     head = [_clean(p) for p in re.split(r"\s+[-–—]\s+", t)]
     name, parts = (head[0] or None), [p for p in head[1:] if p]
-    tokens = sorted({name, *(w for w in re.split(r"[\s(),]+", name) if len(w) >= 2)} if name else set(),
+    tokens = sorted({w for w in [name, *re.split(r"[\s(),]+", name or "")] if w and len(w) >= 2},
                     key=len, reverse=True)
     mask_re = re.compile("|".join(re.escape(w) for w in tokens), re.I) if tokens else None
 

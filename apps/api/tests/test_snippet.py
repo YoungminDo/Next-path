@@ -60,6 +60,12 @@ def test_name_is_masked_in_any_case_and_in_every_token():
     assert "gil" not in dumped and "hong" not in dumped
 
 
+def test_a_one_character_name_is_not_masked():
+    doc = to_extraction("A - 개발자 - Kakao | LinkedIn", "Kakao 2020 - Present", "k8")
+    job = next(w for w in doc["work_events"] if w["organization_raw"] == "Kakao")
+    assert job["evidence"][0]["text"] == "Kakao 2020 - Present"
+
+
 def test_the_name_never_leaves_the_function():
     doc = to_extraction(TITLE, SNIPPET, "k1")
     assert "홍길동" not in json.dumps(doc, ensure_ascii=False)
