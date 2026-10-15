@@ -115,11 +115,13 @@ def test_a_lone_year_is_not_attached_to_any_job():
 
 def test_the_name_never_leaves_the_function():
     doc = to_extraction(TITLE, SNIPPET, "k1")
-    dumped = json.dumps(doc, ensure_ascii=False)
-    assert "홍길동" not in dumped
-    assert MASK in dumped
+    assert "홍길동" not in json.dumps(doc, ensure_ascii=False)
     assert doc["person"]["display_name_raw"] is None
     assert doc["person"]["headline_raw"] == "백엔드 개발자 - 토스"
+    # A company shown only in the title has the title line as its evidence: the name is masked there.
+    doc = to_extraction("홍길동 - PM - 쿠팡 | LinkedIn", "서울", "k4")
+    dumped = json.dumps(doc, ensure_ascii=False)
+    assert "홍길동" not in dumped and MASK in dumped
 
 
 def test_nothing_read_is_empty():
@@ -283,16 +285,7 @@ from hellomyme.ingest.snippet import profile_key, to_extraction  # noqa: E402
             codes["EMPTY"] += 1
             continue
 ```
-4. In `self_test()`, the third fixture is now empty and not counted. Replace the assertions with:
-```python
-    assert r["unique_profiles"] == 2, r
-    assert rd["schema_pass"] == 2, r
-    assert rd["school_mapped"] == 2, r          # 고려대학교, Yonsei University (name_en)
-    assert rd["nextpath_ready"] == 1, r         # only the person with dated jobs + school/major/year
-    assert rd["transition_ready"] == 1, r       # a lone "2019" is not attached to any job
-    assert r["issues_by_rule"].get("WARN:MISSING_START") == 2, r
-    assert r["issues_by_rule"].get("EMPTY") == 1, r
-```
+4. `self_test()` keeps its fixtures and expectations: the third fixture ("박영희 - 카카오") is not empty, because a company shown in the title is a work event. Assertions: `unique_profiles == 3`, `schema_pass == 3`, `school_mapped == 2`, `nextpath_ready == 1`, `transition_ready == 1`, `WARN:MISSING_START == 3`.
 
 Run: `cd C:/Next-path && PYTHONUTF8=1 uv run --project apps/api python scripts/linkedin_snippet_yield.py --self-test >/dev/null && cd apps/api && uv run ruff check ../../scripts/linkedin_snippet_yield.py`
 Expected: `self-test ok`, `All checks passed!`
