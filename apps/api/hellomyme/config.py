@@ -95,6 +95,14 @@ class Settings(BaseSettings):
     # Shown under the invitation only when set (the reward is a business decision).
     interview_reward_text: str | None = None
 
+    # Search ingest (docs/12): public-profile snippets from search APIs, received for review as
+    # SEED statistics input. Either key alone works; with both the run alternates per query.
+    # Production also needs the legal review flag (docs/09 §9), like the workbook's --legal-reviewed.
+    serpapi_key: SecretStr | None = None
+    brave_api_key: SecretStr | None = None
+    public_profile_legal_basis: str | None = None
+    public_profile_legal_reviewed: bool = False
+
     @field_validator("database_url")
     @classmethod
     def _psycopg_driver(cls, value: str) -> str:

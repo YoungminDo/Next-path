@@ -27,7 +27,7 @@
 | `search_source.py` | `hellomyme/ingest/` | 검색 API 호출만 담당. `serpapi`, `brave` 두 구현이 같은 형태 `(url, title, snippet)`를 돌려준다. 키는 `serpapi_key`, `brave_api_key` |
 | `search_plan.py` | `hellomyme/ingest/` | 이번 회차 검색어 고르기 (§4) |
 | `search_run.py` | `hellomyme/ingest/` | 회차 실행: 고르기 → 검색 → 변환 → `receive()` → 기록 (§5) |
-| CLI `search-run` | `hellomyme/ingest/cli.py` | 크론 진입점. `--dry-run`은 검색·변환·검사까지만 하고 접수하지 않고 집계만 출력 |
+| CLI `search-run` | `hellomyme/ingest/cli.py` | 크론 진입점. `--dry-run`은 같은 회차를 한 트랜잭션 안에서 돌리고 마지막에 롤백한다(검색은 실제로 하고, 접수·기록은 남지 않음) |
 | 크론 서비스 | `render.yaml` | `type: cron`, 매일 03:00 KST (`0 18 * * *` UTC), `hellomyme-ingest search-run` |
 
 ## 3. 데이터
@@ -38,7 +38,7 @@
 |---|---|---|
 | `search_ingest_policy` | `version`, `status`(ACTIVE/RETIRED), `max_queries_per_run`, `results_per_query`, `requery_after_days`, `demand_lookback_days`, `max_consecutive_errors` | ACTIVE는 하나만. 시드 `search_v1`: 20 / 10 / 30 / 30 / 5 |
 | `search_query` | `search_query_id`, `query_text`(UNIQUE), `origin`(OPERATOR/DEMAND), `status`(ACTIVE/PAUSED), `institution_id`, `major_node_id`, `last_run_at`, `created_at` | 운영자 목록과 수요 기반으로 만든 검색어를 같은 곳에 둔다 |
-| `search_run` | `search_run_id`, `started_at`, `finished_at`, `status`(RUNNING/DONE/FAILED/SKIPPED), `reason`, `dry_run`, `queries`, `results`, `received`, `replayed`, `already_loaded`, `rejected`, `empty`, `errors`, `by_provider` jsonb | 회차 기록. `by_provider`는 검색 API별 `{queries, results, received, failed}`로 어느 쪽 수율이 좋은지 비교한다. 결과 문장은 남기지 않는다 |
+| `search_run` | `search_run_id`, `started_at`, `finished_at`, `status`(RUNNING/DONE/FAILED/SKIPPED), `reason`, `queries`, `results`, `received`, `replayed`, `already_loaded`, `rejected`, `empty`, `errors`, `by_provider` jsonb | 회차 기록. `by_provider`는 검색 API별 `{queries, results, received, failed}`로 어느 쪽 수율이 좋은지 비교한다. 결과 문장은 남기지 않는다 |
 | `search_query` 추가 열 | `last_provider` | 다음 회차에 반대쪽부터 시작하도록 |
 
 ### 기존 테이블에 들어가는 값
