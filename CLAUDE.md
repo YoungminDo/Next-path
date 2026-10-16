@@ -50,6 +50,10 @@ accounts in `HELLOMYME_ADMIN_ACCOUNT_IDS`, counts only. Migration 0025 closes th
   docking; SP id `nextpath`, origin `https://nextpath.da-sh.io` (hmm-id PR #10 merged).
 - Cohort: fallback 0 exact → 1 graduation ±window → 2 dimension fallback → 3 similarity top-K;
   thresholds/windows/rewards/costs live in policy tables, never in code.
+- Professional (직장인) career data comes from the person's own upload (owner decision 2026-10-15): their own
+  LinkedIn capture or resume through `/upload`, kept only as the rows they confirmed (school, major, admission and
+  graduation, each job's company, role, employment type incl. INTERN, start/end; first job = fe_v1). No name or
+  photo; used as career data for statistics, never shown as a person.
 
 ## Non-negotiables
 raw/source records append-only; unknown = NULL (never fabricate or repair data); immutable
