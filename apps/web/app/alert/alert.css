@@ -1,0 +1,93 @@
+/* /alert (공고 알림 test landing). Screens follow the 커피챗 app look: one phone-width column,
+   teal cards, a fixed bottom button. Scoped under .al so the main landing stays as it is. */
+.al {
+  --al-frame: #dde4e6;
+  --al-bg: #f5f8f9;
+  --al-card: #ffffff;
+  --al-ink: #1b2733;
+  --al-sub: #51606e;
+  --al-line: #ebeef1;
+  --al-line-soft: #f3f6f8;
+  --al-brand: #0a6e63;
+  --al-on-brand: #ffffff;
+  --al-brand-soft: #e3f7f4;
+  --al-amber: #9a5b0c;
+  --al-amber-soft: #fcf1de;
+  --al-chip: #eef1f3;
+  --al-chip-ink: #4a5764;
+  --al-shadow: 0 1px 2px rgba(20, 40, 50, 0.05), 0 10px 26px rgba(20, 40, 50, 0.07);
+  min-height: 100vh;
+  background: var(--al-frame);
+  color: var(--al-ink);
+}
+@media (prefers-color-scheme: dark) {
+  .al {
+    --al-frame: #0a1113;
+    --al-bg: #0f1719;
+    --al-card: #172124;
+    --al-ink: #e7eef0;
+    --al-sub: #a4b2ba;
+    --al-line: #26343a;
+    --al-line-soft: #1e2a2e;
+    --al-brand: #3cc9b9;
+    --al-on-brand: #062925;
+    --al-brand-soft: #133a36;
+    --al-amber: #f0b566;
+    --al-amber-soft: #3a2c17;
+    --al-chip: #223036;
+    --al-chip-ink: #b9c6cc;
+    --al-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 10px 26px rgba(0, 0, 0, 0.25);
+  }
+}
+.al-app { max-width: 440px; margin: 0 auto; min-height: 100vh; background: var(--al-bg); padding-bottom: calc(132px + env(safe-area-inset-bottom, 0px)); }
+@media (min-width: 441px) { .al-app { box-shadow: 0 30px 60px rgba(10, 20, 25, 0.18); } }
+.al-g { padding-left: max(18px, env(safe-area-inset-left, 0px)); padding-right: max(18px, env(safe-area-inset-right, 0px)); }
+.al a { color: var(--al-brand); }
+
+.al-top { position: sticky; top: 0; z-index: 5; background: var(--al-card); border-bottom: 1px solid var(--al-line-soft); }
+.al-top-row { display: flex; align-items: center; gap: 10px; min-height: 57px; }
+.al-brand { font-size: 17px; font-weight: 800; letter-spacing: -0.01em; color: var(--al-ink); text-decoration: none; }
+.al .al-brand { color: var(--al-ink); }
+.al-pill { font-size: 11.5px; font-weight: 700; color: var(--al-brand); background: var(--al-brand-soft); padding: 4px 9px; border-radius: 999px; }
+
+.al-hero { padding-block: 26px 4px; }
+.al-hero h1 { margin: 0; font-size: 25px; font-weight: 800; letter-spacing: -0.03em; line-height: 1.38; text-wrap: balance; }
+.al-hero .al-lead { margin: 8px 0 0; font-size: 15px; color: var(--al-sub); font-weight: 500; }
+.al-steps { list-style: none; margin: 20px 0 0; padding: 0; display: flex; flex-direction: column; gap: 11px; }
+.al-steps li { display: flex; align-items: center; gap: 10px; font-size: 15px; font-weight: 700; }
+.al-n { width: 26px; height: 26px; border-radius: 9px; background: var(--al-brand); color: var(--al-on-brand); font-size: 13px; font-weight: 800; display: flex; align-items: center; justify-content: center; flex: 0 0 auto; }
+.al-cta { display: flex; align-items: center; justify-content: center; width: 100%; min-height: 54px; border-radius: 16px; background: var(--al-brand); font-size: 16px; font-weight: 800; text-decoration: none; text-align: center; padding: 0 12px; }
+.al .al-cta { color: var(--al-on-brand); }
+.al-hero .al-cta { margin-top: 22px; }
+.al-cta-sub { margin: 8px 0 0; text-align: center; font-size: 12.5px; color: var(--al-sub); }
+
+.al-sec { padding-block: 34px 0; }
+.al-sec h2 { margin: 0; font-size: 19px; font-weight: 800; letter-spacing: -0.02em; text-wrap: balance; }
+.al-sub { margin: 4px 0 14px; font-size: 13.5px; color: var(--al-sub); }
+
+.al-cards { display: flex; flex-direction: column; gap: 10px; }
+.al-card { background: var(--al-card); border: 1px solid var(--al-line); border-radius: 18px; padding: 16px; box-shadow: var(--al-shadow); }
+.al-card b { display: block; font-size: 15.5px; font-weight: 800; }
+.al-card span { display: block; font-size: 13px; color: var(--al-sub); margin-top: 3px; line-height: 1.55; }
+
+.al-sms { background: var(--al-chip); border-radius: 18px; padding: 14px; }
+.al-sms-when { font-size: 11.5px; color: var(--al-chip-ink); font-weight: 700; margin-bottom: 8px; }
+.al-bubble { background: var(--al-card); border-radius: 4px 16px 16px 16px; padding: 12px 14px; font-size: 13.5px; line-height: 1.6; white-space: pre-line; }
+
+.al-plan { display: flex; gap: 12px; align-items: flex-start; }
+.al-plan > div { min-width: 0; }
+.al-price { margin-left: auto; font-size: 16px; font-weight: 800; color: var(--al-brand); white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+.al-faq { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
+.al-faq details { background: var(--al-card); border: 1px solid var(--al-line); border-radius: 14px; padding: 0 14px; }
+.al-faq summary { cursor: pointer; font-size: 14.5px; font-weight: 700; padding-block: 14px; list-style: none; display: flex; justify-content: space-between; gap: 10px; }
+.al-faq summary::-webkit-details-marker { display: none; }
+.al-faq summary::after { content: "+"; color: var(--al-sub); font-weight: 800; }
+.al-faq details[open] summary::after { content: "–"; }
+.al-faq p { margin: 0 0 14px; font-size: 13.5px; color: var(--al-sub); line-height: 1.6; }
+
+.al-foot { padding-block: 26px 8px; }
+.al-foot .bizinfo { text-align: left; }
+
+.al-bar { position: fixed; bottom: 0; left: 50%; transform: translateX(-50%); width: 100%; max-width: 440px; z-index: 6; background: var(--al-card); border-top: 1px solid var(--al-line); padding-top: 12px; padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px)); }
+.al-bar .al-cta-sub { margin-top: 6px; }
