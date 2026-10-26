@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 import threading
 from datetime import date
 from typing import Literal, Protocol
@@ -65,7 +66,9 @@ SYSTEM = (
     "points at what in the records fits (a company, a role, years). Name two or three kinds of "
     "company that fit (industry and size, never a specific company). Then two or three things to "
     "strengthen for those roles, judged only from the records: for example a short tenure, a "
-    "career break, no experience in the wanted role yet, or a long stay in one role. Never invent "
+    "career break, no experience in the wanted role yet, or a long stay in one role. A wanted role "
+    "that is missing or not decided yet is never one of them (the person may simply not have been "
+    "asked). Never invent "
     "experience, skills, numbers, achievements or companies that are not in the records, never "
     "promise a hire or a pass, and never judge the person. Use the role list for role_code when "
     "a role matches; otherwise null. Keep every sentence short and plain."
@@ -199,6 +202,14 @@ def member_records(conn: Connection, person_id: str) -> str | None:
 
 # --- runs -------------------------------------------------------------------------------------
 
+# Without a chosen wanted role, a "decide what you want" gap is about our question, not the person.
+_NO_WANTED = re.compile(r"희망\s*직무|원하는\s*(방향|직무|일)")
+
+
+def _wants_a_role(records: str) -> bool:
+    """The records name at least one wanted role (member_records' 희망 직무 line)."""
+    return "\n희망 직무: " in records and "\n희망 직무: 아직 정하지 않음" not in records
+
 def _view(row) -> dict:
     return {"analysis_id": row.analysis_id, "created_at": row.created_at.isoformat(), **row.result}
 
@@ -261,7 +272,8 @@ def run(engine: Engine, settings: Settings, account_id: str, person_id: str | No
         for f in result.fits:
             if f.role_code not in known:
                 f.role_code = None
-        result = result.model_copy(update={"fits": result.fits[:3], "gaps": result.gaps[:3],
+        gaps = result.gaps if _wants_a_role(records) else [g for g in result.gaps if not _NO_WANTED.search(g)]
+        result = result.model_copy(update={"fits": result.fits[:3], "gaps": gaps[:3],
                                            "company_types": result.company_types[:3]})
     _finish(engine, run_id, result, outcome, usage)
     if result is None:

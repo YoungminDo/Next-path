@@ -152,3 +152,25 @@ def test_coaching_request_has_its_own_consent_and_cancel_clears_the_number(engin
                FROM coaching_request r JOIN account_identity ai USING (account_id)
                WHERE ai.provider_subject = 'coach-me'""")).one()
     assert (row.phone_e164, row.gone, row.h) == (None, True, ["GRANTED", "REVOKED"])
+
+
+def test_a_missing_wanted_role_is_never_a_gap(engine, ids):  # noqa: F811
+    """No wanted role chosen (often not even asked): a "decide what you want" gap is dropped; with a
+    chosen role the same kind of gap stays (it is then about the person's own aim)."""
+    wanted_gap = "희망 직무가 기록에 없어서, 원하는 방향을 먼저 정해 보면 좋아요."
+    answer = ANSWER.model_copy(update={"gaps": ["공백 설명이 없어요", wanted_gap]})
+    c = app_with(Fake(result=answer))
+    out = c.post("/acq/me/fit", headers=pro_member(c, ids, "fit-no-wanted"), json=body()).json()
+    assert out["gaps"] == ["공백 설명이 없어요"]
+
+    fake = Fake(result=answer)
+    c = app_with(fake)
+    h = anon()
+    payload = {**student(ids), "user_type": "PROFESSIONAL",
+               "current_job": {"organization_name": "분석회사", "role_node_id": ids["R3"],
+                               "start_year": 2021},
+               "desired_roles": [{"role_node_id": ids["R3B"], "role_raw": None}],
+               "desired_role_status": "CHOSEN"}
+    auth, _ = merge(c, h, save(c, h, payload), "fit-wanted")
+    out = c.post("/acq/me/fit", headers=auth, json=body()).json()
+    assert out["gaps"] == ["공백 설명이 없어요", wanted_gap] and "\n희망 직무: " in fake.records

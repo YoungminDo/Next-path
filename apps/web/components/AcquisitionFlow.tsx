@@ -857,6 +857,11 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
       return;
     }
     const id = await saveAnswers(edu, userType, current, true);
+    const d = desiredRef.current;
+    track("desired_role_selected", {
+      user_type: userType, status: d.status, n_roles: d.roles.length, surface: "alert_confirm",
+      n_listed: d.roles.filter((r) => r.id).length, n_typed: d.roles.filter((r) => !r.id).length,
+    });
     try {
       const merged = await api.mergeDraft(id, CONSENT_VERSION);
       if (merged.merged) pixel("CompleteRegistration", `signup-${id}`);
@@ -1075,6 +1080,10 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
           )}
           {alertFirst ? (
             <>
+              {/* The preview that asks this is skipped when logging in first: asked here instead, so the
+                  analysis can aim at it (and never counts its absence as a gap). */}
+              <DesiredPicker roles={[...middleRoles, ...roles]} professional={professional}
+                             value={desired} onChange={changeDesired} />
               <label className={consentAsked && !consent ? "check ask" : "check"}>
                 <input ref={consentBox} type="checkbox" checked={consent}
                        onChange={(e) => setConsent(e.target.checked)} />
