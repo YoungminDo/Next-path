@@ -507,3 +507,23 @@ body { word-break: keep-all; overflow-wrap: break-word; }
 .fit-level.mid { background: var(--line); color: var(--sub); }
 .fit-gaps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; font-size: 14px; line-height: 1.55; }
 .coach { display: flex; flex-direction: column; gap: 10px; border: 1px solid var(--line); }
+
+/* --- consent rows in plain words (components/Consent.tsx) ------------------------------------- */
+.consent-box { border: 1px solid var(--line); border-radius: 14px; background: var(--card); padding: 4px 14px; }
+.consent-all-row { display: flex; gap: 10px; align-items: flex-start; padding: 12px 0; cursor: pointer;
+  border-bottom: 1px solid var(--line); }
+.consent-all-row b { font-size: 15px; color: var(--ink); }
+.consent-all-row small { display: block; margin-top: 1px; font-size: 12.5px; color: var(--sub); }
+.consent-box input[type="checkbox"] { width: 20px; height: 20px; margin: 1px 0 0; accent-color: var(--mint); flex: 0 0 auto; }
+.consent-item { padding: 10px 0; }
+.consent-item + .consent-item { border-top: 1px solid var(--line); }
+.consent-item-row { display: flex; align-items: center; gap: 8px; }
+.consent-item-row label { display: flex; gap: 10px; align-items: center; flex: 1; min-width: 0; cursor: pointer;
+  font-size: 14px; color: var(--ink); }
+.consent-tag { display: inline-block; margin-right: 6px; font-size: 12px; font-weight: 700; color: var(--mint-ink); }
+.consent-tag.opt { color: var(--sub); }
+.consent-view { flex: 0 0 auto; background: none; border: 0; padding: 6px 2px; font-size: 13px; color: var(--sub);
+  text-decoration: underline; cursor: pointer; }
+.consent-body { margin: 6px 0 2px 30px; font-size: 12.5px; color: var(--sub); line-height: 1.6; }
+.consent-body ul { margin: 0; padding-left: 16px; display: flex; flex-direction: column; gap: 2px; }
+.consent-body a { color: var(--mint-ink); }

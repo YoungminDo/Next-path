@@ -70,10 +70,10 @@ class Settings(BaseSettings):
     career_import_session_limit: int = 3  # per anonymous session
     career_import_client_limit: int = 20  # per client address before login (shared Wi-Fi allowed)
     career_import_anonymous_daily_limit: int = 300  # all anonymous reads together
-    career_import_consent_version: str = "career_import_v1"
+    career_import_consent_version: str = "career_import_v2"
     # Optional, separate consent: keep what the read showed as anonymous statistics input, also
     # when the person never signs up (migration 0031). Kept this many days, then removed.
-    career_import_stats_consent_version: str = "career_import_stats_v1"
+    career_import_stats_consent_version: str = "career_import_stats_v2"
     career_import_retention_days: int = 365 * 3
 
     # Team dashboard (/admin): account ids allowed to see the aggregate numbers, e.g.
@@ -97,15 +97,15 @@ class Settings(BaseSettings):
     interview_reward_text: str | None = None
     # Job-alert opt-in (/alert): same phone check as the interview, its own consent (migration 0043).
     job_alert_enabled: bool = True
-    job_alert_consent_version: str = "job_alert_contact_v1"
+    job_alert_consent_version: str = "job_alert_contact_v2"
     # First-pass fit analysis (/alert, migration 0044): confirmed records to Claude, its own
     # overseas-transfer consent wording; runs per account per day.
     fit_analysis_enabled: bool = True
-    fit_analysis_consent_version: str = "fit_analysis_v1"
+    fit_analysis_consent_version: str = "fit_analysis_v2"
     fit_analysis_daily_limit: int = 3
     # Coaching requests: product prices live in coaching_product; the phone has its own consent.
     coaching_enabled: bool = True
-    coaching_consent_version: str = "coaching_contact_v1"
+    coaching_consent_version: str = "coaching_contact_v2"
 
     # Search ingest (docs/12): public-profile snippets from search APIs, received for review as
     # SEED statistics input. Either key alone works; with both the run alternates per query.

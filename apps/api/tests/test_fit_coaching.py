@@ -53,7 +53,7 @@ def pro_member(c, ids, subject):  # noqa: F811
 
 
 def body(**extra):
-    return {"consent": True, "consent_text_version": "fit_analysis_v1", **extra}
+    return {"consent": True, "consent_text_version": "fit_analysis_v2", **extra}
 
 
 def test_consent_and_a_profile_come_first(ids):  # noqa: F811
@@ -92,7 +92,7 @@ def test_one_answer_per_set_of_records(engine, ids):  # noqa: F811
         row = conn.execute(text(
             """SELECT f.outcome, f.consent_text_version, f.input_tokens FROM fit_analysis f
                WHERE f.analysis_id = CAST(:i AS uuid)"""), {"i": out["analysis_id"]}).one()
-    assert tuple(row) == ("DONE", "fit_analysis_v1", 900)
+    assert tuple(row) == ("DONE", "fit_analysis_v2", 900)
 
     # New records are a new run; the daily limit counts runs that reached the model.
     job = {"organization_name": "예전회사", "role_node_id": ids["R3B"], "start_year": 2018, "end_year": 2020}
@@ -118,7 +118,7 @@ def test_a_failed_run_is_kept_but_never_shown(engine, ids):  # noqa: F811
 
 def coaching_body(**extra):
     return {"sku": "COACHING_UNTIL_DEADLINE", "phone": "010-7777-8888", "consent": True,
-            "consent_text_version": "coaching_contact_v1", **extra}
+            "consent_text_version": "coaching_contact_v2", **extra}
 
 
 def test_coaching_request_has_its_own_consent_and_cancel_clears_the_number(engine, ids):  # noqa: F811

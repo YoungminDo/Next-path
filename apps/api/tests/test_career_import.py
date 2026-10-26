@@ -61,7 +61,7 @@ def app_with(extractor, **overrides) -> TestClient:
 
 def body(files=None, **extra):
     return {"files": files or [{"media_type": "image/png", "data": PNG}], "consent": True,
-            "consent_text_version": "career_import_v1", **extra}
+            "consent_text_version": "career_import_v2", **extra}
 
 
 def test_off_without_a_key_and_consent_comes_first(ids):  # noqa: F811
@@ -353,7 +353,7 @@ def test_a_returning_member_keeps_what_they_confirmed_from_a_file(engine, ids): 
 
 def test_what_was_read_is_kept_only_with_the_separate_consent(engine, ids):  # noqa: F811
     c = app_with(Fake())
-    stats = {"stats_consent": True, "stats_consent_text_version": "career_import_stats_v1"}
+    stats = {"stats_consent": True, "stats_consent_text_version": "career_import_stats_v2"}
     assert c.post("/acq/import/parse", headers=anon(),
                   json=body(stats_consent=True, stats_consent_text_version="old")).status_code == 409
 
@@ -382,7 +382,7 @@ def test_what_was_read_is_kept_only_with_the_separate_consent(engine, ids):  # n
     assert rows[0].role == ids["R3"]
     assert (rows[3].end_year, rows[3].end_month) == (None, None)  # the misread end stays unknown
     assert tuple(edu) == ("질의대학교", "경영학과", ids["inst"], ids["M3"])
-    assert versions == ["career_import_stats_v1", None]
+    assert versions == ["career_import_stats_v2", None]
 
     # After the promised retention period the rows are removed.
     with engine.begin() as conn:

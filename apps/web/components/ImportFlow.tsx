@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 
+import { ConsentAll, ConsentBox, ConsentItem } from "@/components/Consent";
 import NodeSelect from "@/components/NodeSelect";
 import {
   acq,
@@ -20,8 +21,9 @@ import { prepareUpload, UploadError } from "@/lib/upload";
    files are never stored. */
 
 // Versions of the two notices below; the server refuses any other (change both together).
-export const IMPORT_CONSENT_VERSION = "career_import_v1";
-export const IMPORT_STATS_CONSENT_VERSION = "career_import_stats_v1";
+// v2 (2026-10-26): the same notice in shorter words, the details one tap away (components/Consent).
+export const IMPORT_CONSENT_VERSION = "career_import_v2";
+export const IMPORT_STATS_CONSENT_VERSION = "career_import_stats_v2";
 const isPdf = (f: File) => f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf");
 
 const two = (m: number | null) => (m ? `.${String(m).padStart(2, "0")}` : "");
@@ -119,39 +121,28 @@ export function ImportUpload({ member, onRead, onManual }: {
               ))}
             </ul>
           )}
-          <label className="check consent-all">
-            <input type="checkbox" checked={agree && stats}
-                   onChange={(e) => { setAgree(e.target.checked); setStats(e.target.checked); }} />
-            <b>모두 동의하기</b>
-          </label>
-          <label className="check consent-detail">
-            <input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} />
-            <span>
-              <b>[필수] 파일 읽기를 위한 개인정보 국외 이전 동의</b><br />
-              올린 파일을 읽기 위해 미국의 Anthropic(AI 서비스)에 보내요. 읽은 뒤 파일은 저장하지 않아요.
-            </span>
-          </label>
-          <details className="consent-more">
-            <summary>자세히 보기</summary>
-            <ul>
-              <li>이전받는 자: Anthropic, PBC (미국) · privacy@anthropic.com</li>
-              <li>이전 일시·방법: 파일을 올릴 때, 암호화된 통신으로 전송</li>
-              <li>이전 항목: 올린 파일에 담긴 내용 (이력서·캡처)</li>
-              <li>이용 목적: 경력·학력 항목을 읽어 입력칸 채우기</li>
-              <li>보유 기간: nextpath는 파일을 저장하지 않아요. Anthropic은 이 내용을 AI 학습에 쓰지 않고, 정해진 보관 기간이 지나면 지워요.</li>
-              <li>동의하지 않아도 돼요. 동의하지 않으면 직접 입력으로 같은 결과를 볼 수 있어요.</li>
-              <li><a href="/privacy" target="_blank" rel="noreferrer">개인정보처리방침 전문</a></li>
-            </ul>
-          </details>
-          <label className="check consent-detail">
-            <input type="checkbox" checked={stats} onChange={(e) => setStats(e.target.checked)} />
-            <span>
-              <b>[선택] 읽은 경력·학력을 익명 통계에 쓰는 것에 동의</b><br />
-              가입하지 않아도, 읽은 회사·직무·학교·기간을 이름·연락처 없이 남겨
-              &lsquo;나와 같은 자리였던 사람들&rsquo; 통계를 만드는 데 써요.
-              보유 기간: 3년. 동의하지 않아도 파일 읽기는 그대로 돼요.
-            </span>
-          </label>
+          <ConsentBox>
+            <ConsentAll checked={agree && stats} note="파일은 읽고 바로 지워요"
+                        onChange={(v) => { setAgree(v); setStats(v); }} />
+            <ConsentItem required title="AI가 이력서 읽기 (국외 이전)" checked={agree} onChange={setAgree}>
+              <ul>
+                <li>받는 곳: Anthropic, PBC (미국, AI 서비스) · privacy@anthropic.com</li>
+                <li>보내는 것: 올린 파일 내용 (이력서·캡처) · 올릴 때 암호화해서 보내요</li>
+                <li>목적: 경력·학력을 읽어 입력칸 채우기</li>
+                <li>보관: nextpath는 파일을 저장하지 않아요. Anthropic은 AI 학습에 쓰지 않고 정해진 기간 뒤 지워요.</li>
+                <li>동의하지 않으면 직접 입력으로 같은 결과를 볼 수 있어요.</li>
+                <li><a href="/privacy" target="_blank" rel="noreferrer">개인정보처리방침</a></li>
+              </ul>
+            </ConsentItem>
+            <ConsentItem required={false} title="이름 없이 통계에 쓰기" checked={stats} onChange={setStats}>
+              <ul>
+                <li>남기는 것: 읽은 회사·직무·학교·기간 (이름·연락처 없이)</li>
+                <li>목적: &lsquo;나와 같은 자리였던 사람들&rsquo; 통계 만들기</li>
+                <li>보관: 3년</li>
+                <li>동의하지 않아도 파일 읽기는 그대로 돼요.</li>
+              </ul>
+            </ConsentItem>
+          </ConsentBox>
           {err && <p className="error" role="alert">{err}</p>}
           <button className="cta" disabled={busy || !files.length || !agree} onClick={() => void read()}>
             {busy ? "읽는 중이에요… (20초쯤 걸려요)" : "올리고 채우기"}

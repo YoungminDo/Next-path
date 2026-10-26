@@ -10,7 +10,7 @@ from tests.test_interview import app_with
 
 
 def body(phone="010-1234-5678", **extra):
-    return {"phone": phone, "consent": True, "consent_text_version": "job_alert_contact_v1", **extra}
+    return {"phone": phone, "consent": True, "consent_text_version": "job_alert_contact_v2", **extra}
 
 
 def history(engine, subject: str) -> dict:

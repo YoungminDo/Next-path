@@ -32,6 +32,7 @@ import {
   type TeaserResult,
   type Unlisted,
 } from "@/lib/api";
+import { ConsentBox, ConsentItem } from "@/components/Consent";
 import { ImportedJobs, ImportEntry, importRows, ImportReview, ImportUpload, toPastJob } from "@/components/ImportFlow";
 import NodeSelect from "@/components/NodeSelect";
 import SearchSelect, { type Picked } from "@/components/SearchSelect";
@@ -64,11 +65,11 @@ const INTERVIEW_CONSENT_VERSION = "interview_contact_v1";
 const ALERT_ENTRY = "hellomyme.entry";
 const ALERT_SKIPPED = "hellomyme.alert_skipped";
 // The version of the job-alert consent wording shown in AlertStep; change both together.
-const JOB_ALERT_CONSENT_VERSION = "job_alert_contact_v1";
+const JOB_ALERT_CONSENT_VERSION = "job_alert_contact_v2";
 // The wording versions of the analysis transfer consent (FitScreen) and the coaching contact consent
 // (CoachingOffer); change each together with its text.
-const FIT_CONSENT_VERSION = "fit_analysis_v1";
-const COACHING_CONSENT_VERSION = "coaching_contact_v1";
+const FIT_CONSENT_VERSION = "fit_analysis_v2";
+const COACHING_CONSENT_VERSION = "coaching_contact_v2";
 const SIZES: Record<string, string> = {
   ENTERPRISE: "대기업", LARGE: "대형", MID: "중견", SMALL: "소형", MICRO: "초소형",
   OTHER: "기타",
@@ -1574,22 +1575,22 @@ function AlertStep({ status, userType, onDone, onSkip }: {
       ) : (
         <button className="cta ghost" disabled={!phoneOk || busy} onClick={sendCode}>인증번호 받기</button>
       ))}
-      <label className="check consent-detail">
-        <input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} />
-        <span>
-          <b>[선택] 공고 알림을 위한 개인정보 수집·이용 동의</b><br />
-          목적: 나와 맞는 채용 공고 알림 문자 발송 · 항목: 휴대전화번호 ·
-          보유 기간: 동의한 날부터 1년 (그 전에 알림을 끄면 바로 삭제)<br />
-          동의하지 않아도 되고, 동의하지 않아도 서비스는 그대로 이용할 수 있어요.
-        </span>
-      </label>
-      <label className="check consent-detail">
-        <input type="checkbox" checked={marketing} onChange={(e) => setMarketing(e.target.checked)} />
-        <span>
-          <b>[선택] 코칭·이벤트 소식 문자 받기 (광고성 정보)</b><br />
-          이력서 첨삭 코칭과 이벤트 소식을 문자로 보내요. 밤 9시~아침 8시에는 보내지 않아요.
-        </span>
-      </label>
+      <ConsentBox>
+        <ConsentItem required title="공고 알림 받을 번호 저장" checked={agree} onChange={setAgree}>
+          <ul>
+            <li>목적: 나와 맞는 채용 공고 알림 문자 보내기</li>
+            <li>저장하는 것: 휴대전화번호</li>
+            <li>보관: 동의한 날부터 1년. 그 전에 알림을 끄면 바로 지워요.</li>
+            <li>동의하지 않아도 서비스는 그대로 쓸 수 있어요. 알림만 받을 수 없어요.</li>
+          </ul>
+        </ConsentItem>
+        <ConsentItem required={false} title="코칭·이벤트 소식 받기 (광고)" checked={marketing} onChange={setMarketing}>
+          <ul>
+            <li>이력서 첨삭 코칭과 이벤트 소식을 문자로 보내요.</li>
+            <li>밤 9시~아침 8시에는 보내지 않고, 언제든 끌 수 있어요.</li>
+          </ul>
+        </ConsentItem>
+      </ConsentBox>
       {err && <p className="error" role="alert">{err}</p>}
       {sent && needCode && <button className="link" disabled={busy} onClick={sendCode}>인증번호 다시 받기</button>}
       <button className="cta" disabled={busy || !phoneOk || !agree || (needCode && (!sent || code.length !== 6))}
@@ -1658,26 +1659,18 @@ function FitScreen({ status, userType, onDone, onAlert }: {
         <span className="badge">AI 1차 분석</span>
         <h2>어디랑 잘 맞는지 분석해 볼게요</h2>
         <p className="sub">확인한 학력과 경력으로 잘 맞는 직군 3개와 보완하면 좋은 점을 알려드려요. 20초쯤 걸려요.</p>
-        <label className="check consent-detail">
-          <input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} />
-          <span>
-            <b>[필수] 분석을 위한 개인정보 국외 이전 동의</b><br />
-            확인한 학력·경력(학교, 전공, 회사, 직무, 기간)과 희망 직무를 분석하려고 미국의 Anthropic(AI 서비스)에 보내요.
-            이름·연락처는 보내지 않아요.
-          </span>
-        </label>
-        <details className="consent-more">
-          <summary>자세히 보기</summary>
-          <ul>
-            <li>이전받는 자: Anthropic, PBC (미국) · privacy@anthropic.com</li>
-            <li>이전 일시·방법: 분석 보기를 누를 때, 암호화된 통신으로 전송</li>
-            <li>이전 항목: 학교·전공·입학·졸업 연도, 회사·직무·고용 형태·기간, 희망 직무</li>
-            <li>이용 목적: 잘 맞는 직군과 보완하면 좋은 점 분석</li>
-            <li>보유 기간: nextpath는 분석 결과만 회원 탈퇴 때까지 보관해요. Anthropic은 이 내용을 AI 학습에 쓰지 않고, 정해진 보관 기간이 지나면 지워요.</li>
-            <li>동의하지 않아도 돼요. 동의하지 않으면 분석 없이 결과 화면으로 가요.</li>
-            <li><a href="/privacy" target="_blank" rel="noreferrer">개인정보처리방침 전문</a></li>
-          </ul>
-        </details>
+        <ConsentBox>
+          <ConsentItem required title="AI가 경력 분석하기 (국외 이전)" checked={agree} onChange={setAgree}>
+            <ul>
+              <li>받는 곳: Anthropic, PBC (미국, AI 서비스) · privacy@anthropic.com</li>
+              <li>보내는 것: 학교·전공·입학·졸업 연도, 회사·직무·고용 형태·기간, 희망 직무 (이름·연락처는 안 보내요) · 분석 보기를 누를 때 암호화해서 보내요</li>
+              <li>목적: 잘 맞는 직군과 보완하면 좋은 점 분석</li>
+              <li>보관: nextpath는 분석 결과만 탈퇴 때까지 보관해요. Anthropic은 AI 학습에 쓰지 않고 정해진 기간 뒤 지워요.</li>
+              <li>동의하지 않으면 분석 없이 결과 화면으로 가요.</li>
+              <li><a href="/privacy" target="_blank" rel="noreferrer">개인정보처리방침</a></li>
+            </ul>
+          </ConsentItem>
+        </ConsentBox>
         {err && <p className="error" role="alert">{err}</p>}
         <button className="cta" disabled={busy || !agree} onClick={() => void runIt()}>
           {busy ? "분석하는 중이에요… (20초쯤 걸려요)" : "1차 분석 보기"}
@@ -1784,14 +1777,16 @@ function CoachingOffer({ userType }: { userType: UserType }) {
         <input type="tel" inputMode="numeric" autoComplete="tel" placeholder="010-1234-5678" value={phone}
                onChange={(e) => setPhone(e.target.value)} />
       </Field>
-      <label className="check consent-detail">
-        <input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} />
-        <span>
-          <b>[필수] 코칭 연락을 위한 개인정보 수집·이용 동의</b><br />
-          목적: 코칭 안내와 일정 연락 · 항목: 휴대전화번호 · 보유 기간: 신청한 날부터 1년 (그 전에 취소하면 바로 삭제)<br />
-          동의하지 않아도 되고, 동의하지 않으면 코칭을 신청할 수 없어요.
-        </span>
-      </label>
+      <ConsentBox>
+        <ConsentItem required title="코칭 연락받을 번호 저장" checked={agree} onChange={setAgree}>
+          <ul>
+            <li>목적: 코칭 안내와 일정 연락</li>
+            <li>저장하는 것: 휴대전화번호</li>
+            <li>보관: 신청한 날부터 1년. 그 전에 취소하면 바로 지워요.</li>
+            <li>동의하지 않으면 코칭을 신청할 수 없어요.</li>
+          </ul>
+        </ConsentItem>
+      </ConsentBox>
       {err && <p className="error" role="alert">{err}</p>}
       <button className="cta" disabled={busy || !picked || !phoneOk || !agree} onClick={submit}>
         {picked ? `${picked.name} 신청하기 · ${won(picked.amount_krw)}` : "상품을 골라 주세요"}
