@@ -3,6 +3,8 @@ import type { Metadata } from "next";
 import BusinessInfo from "@/components/BusinessInfo";
 import TrackView from "@/components/TrackView";
 
+import Feed from "./Feed";
+import RealReviews from "./RealReviews";
 import "./alert.css";
 
 /* 공고 알림 test landing (/alert, owner decision 2026-10-26), in the Hello My Me look and voice. Same
@@ -52,6 +54,23 @@ const FITS = [
   { name: "CRM 마케팅", level: "잘 맞아요", high: true, why: "재방문 캠페인을 직접 운영했어요" },
   { name: "PM", level: "도전해 볼 만해요", high: false, why: "실험 설계 경험이 기획으로 이어질 수 있어요" },
 ];
+
+// Worries people told us about (owner's collected reviews, 2026-10-26), written as worries: no names,
+// companies or outcomes, so the feed claims no one's result. Each says which part of the service helps.
+const WORRIES = [
+  { quote: "졸업 작품 내고 나서야 채용 사이트를 열어요", meta: "→ 맞는 공고를 문자로 먼저 알려드려요" },
+  { quote: "검색창에 뭘 넣어야 할지부터 막막해요", meta: "→ 잘 맞는 직군 3개를 골라드려요" },
+  { quote: "새 공고가 있을까 싶어 같은 사이트를 자꾸 새로고침해요", meta: "→ 올라오면 문자로 알려드려요" },
+  { quote: "경험이라곤 아르바이트밖에 없다고 말하게 돼요", meta: "→ 경험을 어떻게 쓸지 보완점을 짚어드려요" },
+  { quote: "즐겨찾기에 채용 페이지만 잔뜩, 매번 하나씩 열어봐요", meta: "→ 맞는 공고만 모아 알려드려요" },
+  { quote: "유명한 회사 이름밖에 몰라서 찾아볼 곳이 몇 군데 없어요", meta: "→ 어울리는 회사 유형을 알려드려요" },
+  { quote: "마감 주간엔 취업 준비가 통째로 멈춰요", meta: "→ 바쁠 때도 문자 한 통이면 확인돼요" },
+  { quote: "엑셀을 쓸 줄 안다는 한 줄에서 멈춰 있어요", meta: "→ 무엇을 더 적으면 좋을지 알려드려요" },
+  { quote: "저장한 공고는 많은데 지원한 곳은 없어요", meta: "→ 나와 맞는 공고부터 추려드려요" },
+  { quote: "개발 교육을 받았으니 개발자로만 지원해야 할 것 같아요", meta: "→ 배운 걸 쓰는 다른 직군도 보여드려요" },
+  { quote: "새 양식을 또 채워야 하나 싶어서 자꾸 미뤄요", meta: "→ 갖고 있던 이력서 파일 그대로 올리면 돼요" },
+  { quote: "자기소개서 첫 문장만 몇 번째 바꾸는지 모르겠어요", meta: "→ 먼저 고칠 곳 두세 개를 정리해 드려요" },
+].map((w, i) => ({ key: String(i), ...w }));
 
 const FAQ = [
   { q: "어떤 공고를 알려주나요?", a: "회사 채용 페이지와 채용 사이트에 공개된 공고 중 회사가 확인되는 공고만 알려드려요. 마감된 공고는 보내지 않아요." },
@@ -107,6 +126,15 @@ export default function AlertLanding() {
               </div>
             </div>
           </section>
+
+          <section className="al-sec al-g">
+            <p className="al-eyebrow">이런 고민 있으신가요?</p>
+            <h2>공고는 늦게 보고,<br />이력서는 막막하고</h2>
+            <p className="al-sub">취업을 준비하며 많이 들은 고민이에요. 이력서 하나로 같이 풀어봐요.</p>
+            <Feed label="취업 준비 고민" items={WORRIES} />
+          </section>
+
+          <RealReviews />
 
           <section className="al-sec al-g">
             <p className="al-eyebrow">이렇게 진행돼요</p>

@@ -27,6 +27,7 @@ from hellomyme.domain import (
     job_alert,
     ledger,
     payments,
+    review,
     signup_alert,
 )
 from hellomyme.domain.career_input import member_person_id
@@ -642,6 +643,44 @@ def coaching_request(body: CoachingRequest, conn: Conn, settings: AppSettings, a
 @router.delete("/me/coaching")
 def coaching_cancel(conn: Conn, settings: AppSettings, account_id: Account):
     return coaching.cancel(conn, settings, account_id)
+
+
+# --- members' own reviews (/alert; migration 0045) ------------------------------------------------
+
+@router.get("/reviews")
+def public_reviews(conn: Conn, settings: AppSettings, response: Response):
+    """Approved reviews for the landing; empty until enough are approved."""
+    response.headers["Cache-Control"] = "public, max-age=60, s-maxage=300"
+    return review.public(conn, settings)
+
+
+@router.get("/me/review")
+def review_status(conn: Conn, settings: AppSettings, account_id: Account):
+    return review.status(conn, settings, account_id)
+
+
+class ReviewRequest(BaseModel):
+    surface: review.Surface
+    body: str = Field(min_length=1, max_length=1000)
+    publish: bool = False  # optional: show it on the landing (its own consent)
+    consent_text_version: str | None = Field(default=None, max_length=64)
+
+
+@router.post("/me/review")
+def review_submit(body: ReviewRequest, conn: Conn, settings: AppSettings, account_id: Account,
+                  background: BackgroundTasks):
+    out = _interview(lambda: review.submit(conn, settings, account_id, body.surface, body.body,
+                                           body.publish, body.consent_text_version))
+    # The text never goes to Slack (it may say anything): the team reads it in /admin.
+    if (notifier := signup_alert.get_notifier(settings)) is not None:
+        background.add_task(notifier.post, f":speech_balloon: 이용 후기 1건 · 공개 동의 "
+                                           f"{'O' if body.publish else 'X'} · /admin에서 확인")
+    return out
+
+
+@router.delete("/me/review")
+def review_delete(conn: Conn, settings: AppSettings, account_id: Account):
+    return review.delete(conn, settings, account_id)
 
 
 class IntentRequest(BaseModel):

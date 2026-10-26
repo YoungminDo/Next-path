@@ -175,6 +175,14 @@ export type CoachingStatus = {
   products: { sku: string; name: string; amount_krw: number }[];
   request: { sku: string; name: string; amount_krw: number; requested_at: string; phone_masked: string | null } | null;
 };
+export type ReviewSurface = "FIT" | "ALERT";
+export type ReviewStatus = {
+  enabled: boolean; consent_text_version: string;
+  review: { surface: ReviewSurface; body: string; publish: boolean; created_at: string;
+    state: "PENDING" | "APPROVED" | "HIDDEN" } | null;
+};
+/** An approved review as the landing may show it: the member's own words, the step and the month only. */
+export type PublicReview = { surface: ReviewSurface; label: string; body: string; month: string };
 export type EmploymentType = "FULL_TIME" | "PART_TIME" | "CONTRACT" | "INTERN";
 export type ImportStatus = { enabled: boolean; consent_text_version: string;
   stats_consent_text_version: string; max_files: number; remaining_today: number };
@@ -289,6 +297,16 @@ export const acq = {
       body: JSON.stringify({ sku, phone, consent: true, consent_text_version: consentTextVersion }),
     }),
   coachingCancel: () => call<CoachingStatus>("/acq/me/coaching", { method: "DELETE" }),
+  /** Empty until enough reviews are approved (the small-number rule). */
+  reviews: () => call<{ reviews: PublicReview[] }>("/acq/reviews"),
+  review: () => call<ReviewStatus>("/acq/me/review"),
+  reviewSubmit: (surface: ReviewSurface, body: string, consentTextVersion: string | null) =>
+    call<ReviewStatus>("/acq/me/review", {
+      method: "POST",
+      body: JSON.stringify({ surface, body, publish: consentTextVersion !== null,
+                             consent_text_version: consentTextVersion }),
+    }),
+  reviewDelete: () => call<ReviewStatus>("/acq/me/review", { method: "DELETE" }),
   importStatus: () => call<ImportStatus>("/acq/import"),
   /** Reads the person's own files (never stored). Before login the rows only prefill the form. */
   importParse: (files: { media_type: string; data: string }[], consentTextVersion: string,

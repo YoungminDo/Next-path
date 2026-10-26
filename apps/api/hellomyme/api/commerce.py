@@ -188,6 +188,8 @@ EventName = Literal[
     "alert_step_viewed", "alert_code_sent", "alert_subscribed", "alert_skipped", "alert_withdrawn",
     # First-pass fit analysis and coaching requests (/alert, migration 0044)
     "fit_step_viewed", "fit_requested", "coaching_requested", "coaching_cancelled",
+    # Members' own reviews (/alert, migration 0045)
+    "review_viewed", "review_submitted", "review_deleted",
 ]
 
 

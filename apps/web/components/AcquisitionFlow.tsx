@@ -35,6 +35,7 @@ import {
 import { ConsentBox, ConsentItem } from "@/components/Consent";
 import { ImportedJobs, ImportEntry, importRows, ImportReview, ImportUpload, toPastJob } from "@/components/ImportFlow";
 import NodeSelect from "@/components/NodeSelect";
+import ReviewBox from "@/components/ReviewBox";
 import SearchSelect, { type Picked } from "@/components/SearchSelect";
 import { pixel, pixelSettled } from "@/lib/pixel";
 import { inAppBrowser, isInternal, track } from "@/lib/track";
@@ -1710,6 +1711,7 @@ function FitScreen({ status, userType, onDone, onAlert }: {
       )}
       <CoachingOffer userType={userType} />
       <AlertEntry onOpen={onAlert} />
+      <ReviewBox surface="FIT" />
       <button className="cta" onClick={onDone}>비슷한 경력의 사람들이 간 길 보기</button>
     </section>
   );

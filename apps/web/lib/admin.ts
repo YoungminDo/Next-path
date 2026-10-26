@@ -53,3 +53,19 @@ export async function loadStats(range: AdminRange, withTeam: boolean): Promise<A
   if (!res.ok) throw new ApiError(res.status, await res.text());
   return res.json() as Promise<AdminStats>;
 }
+
+/** The review queue: members' own texts, newest first, publish-consented pending ones on top. */
+export type AdminReview = { review_id: string; surface: "FIT" | "ALERT"; body: string; publish: boolean;
+  created_at: string; state: "PENDING" | "APPROVED" | "HIDDEN" };
+
+async function reviewsCall(path: string, init?: RequestInit): Promise<AdminReview[]> {
+  const res = await fetch(`/api/backend/admin/reviews${path}`, { cache: "no-store", ...init });
+  if (res.status === 401 || res.status === 403) throw new AdminError(res.status, null);
+  if (!res.ok) throw new ApiError(res.status, await res.text());
+  return ((await res.json()) as { reviews: AdminReview[] }).reviews;
+}
+
+export const loadReviews = () => reviewsCall("");
+export const decideReview = (id: string, decision: "APPROVED" | "HIDDEN") =>
+  reviewsCall(`/${id}`, { method: "POST", headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ decision }) });

@@ -14,7 +14,8 @@ export type FunnelEvent =
   | "payment_started" | "payment_failed" | "credit_purchased"
   | "checkout_viewed" | "checkout_completed" | "checkout_cancelled" | "login_consent_missing"
   | "alert_step_viewed" | "alert_code_sent" | "alert_subscribed" | "alert_skipped" | "alert_withdrawn"
-  | "fit_step_viewed" | "fit_requested" | "coaching_requested" | "coaching_cancelled";
+  | "fit_step_viewed" | "fit_requested" | "coaching_requested" | "coaching_cancelled"
+  | "review_viewed" | "review_submitted" | "review_deleted";
 
 const TOUCH = "hellomyme.touch";
 

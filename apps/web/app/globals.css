@@ -362,6 +362,10 @@ body { word-break: keep-all; overflow-wrap: break-word; }
 .admin-body { display: flex; flex-direction: column; gap: 14px; transition: opacity .15s; }
 .admin-body.refreshing { opacity: .5; }
 .admin-card { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.admin-reviews { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.admin-reviews li { padding: 12px 0; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; }
+.admin-reviews li > p:first-child { margin: 0; font-size: 14px; line-height: 1.6; white-space: pre-wrap; }
+.admin-review-acts { display: flex; gap: 8px; }
 .admin-sub { margin: 6px 0 0; font-size: 14px; color: var(--sub); font-weight: 700; }
 .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
 .kpi { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; display: flex; flex-direction: column; gap: 2px; }
@@ -507,6 +511,15 @@ body { word-break: keep-all; overflow-wrap: break-word; }
 .fit-level.mid { background: var(--line); color: var(--sub); }
 .fit-gaps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; font-size: 14px; line-height: 1.55; }
 .coach { display: flex; flex-direction: column; gap: 10px; border: 1px solid var(--line); }
+/* A member's own review (components/ReviewBox.tsx) */
+.review-box { display: flex; flex-direction: column; gap: 10px; border: 1px solid var(--line); }
+.review-box textarea { color: var(--ink); background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+  padding: 12px; font: inherit; font-size: 15px; line-height: 1.5; resize: vertical; min-height: 84px; }
+.review-box textarea:focus { outline: 2px solid var(--mint); outline-offset: 1px; }
+.review-count { text-align: right; margin-top: -6px; }
+.review-quote { margin: 0; padding: 10px 12px; border-left: 3px solid var(--mint); background: var(--bg);
+  border-radius: 0 10px 10px 0; font-size: 14px; line-height: 1.6; color: var(--ink); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 /* --- consent rows in plain words (components/Consent.tsx) ------------------------------------- */
 .consent-box { border: 1px solid var(--line); border-radius: 14px; background: var(--card); padding: 4px 14px; }

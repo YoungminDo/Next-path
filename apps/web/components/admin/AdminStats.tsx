@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
+import AdminReviews from "@/components/admin/AdminReviews";
 import { AdminError, loadStats, type AdminRange, type AdminStats as Stats, type Daily, type Named } from "@/lib/admin";
 
 /* Team dashboard. One filter row scopes everything below it; each chart has a table twin; colors
@@ -214,6 +215,8 @@ export default function AdminStats() {
               <Mini label="남긴 경력 수" value={data.imports.experiences_kept} />
             </div>
           </Card>
+
+          <AdminReviews />
         </div>
       )}
     </main>

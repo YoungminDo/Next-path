@@ -106,6 +106,11 @@ class Settings(BaseSettings):
     # Coaching requests: product prices live in coaching_product; the phone has its own consent.
     coaching_enabled: bool = True
     coaching_consent_version: str = "coaching_contact_v2"
+    # Members' own reviews (migration 0045): showing one on the landing has its own consent; the
+    # landing shows approved reviews only once at least this many are (the small-number rule).
+    review_enabled: bool = True
+    review_consent_version: str = "review_publish_v1"
+    review_min_shown: int = 5
 
     # Search ingest (docs/12): public-profile snippets from search APIs, received for review as
     # SEED statistics input. Either key alone works; with both the run alternates per query.
