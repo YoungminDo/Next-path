@@ -151,3 +151,14 @@
   .al-feed-item.in, .al-feed-item.in .al-feed-card { animation: none; }
   .al-feed-item.out { transition: none; }
 }
+
+/* Kakao first (KakaoStart.tsx): the brand's yellow with its dark label */
+.al .al-cta.kakao { background: var(--kakao); color: #191600; border: 0; cursor: pointer; font-family: inherit; }
+.al .al-cta.kakao:disabled { opacity: 0.6; }
+.al-hero .al-kakao { margin-top: 22px; }
+.al-hero .al-kakao .al-cta { margin-top: 0; }
+.al-help { margin: 12px 0 0; padding: 12px 14px; border-radius: 12px; background: var(--caution-bg);
+  font-size: 13px; line-height: 1.6; color: var(--ink); }
+.al-help p { margin: 4px 0 6px; }
+.al-link { background: none; border: 0; padding: 8px 0 0; font: inherit; font-size: 13px; color: var(--sub);
+  text-decoration: underline; cursor: pointer; }

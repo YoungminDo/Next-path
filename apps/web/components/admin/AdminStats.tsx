@@ -216,6 +216,14 @@ export default function AdminStats() {
             </div>
           </Card>
 
+          <Card title="공고 알림 (/alert) · 로그인 먼저" note="알림 랜딩을 본 브라우저만 셉니다. 로그인 뒤에도 같은 브라우저면 이어서 세요. 앱 안 브라우저에서 바깥 브라우저로 옮기면 끊겨요."
+                table={<Table head={["단계", "사람", "방문 대비", "이전 단계 대비"]} rows={data.alert.map((s, i) => [
+                  s.label, fmt(s.people), pct(s.people, data.alert[0]?.people ?? 0), i ? pct(s.people, data.alert[i - 1].people) : "–"])} />}>
+            <Bars items={data.alert.map((s, i) => ({ label: s.label, value: s.people,
+              end: `${fmt(s.people)}명 · ${pct(s.people, data.alert[0]?.people ?? 0)}`,
+              detail: i ? `이전 단계 대비 ${pct(s.people, data.alert[i - 1].people)}` : "첫 단계" }))} />
+          </Card>
+
           <AdminReviews />
         </div>
       )}

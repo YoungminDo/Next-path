@@ -95,3 +95,35 @@ def test_campaigns_count_visits_inputs_and_new_members(engine, ids):  # noqa: F8
     row = next(r for r in rows if r["campaign"] == tag)
     assert {k: row[k] for k in ("source", "visits", "inputs", "login_clicks", "new_members")} == {
         "source": "meta", "visits": 4, "inputs": 1, "login_clicks": 1, "new_members": 1}
+
+
+def test_alert_funnel_follows_the_landing_browsers_through_the_login(engine):
+    """/alert, login first: each step counts the browsers that saw the landing (docs/10)."""
+    app = create_app()
+    c = TestClient(app)
+    admin = login(c, f"admin-{uuid.uuid4().hex[:6]}")
+    account_id = c.get("/admin/stats", headers=admin).json()["detail"]["account_id"]
+    app.dependency_overrides[get_settings] = lambda: Settings(env="test", auth_providers=["DEV"],
+                                                             admin_account_ids=[account_id])
+    count = lambda: {s["key"]: s["people"] for s in c.get(  # noqa: E731
+        "/admin/stats", headers=admin, params={"range": "today"}).json()["alert"]}
+    before = count()
+
+    uploader, leaver, elsewhere = (uuid.uuid4().hex for _ in range(3))
+    for sid in (uploader, leaver):
+        event(c, "landing_viewed", sid, variant="alert", path="/alert")
+        event(c, "login_clicked", sid, surface="alert_hero", provider="KAKAO")
+        event(c, "signup_completed", sid, merged_draft=False, entry="alert_login_first")
+        event(c, "import_viewed", sid, member=False, surface="alert_login_first")
+    event(c, "import_uploaded", uploader, surface="alert_login_first")
+    event(c, "import_parsed", uploader, surface="alert_login_first")
+    event(c, "career_input_completed", uploader, entry="alert_login_first", from_file=True)
+    event(c, "alert_subscribed", uploader)
+    event(c, "fit_requested", uploader)
+    # Not from the alert landing: not counted, whatever it did.
+    event(c, "import_uploaded", elsewhere, surface="alert_login_first")
+
+    after = count()
+    assert {k: after[k] - before[k] for k in after} == {
+        "landing": 2, "kakao": 2, "login": 2, "upload_viewed": 2, "uploaded": 1, "parsed": 1,
+        "saved": 1, "saved_file": 1, "alert": 1, "fit": 1}

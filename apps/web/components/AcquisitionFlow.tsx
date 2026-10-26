@@ -48,7 +48,7 @@ import { YEARS } from "@/lib/years";
    every distribution, intent and path. The server enforces the same gate: before login it only
    answers the teaser. Tone: "people who stood where I stand", never "seniors". */
 type Screen =
-  | "start" | "upload" | "s_edu" | "p_now" | "finding" | "gate" | "interview" | "alert" | "fit"
+  | "start" | "upload" | "a_login" | "s_edu" | "p_now" | "finding" | "gate" | "interview" | "alert" | "fit"
   | "s_result" | "s_intent" | "p_next" | "p_first" | "p_similar" | "me" | "m_upload" | "m_review"
   | "m_changes";
 type UserType = "STUDENT" | "PROFESSIONAL";
@@ -61,10 +61,13 @@ const CONSENT_VERSION = "career_terms_v2";
 const INTERVIEW_SKIPPED = "hellomyme.interview_skipped";
 // The version of the interview consent wording shown in InterviewStep; change both together.
 const INTERVIEW_CONSENT_VERSION = "interview_contact_v1";
-// Came in through the job-alert landing (/alert → /upload?from=alert): after login the alert
-// opt-in comes first, instead of the interview invitation (docs/10 §공고 알림 랜딩).
+// Came in through the job-alert landing (/alert): after login the first-pass analysis, then the alert
+// opt-in, instead of the interview invitation (docs/10 §공고 알림 랜딩).
 const ALERT_ENTRY = "hellomyme.entry";
 const ALERT_SKIPPED = "hellomyme.alert_skipped";
+const fromAlertEntry = () => {
+  try { return localStorage.getItem(ALERT_ENTRY) === "alert"; } catch { return false; }
+};
 // The version of the job-alert consent wording shown in AlertStep; change both together.
 const JOB_ALERT_CONSENT_VERSION = "job_alert_contact_v2";
 // The wording versions of the analysis transfer consent (FitScreen) and the coaching contact consent
@@ -280,6 +283,9 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
   const [memberRead, setMemberRead] = useState<ImportRead>();
   const importFrom = useRef<Screen>("me");
   const [notice, setNotice] = useState<{ screen: Screen; text: string }>();
+  // Login first (/alert, owner decision 2026-10-26): logged in, nothing saved yet. The resume comes
+  // next, and the career-data consent is asked on the confirm screen, where the records are saved.
+  const [alertFirst, setAlertFirst] = useState(false);
 
   const professional = userType === "PROFESSIONAL";
 
@@ -369,6 +375,11 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
     if (loginError || loggedIn) window.history.replaceState(null, "", window.location.pathname);
     if (loggedIn) loginPending(false);
     if (loginError) setError(LOGIN_ERRORS[loginError] ?? `로그인에 실패했어요 (${loginError}).`);
+    // The Kakao button on /alert came back without a login (no draft waits for it): offer it again.
+    if (loginError && fromAlertEntry() && !pending.draftId()) {
+      setScreen("a_login");
+      return;
+    }
     if (loggedIn) {
       run(finishLogin)();
       return;
@@ -413,7 +424,8 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
     if (type === "upload" || startOn === "upload") {
       // A member opening the upload link fills in their own profile instead (straight away, so a
       // quick upload never takes the before-login path).
-      if (!pending.member()) { setScreen("upload"); return; }
+      const alertLink = params.get("from") === "alert";
+      if (!pending.member()) { setScreen(alertLink ? "a_login" : "upload"); return; }
       setScreen("m_upload");
       acq.me().then(async (m) => {
         const pro = m.profile.user_type === "PROFESSIONAL";
@@ -423,7 +435,7 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
         if (!m.intent) setBase(await acq.meStep(pro ? "next_roles" : "first_roles"));
       }).catch((e) => {
         if (e instanceof ApiError && (e.status === 401 || e.status === 404)) pending.member(null);
-        setScreen("upload");
+        setScreen(alertLink ? "a_login" : "upload");
       });
       return;
     }
@@ -533,14 +545,15 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
   const settle = (p: Promise<unknown>, ms: number) =>
     Promise.race([p, new Promise((done) => setTimeout(done, ms))]);
 
-  async function toTeaser(e: Edu, type: UserType, cur: Job = current) {
+  /** Saves the answers as a draft (the funnel's input step); returns the draft id. */
+  async function saveAnswers(e: Edu, type: UserType, cur: Job = current, member = false) {
     const d = await acq.saveDraft(payload(e, type, cur), draftId, isInternal());
     setDraftId(d.draft_id);
     setUnl({ kinds: d.unlisted ?? [], institution: e.institution_raw, major: e.major_raw });
     pixel("Lead", `lead-${d.draft_id}`);
     // In-app browsers (Instagram etc.) may need "외부 브라우저로 열기" to log in, which opens the current
     // address: the answers go back into it, but only once the pixel's events have left with the clean one.
-    if (app && app !== "kakaotalk") {
+    if (!member && app && app !== "kakaotalk") {
       void pixelSettled().then(() => window.history.replaceState(null, "", handoffUrl(e, type, cur)));
     }
     track("career_input_completed", {
@@ -554,12 +567,19 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
       admission_year: Number(e.admission_year), graduation_year: Number(e.graduation_year),
       current_role_node_id: type === "PROFESSIONAL" ? cur.role_node_id || null : null,
       from_file: Boolean(importId),
+      entry: member ? "alert_login_first" : undefined,
     });
     if (importId) {
       track("import_confirmed", { member: false, user_type: type, other_jobs: others.filter((o) => o.keep).length,
-                                  roles_picked: others.filter((o) => o.keep && o.role).length });
+                                  roles_picked: others.filter((o) => o.keep && o.role).length,
+                                  entry: member ? "alert_login_first" : undefined });
     }
-    const t = await acq.teaser(d.draft_id);
+    return d.draft_id;
+  }
+
+  async function toTeaser(e: Edu, type: UserType, cur: Job = current) {
+    const id = await saveAnswers(e, type, cur);
+    const t = await acq.teaser(id);
     setTeaser(t);
     const returned = loginPending();
     setLoginReturned(returned);
@@ -607,7 +627,8 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
       pending.draftId(null);
       pending.consentVersion(null);
     }
-    track("signup_completed", { merged_draft: Boolean(saved && version), new_member: newMember });
+    track("signup_completed", { merged_draft: Boolean(saved && version), new_member: newMember,
+                                entry: fromAlertEntry() && !saved ? "alert_login_first" : undefined });
     if (newMember) pixel("CompleteRegistration", `signup-${saved}`);
     if (saved && differs.length) {
       // Already a member with other answers on record: show before/after, they decide.
@@ -629,6 +650,12 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
     try {
       m = await acq.me();
     } catch (e) {
+      if (e instanceof ApiError && e.status === 404 && fromAlertEntry()) {
+        // Logged in first on /alert: the resume is the next step.
+        setAlertFirst(true);
+        setScreen("upload");
+        return;
+      }
       if (e instanceof ApiError && e.status === 404) {
         setError("아직 저장된 정보가 없어요. 처음부터 입력해 주세요.");
         setScreen("start");
@@ -636,8 +663,8 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
       }
       throw e;
     }
-    // Came from the job-alert landing: the optional alert opt-in, then the first-pass analysis,
-    // then the result.
+    // Came from the job-alert landing: the first-pass analysis (what the resume was for), then the
+    // optional alert opt-in, then the result.
     let fromAlert = false;
     let alertSkipped = false;
     try {
@@ -646,16 +673,20 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
     } catch { /* private mode */ }
     if (fromAlert) {
       pending.member("1");
-      const toFit = () => showFit("after_login", () => resumeMember(m));
-      const al = alertSkipped ? null : await acq.jobAlert().catch(() => null);
-      if (al && al.enabled && al.status === "NONE") {
-        setJobAlert(al);
-        afterInterview.current = toFit;
-        track("alert_step_viewed", { surface: "after_login", user_type: m.profile.user_type });
-        setScreen("alert");
-        return;
-      }
-      await toFit();
+      const toResult = () => resumeMember(m);
+      // Asked after the analysis; read again then (it can be turned on from the analysis screen).
+      const toAlert = async () => {
+        const al = alertSkipped ? null : await acq.jobAlert().catch(() => null);
+        if (al && al.enabled && al.status === "NONE") {
+          setJobAlert(al);
+          afterInterview.current = toResult;
+          track("alert_step_viewed", { surface: "after_fit", user_type: m.profile.user_type });
+          setScreen("alert");
+          return;
+        }
+        await toResult();
+      };
+      await showFit("after_login", toAlert);
       return;
     }
     // Right after login, once: the optional interview invitation, then the result.
@@ -801,6 +832,42 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
     await api.devLogin();
     await finishLogin();
   });
+  // /alert, login first: Kakao before anything is asked (no consent here: the login keeps nothing
+  // about the person; the career-data consent comes with the save).
+  const kakaoFirst = () => {
+    try { localStorage.setItem(ALERT_ENTRY, "alert"); } catch { /* private mode */ }
+    track("login_clicked", { surface: "alert_flow", provider: "KAKAO", again: loginReturned || undefined });
+    loginPending(true);
+    setBusy(true);
+    window.location.href = "/auth/hmm/start";
+  };
+  const devFirst = run(async () => {
+    try { localStorage.setItem(ALERT_ENTRY, "alert"); } catch { /* private mode */ }
+    await api.devLogin();
+    await finishLogin();
+  });
+  /** Logged in first: save the checked answers as the member's profile (consent recorded with it),
+   *  then the alert opt-in and the first-pass analysis (afterLogin). */
+  const submitAlertMember = run(async () => {
+    if (!consent) {
+      setConsentAsked(true);
+      track("login_consent_missing", { user_type: userType, surface: "alert_confirm" });
+      consentBox.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+      consentBox.current?.focus({ preventScroll: true });
+      return;
+    }
+    const id = await saveAnswers(edu, userType, current, true);
+    try {
+      const merged = await api.mergeDraft(id, CONSENT_VERSION);
+      if (merged.merged) pixel("CompleteRegistration", `signup-${id}`);
+    } catch (e) {
+      // 409: this account already has a profile (saved in another tab); continue with it.
+      if (!(e instanceof ApiError && e.status === 409)) throw e;
+    }
+    setAlertFirst(false);
+    pending.member("1");
+    await afterLogin();
+  });
   const submitFirst = run(async () => {
     if (!firstIsCurrent) {
       await acq.addJob({
@@ -866,7 +933,8 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
   };
 
   const back: Partial<Record<Screen, Screen>> = {
-    upload: "start", s_edu: importId ? "upload" : "start", p_now: importId ? "upload" : "start",
+    upload: alertFirst ? undefined : "start", start: alertFirst ? "upload" : undefined,
+    s_edu: importId ? "upload" : "start", p_now: importId ? "upload" : "start",
     gate: professional ? "p_now" : "s_edu",
     s_intent: "s_result", p_first: "p_next", p_similar: hasFirst ? "p_next" : "p_first",
     m_upload: importFrom.current, m_review: "m_upload",
@@ -899,7 +967,8 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
 
       {screen === "start" && (
         <section className="screen">
-          <h1>나와 같은 자리에 있었던 사람들은<br />어디로 갔을까</h1>
+          {alertFirst ? <h1>직접 입력해도<br />1차 분석을 받을 수 있어요</h1>
+            : <h1>나와 같은 자리에 있었던 사람들은<br />어디로 갔을까</h1>}
           <p className="sub">지금 내 상황을 골라주세요</p>
           <div className="options">
             <button className="option" onClick={() => { setUserType("STUDENT"); setScreen("s_edu"); }}>
@@ -916,8 +985,32 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
         </section>
       )}
 
-      {screen === "upload" && (
+      {screen === "upload" && (alertFirst ? (
+        <ImportUpload member={false} onRead={applyRead} onManual={() => setScreen("start")} surface="alert_login_first"
+                      top={<AlertSteps at={1} />} lead={<AlertGets />}
+                      title="이력서를 올리면 1차 분석이 바로 나와요"
+                      sub="휴대폰에 있는 PDF, 사진, 링*드인 캡처 그대로 올리면 돼요. 새로 쓸 필요 없어요."
+                      manualLabel="이력서가 없어요 · 직접 입력할게요" />
+      ) : (
         <ImportUpload member={false} onRead={applyRead} onManual={() => setScreen("start")} />
+      ))}
+
+      {screen === "a_login" && (
+        <section className="screen">
+          <AlertSteps at={0} />
+          <h2>카카오로 시작하면<br />이력서 1차 분석이 바로 이어져요</h2>
+          <p className="sub">가입은 3초면 끝나요. 다음 화면에서 갖고 있던 이력서를 그대로 올리면 돼요.</p>
+          <AlertGets />
+          {loginReturned && app && app !== "kakaotalk" && (
+            <div className="login-help" role="status">
+              <b>카카오 로그인이 안 열렸나요?</b>
+              <p>앱 안에서는 카카오 로그인이 막힐 때가 있어요. 화면 오른쪽 위 <b>⋯</b>를 누르고
+                <b> ‘외부 브라우저로 열기’</b>를 골라 주세요.</p>
+            </div>
+          )}
+          <button className="cta kakao" disabled={busy} onClick={kakaoFirst}>카카오로 3초 만에 시작하기</button>
+          {DEV_LOGIN && <button className="cta ghost" disabled={busy} onClick={devFirst}>개발용 로그인</button>}
+        </section>
       )}
       {screen === "m_upload" && (
         <ImportUpload member onRead={(r) => { setMemberRead(r); setScreen("m_review"); }}
@@ -935,7 +1028,7 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
 
       {(screen === "s_edu" || screen === "p_now") && (
         <section className="screen">
-          <Progress value={0.33} />
+          {alertFirst ? <AlertSteps at={1} /> : <Progress value={0.33} />}
           <h2>{professional ? "학교와 지금 하는 일을 알려주세요" : "학교와 전공을 알려주세요"}</h2>
           {importId && <p className="hint">올린 파일에서 읽은 내용이에요. 틀린 곳은 고쳐 주세요.</p>}
           <Field label="학교">
@@ -980,11 +1073,31 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
               <ImportedJobs rows={others} roles={roles} onChange={setOthers} />
             </>
           )}
-          <p className="hint">입력한 내용은 나와 비슷한 사람을 찾는 데만 써요. 다른 사람에게 보이지 않아요.</p>
-          <button className="cta" disabled={busy || !eduReady || (professional && !(current.role_node_id && current.start_year))}
-                  onClick={submitInput}>
-            나와 비슷한 사람 찾기
-          </button>
+          {alertFirst ? (
+            <>
+              <label className={consentAsked && !consent ? "check ask" : "check"}>
+                <input ref={consentBox} type="checkbox" checked={consent}
+                       onChange={(e) => setConsent(e.target.checked)} />
+                <span>
+                  입력한 학교·경력을 내 계정에 저장하고, 내 결과와 누군지 알 수 없는 통계에만 쓰는 데 동의해요.
+                  {" "}<a href="/privacy" target="_blank" rel="noreferrer">자세히</a>
+                </span>
+              </label>
+              {consentAsked && !consent && <p className="consent-ask" role="alert">위 동의에 체크하면 바로 분석해 드려요</p>}
+              <button className="cta" disabled={busy || !eduReady || (professional && !(current.role_node_id && current.start_year))}
+                      onClick={submitAlertMember}>
+                저장하고 1차 분석 받기
+              </button>
+            </>
+          ) : (
+            <>
+              <p className="hint">입력한 내용은 나와 비슷한 사람을 찾는 데만 써요. 다른 사람에게 보이지 않아요.</p>
+              <button className="cta" disabled={busy || !eduReady || (professional && !(current.role_node_id && current.start_year))}
+                      onClick={submitInput}>
+                나와 비슷한 사람 찾기
+              </button>
+            </>
+          )}
         </section>
       )}
 
@@ -1719,6 +1832,30 @@ function FitScreen({ status, userType, onDone, onAlert }: {
 
 /** Coaching after the analysis: pick a product, leave a number (its own consent); the team calls,
  *  and payment is arranged then. Nothing is charged here. */
+/** /alert, login first: where the person is (the login already done), so the resume is one step. */
+function AlertSteps({ at }: { at: 0 | 1 }) {
+  const steps = ["카카오 가입", "이력서 올리기", "1차 분석", "공고 알림"];
+  return (
+    <ol className="a-steps" aria-label="진행 단계">
+      {steps.map((t, i) => (
+        <li key={t} className={i < at ? "done" : i === at ? "now" : undefined} aria-current={i === at ? "step" : undefined}>
+          {i < at ? "✓ " : ""}{t}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+/** What the resume gets them, right where it is asked for. */
+function AlertGets() {
+  return (
+    <div className="a-gets">
+      <b>올리면 바로 받아요</b>
+      <ul><li>잘 맞는 직군 3개와 이유</li><li>어울리는 회사 유형</li><li>보완하면 좋은 점 2~3개</li></ul>
+    </div>
+  );
+}
+
 function CoachingOffer({ userType }: { userType: UserType }) {
   const [s, setS] = useState<CoachingStatus | null>(null);
   const [sku, setSku] = useState<string>();

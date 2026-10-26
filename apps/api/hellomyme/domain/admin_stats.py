@@ -27,6 +27,22 @@ FUNNEL = (
     ("path_result", "경로 결과 확인", "result_step_viewed", ("me",)),
     ("unlock", "깊은 분석 열기", "unlock_purchased", None),
 )
+# /alert, login first: (key, label, condition on ev) in funnel order.
+_ALERT_FIRST = "properties->>'entry' = 'alert_login_first'"
+_ALERT_UPLOAD = "properties->>'surface' = 'alert_login_first'"
+ALERT_FUNNEL = (
+    ("landing", "알림 랜딩 방문", "event_name = 'landing_viewed' AND properties->>'variant' = 'alert'"),
+    ("kakao", "카카오 누름", "event_name = 'login_clicked' AND properties->>'surface' LIKE 'alert%'"),
+    ("login", "로그인 완료", "event_name = 'signup_completed'"),
+    ("upload_viewed", "이력서 화면", f"event_name = 'import_viewed' AND {_ALERT_UPLOAD}"),
+    ("uploaded", "파일 올림", f"event_name = 'import_uploaded' AND {_ALERT_UPLOAD}"),
+    ("parsed", "읽기 성공", f"event_name = 'import_parsed' AND {_ALERT_UPLOAD}"),
+    ("saved", "경력 저장 (파일·직접)", f"event_name = 'career_input_completed' AND {_ALERT_FIRST}"),
+    ("saved_file", "그중 파일로 저장",
+     f"event_name = 'career_input_completed' AND {_ALERT_FIRST} AND properties->>'from_file' = 'true'"),
+    ("alert", "공고 알림 신청", "event_name = 'alert_subscribed'"),
+    ("fit", "1차 분석 요청", "event_name = 'fit_requested'"),
+)
 # List price of the import model per million tokens (input, output), claude-opus-5-5; the
 # dashboard shows it as an estimate only (https://www.anthropic.com/pricing).
 IMPORT_PRICE_PER_MTOK = (4.0, 20.0)
@@ -299,6 +315,16 @@ def stats(conn: Connection, rng: Range, with_team: bool) -> dict:
                    AS then_clicked
         FROM asked"""), p).one()._mapping
 
+    # /alert, login first (docs/10 §공고 알림 랜딩): the browsers that saw the landing, step by step to
+    # the resume, the alert opt-in and the analysis. The same browser carries its id through the login.
+    alert_steps = ", ".join(f"count(DISTINCT sid) FILTER (WHERE {cond}) AS {key}"
+                            for key, _, cond in ALERT_FUNNEL)
+    alert_counts = conn.execute(text(_EVENTS + f"""
+        , al AS (SELECT DISTINCT sid FROM ev
+                 WHERE event_name = 'landing_viewed' AND properties->>'variant' = 'alert')
+        SELECT {alert_steps} FROM ev WHERE sid IN (SELECT sid FROM al)"""), p).one()._mapping
+    alert = [{"key": key, "label": label, "people": alert_counts[key]} for key, label, _ in ALERT_FUNNEL]
+
     return {
         "range": rng, "with_team": with_team,
         "since": t_from.isoformat() if t_from else None,
@@ -309,6 +335,7 @@ def stats(conn: Connection, rng: Range, with_team: bool) -> dict:
         "imports": imports,
         "pay": {"cards": cards, "checkout": dict(checkout)},
         "gate": dict(gate),
+        "alert": alert,
     }
 
 

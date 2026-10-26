@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import { ConsentAll, ConsentBox, ConsentItem } from "@/components/Consent";
 import NodeSelect from "@/components/NodeSelect";
@@ -45,8 +45,10 @@ export function toPastJob(x: ImportedJob, role: string): PastJob | null {
   };
 }
 
-export function ImportUpload({ member, onRead, onManual }: {
+export function ImportUpload({ member, onRead, onManual, surface, title, sub, top, lead, manualLabel }: {
   member: boolean; onRead: (r: ImportRead) => void; onManual: () => void;
+  /** Where the screen was opened (funnel), and the words for it when it is not the plain upload. */
+  surface?: string; title?: string; sub?: string; top?: ReactNode; lead?: ReactNode; manualLabel?: string;
 }) {
   const [status, setStatus] = useState<ImportStatus | null>();
   const [files, setFiles] = useState<File[]>([]);
@@ -55,9 +57,9 @@ export function ImportUpload({ member, onRead, onManual }: {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string>();
   useEffect(() => {
-    track("import_viewed", { member });
+    track("import_viewed", { member, surface });
     acq.importStatus().then(setStatus).catch(() => setStatus(null));
-  }, [member]);
+  }, [member, surface]);
   const max = status?.max_files ?? 4;
   const add = (list: FileList | null) => {
     // Copied now: the input is cleared right after, and a FileList is live.
@@ -71,12 +73,12 @@ export function ImportUpload({ member, onRead, onManual }: {
     setBusy(true);
     try {
       const parts = await prepareUpload(files);
-      track("import_uploaded", { member, files: files.length, parts: parts.length, pdf: files.filter(isPdf).length,
-                                 stats_consent: stats });
+      track("import_uploaded", { member, surface, files: files.length, parts: parts.length,
+                                 pdf: files.filter(isPdf).length, stats_consent: stats });
       const r = await acq.importParse(parts, IMPORT_CONSENT_VERSION, stats ? IMPORT_STATS_CONSENT_VERSION : null,
                                       isInternal());
       track("import_parsed", {
-        member, source_kind: r.source_kind, experiences: r.experiences.length, education: r.education.length,
+        member, surface, source_kind: r.source_kind, experiences: r.experiences.length, education: r.education.length,
         roles_matched: r.experiences.filter((x) => x.suggested_role_node_id).length,
       });
       onRead(r);
@@ -92,8 +94,10 @@ export function ImportUpload({ member, onRead, onManual }: {
 
   return (
     <section className="screen" aria-busy={busy}>
-      <h2>{member ? "이력서·캡처로 경력 채우기" : "이력서·링*드인 캡처로 시작하기"}</h2>
-      <p className="sub">기존 만들어둔 이력서, 링*드인 캡처 등을 올리시면 됩니다.</p>
+      {top}
+      <h2>{title ?? (member ? "이력서·캡처로 경력 채우기" : "이력서·링*드인 캡처로 시작하기")}</h2>
+      <p className="sub">{sub ?? "기존 만들어둔 이력서, 링*드인 캡처 등을 올리시면 됩니다."}</p>
+      {lead}
       <ul className="import-points">
         <li>{member ? "경력만 읽어서 보여드려요. 더할 것만 고르면 돼요" : "경력·학력만 읽어서 입력칸을 채워요. 확인하고 고칠 수 있어요"}</li>
         <li>이름·연락처·사진은 읽지 않아요</li>
@@ -101,7 +105,7 @@ export function ImportUpload({ member, onRead, onManual }: {
       {unavailable || usedUp ? (
         <>
           <p className="hint">{usedUp ? "오늘은 파일 읽기를 더 할 수 없어요." : "지금은 파일 읽기를 쓸 수 없어요."} 직접 입력해도 같은 결과를 볼 수 있어요.</p>
-          <button className="cta" onClick={onManual}>직접 입력할게요</button>
+          <button className="cta" onClick={onManual}>{manualLabel ?? "직접 입력할게요"}</button>
         </>
       ) : (
         <>
@@ -148,7 +152,7 @@ export function ImportUpload({ member, onRead, onManual }: {
           <button className="cta" disabled={busy || !files.length || !agree} onClick={() => void read()}>
             {busy ? "읽는 중이에요… (20초쯤 걸려요)" : "올리고 채우기"}
           </button>
-          <button className="cta ghost" disabled={busy} onClick={onManual}>직접 입력할게요</button>
+          <button className="cta ghost" disabled={busy} onClick={onManual}>{manualLabel ?? "직접 입력할게요"}</button>
         </>
       )}
     </section>

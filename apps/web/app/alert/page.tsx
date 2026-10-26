@@ -4,12 +4,13 @@ import BusinessInfo from "@/components/BusinessInfo";
 import TrackView from "@/components/TrackView";
 
 import Feed from "./Feed";
+import KakaoStart from "./KakaoStart";
 import RealReviews from "./RealReviews";
 import "./alert.css";
 
-/* 공고 알림 test landing (/alert, owner decision 2026-10-26), in the Hello My Me look and voice. Same
-   funnel as the main landing: the view counts as a 방문 (landing_viewed, variant "alert"), the button
-   opens the resume upload, and the sign-up happens there. No job postings are listed until real ones
+/* 공고 알림 test landing (/alert, owner decision 2026-10-26), in the Hello My Me look and voice. The view
+   counts as a 방문 (landing_viewed, variant "alert"). Login first (owner decision 2026-10-26): the button
+   is Kakao, and right after the login the flow asks for the resume (AcquisitionFlow). No job postings are listed until real ones
    are collected: a job-info page may only carry postings whose company is known (직업안정법 시행령
    §28 1호). The notification and analysis panels are marked as examples. */
 
@@ -23,8 +24,6 @@ export const metadata: Metadata = {
   twitter: { card: "summary", title: TITLE, description: DESCRIPTION },
 };
 
-// from=alert: after login the flow offers the alert opt-in first (AcquisitionFlow, ALERT_ENTRY).
-const UPLOAD = "/upload?from=alert";
 
 const Check = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"
@@ -44,7 +43,7 @@ const Note = () => (
 );
 
 const STEPS = [
-  { b: "이력서 올리기", s: "PDF, 사진, 링크드인 캡처 모두 돼요. 읽은 학력·경력은 직접 확인한 것만 남아요." },
+  { b: "카카오로 시작하고 이력서 올리기", s: "갖고 있던 PDF, 사진, 링크드인 캡처 그대로 돼요. 읽은 학력·경력은 직접 확인한 것만 남아요." },
   { b: "1차 분석 받기", s: "잘 맞는 직군과 회사 유형, 보완하면 좋은 점을 바로 보여드려요." },
   { b: "맞는 공고 알림 받기", s: "나에게 맞는 공고가 올라오면 오전 8시~밤 9시 사이에 문자로 알려드려요." },
 ];
@@ -96,11 +95,11 @@ export default function AlertLanding() {
             <span className="al-stage"><i aria-hidden="true" />나도 도전하기 · 어디에 지원하지?</span>
             <h1>이력서만 올리면,<br />나에게 맞는 공고를 <em>먼저</em> 알려드려요</h1>
             <p className="al-lead">마감이 닥쳐서야 공고를 보는 일, 이제 그만해요. 분석과 알림은 모두 무료예요.</p>
-            <a className="al-cta" href={UPLOAD}>이력서 올리고 시작하기</a>
+            <KakaoStart surface="hero" />
             <ul className="al-trust">
-              <li><Check />1분이면 끝나요</li>
+              <li><Check />가입 3초</li>
+              <li><Check />있는 이력서 그대로</li>
               <li><Check />분석·알림 무료</li>
-              <li><Check />카카오로 3초 로그인</li>
             </ul>
 
             <div className="al-demo" aria-label="알림 예시">
@@ -204,7 +203,7 @@ export default function AlertLanding() {
         </main>
 
         <div className="al-bar al-g">
-          <a className="al-cta" href={UPLOAD}>이력서 올리고 맞는 공고 받기 · 무료</a>
+          <KakaoStart surface="bar" label="카카오로 시작하고 맞는 공고 받기 · 무료" />
         </div>
       </div>
     </div>
