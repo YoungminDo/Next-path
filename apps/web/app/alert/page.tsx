@@ -20,7 +20,8 @@ export const metadata: Metadata = {
   twitter: { card: "summary", title: TITLE, description: DESCRIPTION },
 };
 
-const UPLOAD = "/upload";
+// from=alert: after login the flow offers the alert opt-in first (AcquisitionFlow, ALERT_ENTRY).
+const UPLOAD = "/upload?from=alert";
 
 const GETS = [
   { b: "어디랑 잘 맞는지 1차 분석", s: "잘 맞는 직군과 회사, 보완하면 좋은 점을 알려드려요" },

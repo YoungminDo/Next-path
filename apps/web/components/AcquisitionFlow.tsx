@@ -17,6 +17,7 @@ import {
   type ImportRead,
   type Institution,
   type InterviewStatus,
+  type JobAlertStatus,
   type MyResult,
   type Node,
   type PastJob,
@@ -42,7 +43,7 @@ import { YEARS } from "@/lib/years";
    every distribution, intent and path. The server enforces the same gate: before login it only
    answers the teaser. Tone: "people who stood where I stand", never "seniors". */
 type Screen =
-  | "start" | "upload" | "s_edu" | "p_now" | "finding" | "gate" | "interview"
+  | "start" | "upload" | "s_edu" | "p_now" | "finding" | "gate" | "interview" | "alert"
   | "s_result" | "s_intent" | "p_next" | "p_first" | "p_similar" | "me" | "m_upload" | "m_review"
   | "m_changes";
 type UserType = "STUDENT" | "PROFESSIONAL";
@@ -55,6 +56,12 @@ const CONSENT_VERSION = "career_terms_v2";
 const INTERVIEW_SKIPPED = "hellomyme.interview_skipped";
 // The version of the interview consent wording shown in InterviewStep; change both together.
 const INTERVIEW_CONSENT_VERSION = "interview_contact_v1";
+// Came in through the job-alert landing (/alert → /upload?from=alert): after login the alert
+// opt-in comes first, instead of the interview invitation (docs/10 §공고 알림 랜딩).
+const ALERT_ENTRY = "hellomyme.entry";
+const ALERT_SKIPPED = "hellomyme.alert_skipped";
+// The version of the job-alert consent wording shown in AlertStep; change both together.
+const JOB_ALERT_CONSENT_VERSION = "job_alert_contact_v1";
 const SIZES: Record<string, string> = {
   ENTERPRISE: "대기업", LARGE: "대형", MID: "중견", SMALL: "소형", MICRO: "초소형",
   OTHER: "기타",
@@ -229,6 +236,11 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
   const [unl, setUnl] = useState<Unl>();
   const app = useMemo(() => (typeof window === "undefined" ? null : inAppBrowser()), []);
   useEffect(() => {
+    try {
+      if (new URLSearchParams(window.location.search).get("from") === "alert") localStorage.setItem(ALERT_ENTRY, "alert");
+    } catch { /* private mode */ }
+  }, []);
+  useEffect(() => {
     // Back from the Kakao page can restore this page as it was (busy, button off): free it.
     const onShow = (e: PageTransitionEvent) => {
       if (!e.persisted) return;
@@ -246,6 +258,7 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
   const desiredSaving = useRef<Promise<unknown> | null>(null);
   // Interview invitation (optional, after login), then the result they were waiting for.
   const [interview, setInterview] = useState<InterviewStatus>();
+  const [jobAlert, setJobAlert] = useState<JobAlertStatus>();
   // A returning member's new answers that differ from their profile: they choose at login.
   const [changes, setChanges] = useState<{ draftId: string; items: ProfileChange[] }>();
   const afterInterview = useRef<(() => Promise<void>) | null>(null);
@@ -611,6 +624,24 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
       }
       throw e;
     }
+    // Came from the job-alert landing: the optional alert opt-in first, then the result.
+    let fromAlert = false;
+    let alertSkipped = false;
+    try {
+      fromAlert = localStorage.getItem(ALERT_ENTRY) === "alert";
+      alertSkipped = localStorage.getItem(ALERT_SKIPPED) === "1";
+    } catch { /* private mode */ }
+    if (fromAlert && !alertSkipped) {
+      const al = await acq.jobAlert().catch(() => null);
+      if (al && al.enabled && al.status === "NONE") {
+        setJobAlert(al);
+        afterInterview.current = () => resumeMember(m);
+        pending.member("1");
+        track("alert_step_viewed", { surface: "after_login", user_type: m.profile.user_type });
+        setScreen("alert");
+        return;
+      }
+    }
     // Right after login, once: the optional interview invitation, then the result.
     const iv = await acq.interview().catch(() => null);
     let skipped = false;
@@ -632,6 +663,22 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
     track("interview_step_viewed", { surface: "result", user_type: userType });
     setScreen("interview");
   });
+  const openAlert = run(async () => {
+    setJobAlert(await acq.jobAlert());
+    afterInterview.current = async () => { setMe(await acq.me()); setScreen("me"); };
+    track("alert_step_viewed", { surface: "result", user_type: userType });
+    setScreen("alert");
+  });
+  const leaveAlert = (status?: JobAlertStatus) => {
+    if (status) setJobAlert(status);
+    else {
+      track("alert_skipped", { user_type: userType });
+      try { localStorage.setItem(ALERT_SKIPPED, "1"); } catch { /* private mode */ }
+    }
+    const next = afterInterview.current;
+    afterInterview.current = null;
+    run(async () => { if (next) await next(); else setScreen("me"); })();
+  };
   const leaveInterview = (status?: InterviewStatus) => {
     if (status) setInterview(status);
     else {
@@ -1006,6 +1053,10 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
         </section>
       )}
 
+      {screen === "alert" && jobAlert && (
+        <AlertStep status={jobAlert} userType={userType} onDone={leaveAlert} onSkip={() => leaveAlert()} />
+      )}
+
       {screen === "interview" && interview && (
         <InterviewStep status={interview} userType={userType} onDone={leaveInterview} onSkip={() => leaveInterview()} />
       )}
@@ -1071,7 +1122,7 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
       {screen === "me" && me && <MyScreen me={me} busy={busy} onUnlock={unlock} onUnlockCompare={unlockCompare} onUnlockCard={unlockCard}
                                           onBuy={buy}
                                           names={meNames} onChangeIntent={changeIntent}
-                                          onInterview={openInterview} onImport={openImport} />}
+                                          onInterview={openInterview} onAlert={openAlert} onImport={openImport} />}
       <BusinessInfo />
     </main>
   );
@@ -1224,12 +1275,12 @@ function months(m: number) {
 }
 
 function MyScreen({ me, busy, onUnlock, onUnlockCompare, onUnlockCard, onBuy, names, onChangeIntent, onInterview,
-  onImport }: {
+  onAlert, onImport }: {
   me: MyResult; busy: boolean; onUnlock: () => void; onUnlockCompare: () => void;
   onUnlockCard: (card: CardType) => void;
   onBuy: (insight: PayableInsight) => void;
   names: { school: string | null; major: string | null }; onChangeIntent: () => void; onInterview: () => void;
-  onImport: () => void;
+  onAlert: () => void; onImport: () => void;
 }) {
   const p = me.intent_paths.paths;
   const professional = me.profile.user_type === "PROFESSIONAL";
@@ -1298,6 +1349,7 @@ function MyScreen({ me, busy, onUnlock, onUnlockCompare, onUnlockCard, onBuy, na
         </>
       )}
       <ImportEntry onOpen={onImport} />
+      <AlertEntry onOpen={onAlert} />
       <InterviewEntry onOpen={onInterview} />
     </section>
   );
@@ -1433,6 +1485,115 @@ function InterviewStep({ status, userType, onDone, onSkip }: {
       <button className="cta ghost" disabled={busy} onClick={onSkip}>다음에 할게요</button>
     </section>
   );
+}
+
+/** Job-alert opt-in (/alert): its own consent; the code check is the interview's. Texts 08:00-21:00 only;
+ *  coaching and event news only with the separate advertising consent (정보통신망법 §50). */
+function AlertStep({ status, userType, onDone, onSkip }: {
+  status: JobAlertStatus; userType: UserType; onDone: (s: JobAlertStatus) => void; onSkip: () => void;
+}) {
+  const [phone, setPhone] = useState("");
+  const [code, setCode] = useState("");
+  const [sent, setSent] = useState(false);
+  const [agree, setAgree] = useState(false);
+  const [marketing, setMarketing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string>();
+  const needCode = status.verification_required;
+  const phoneOk = /^01[016789][0-9]{7,8}$/.test(phoneDigits(phone));
+  const act = (fn: () => Promise<void>) => async () => {
+    setErr(undefined);
+    setBusy(true);
+    try {
+      await fn();
+    } catch (e) {
+      setErr(errorMessage(e) ?? "잠시 후 다시 시도해 주세요.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const sendCode = act(async () => {
+    await acq.jobAlertCode(phone);
+    setSent(true);
+    track("alert_code_sent", { user_type: userType });
+  });
+  const submit = act(async () => {
+    const s = await acq.jobAlertSubscribe(phone, needCode ? code : null, JOB_ALERT_CONSENT_VERSION, marketing);
+    track("alert_subscribed", { user_type: userType, verified: s.verified, marketing });
+    onDone(s);
+  });
+  return (
+    <section className="screen">
+      <span className="badge">공고 알림</span>
+      <h2>맞는 공고가 올라오면 문자로 알려드릴까요?</h2>
+      <p className="sub">이력서와 맞는 공고가 올라오면 오전 8시~밤 9시 사이에 문자로 보내드려요. 언제든 끌 수 있어요.</p>
+      <Field label="휴대전화번호">
+        <input type="tel" inputMode="numeric" autoComplete="tel" placeholder="010-1234-5678" value={phone}
+               onChange={(e) => { setPhone(e.target.value); setSent(false); setCode(""); }} />
+      </Field>
+      {needCode && (sent ? (
+        <Field label="인증번호 (3분 안에 입력)">
+          <input inputMode="numeric" autoComplete="one-time-code" maxLength={6} placeholder="6자리" value={code}
+                 onChange={(e) => setCode(phoneDigits(e.target.value).slice(0, 6))} />
+        </Field>
+      ) : (
+        <button className="cta ghost" disabled={!phoneOk || busy} onClick={sendCode}>인증번호 받기</button>
+      ))}
+      <label className="check consent-detail">
+        <input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} />
+        <span>
+          <b>[선택] 공고 알림을 위한 개인정보 수집·이용 동의</b><br />
+          목적: 나와 맞는 채용 공고 알림 문자 발송 · 항목: 휴대전화번호 ·
+          보유 기간: 동의한 날부터 1년 (그 전에 알림을 끄면 바로 삭제)<br />
+          동의하지 않아도 되고, 동의하지 않아도 서비스는 그대로 이용할 수 있어요.
+        </span>
+      </label>
+      <label className="check consent-detail">
+        <input type="checkbox" checked={marketing} onChange={(e) => setMarketing(e.target.checked)} />
+        <span>
+          <b>[선택] 코칭·이벤트 소식 문자 받기 (광고성 정보)</b><br />
+          이력서 첨삭 코칭과 이벤트 소식을 문자로 보내요. 밤 9시~아침 8시에는 보내지 않아요.
+        </span>
+      </label>
+      {err && <p className="error" role="alert">{err}</p>}
+      {sent && needCode && <button className="link" disabled={busy} onClick={sendCode}>인증번호 다시 받기</button>}
+      <button className="cta" disabled={busy || !phoneOk || !agree || (needCode && (!sent || code.length !== 6))}
+              onClick={submit}>알림 켜기</button>
+      <button className="cta ghost" disabled={busy} onClick={onSkip}>다음에 할게요</button>
+    </section>
+  );
+}
+
+/** On the result: turn job alerts on, or show the number and let them turn alerts off (number deleted). */
+function AlertEntry({ onOpen }: { onOpen: () => void }) {
+  const [s, setS] = useState<JobAlertStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => { acq.jobAlert().then(setS).catch(() => setS(null)); }, []);
+  if (!s) return null;
+  if (s.status === "SUBSCRIBED") {
+    const withdraw = async () => {
+      setBusy(true);
+      setFailed(false);
+      try {
+        setS(await acq.jobAlertWithdraw());
+        track("alert_withdrawn", {});
+      } catch {
+        setFailed(true);
+      } finally {
+        setBusy(false);
+      }
+    };
+    return (
+      <>
+        <p className="hint">공고 알림 켜짐 ({s.phone_masked}) · {" "}
+          <button className="link" disabled={busy} onClick={withdraw}>알림 끄고 번호 지우기</button></p>
+        {failed && <p className="error" role="alert">끄지 못했어요. 잠시 후 다시 눌러 주세요.</p>}
+      </>
+    );
+  }
+  if (!s.enabled) return null;
+  return <button className="link share" onClick={onOpen}>맞는 공고 알림 받기 (문자)</button>;
 }
 
 /** On the result: invite again later (if skipped), or show the request and let them withdraw. */

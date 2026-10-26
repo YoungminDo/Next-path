@@ -184,6 +184,8 @@ EventName = Literal[
     "checkout_viewed", "checkout_completed", "checkout_cancelled",
     # The Kakao button pressed before the consent box was ticked (migration 0040)
     "login_consent_missing",
+    # Job-alert opt-in after login (/alert, migration 0043)
+    "alert_step_viewed", "alert_code_sent", "alert_subscribed", "alert_skipped", "alert_withdrawn",
 ]
 
 

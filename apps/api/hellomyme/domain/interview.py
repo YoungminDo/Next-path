@@ -87,6 +87,12 @@ def send_code(conn: Connection, settings: Settings, account_id: str, raw_phone: 
               sender: SmsSender | None) -> dict:
     if not settings.interview_enabled:
         raise InterviewError(409, "interview applications are closed")
+    return send_phone_code(conn, settings, account_id, raw_phone, sender)
+
+
+def send_phone_code(conn: Connection, settings: Settings, account_id: str, raw_phone: str,
+                    sender: SmsSender | None) -> dict:
+    """A 6-digit code to the number; shared with the job-alert opt-in (same limits, same table)."""
     if sender is None:
         raise InterviewError(409, "verification is not required")
     phone = normalize_phone(raw_phone)

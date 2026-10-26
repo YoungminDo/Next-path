@@ -18,7 +18,7 @@ from hellomyme.api.deps import (
 )
 from hellomyme.db import get_engine
 from hellomyme.domain import acquisition as acq
-from hellomyme.domain import career_import, drafts, interview, ledger, payments
+from hellomyme.domain import career_import, drafts, interview, job_alert, ledger, payments
 from hellomyme.domain.career_input import member_person_id
 from hellomyme.domain.career_query import QueryInvalid
 from hellomyme.domain.policies import PolicyMissing, active_unlock_policy
@@ -537,6 +537,38 @@ def interview_apply(body: InterviewRequest, conn: Conn, settings: AppSettings, a
 @router.delete("/me/interview")
 def interview_withdraw(conn: Conn, settings: AppSettings, account_id: Account):
     return interview.withdraw(conn, settings, account_id, get_sender(settings))
+
+
+# --- job-alert opt-in (/alert; its own consent, the interview's phone check; migration 0043) ---
+
+@router.get("/me/job-alert")
+def job_alert_status(conn: Conn, settings: AppSettings, account_id: Account):
+    return job_alert.status(conn, settings, account_id, get_sender(settings))
+
+
+@router.post("/me/job-alert/code")
+def job_alert_code(body: PhoneRequest, conn: Conn, settings: AppSettings, account_id: Account):
+    return _interview(lambda: job_alert.send_code(conn, settings, account_id, body.phone,
+                                                  get_sender(settings)))
+
+
+class JobAlertRequest(PhoneRequest):
+    code: str | None = Field(default=None, max_length=10)
+    consent: Literal[True]  # the job-alert consent, ticked by the member
+    consent_text_version: str = Field(min_length=1, max_length=64)
+    marketing: bool = False  # optional: coaching and event news by text (advertising)
+
+
+@router.post("/me/job-alert")
+def job_alert_subscribe(body: JobAlertRequest, conn: Conn, settings: AppSettings, account_id: Account):
+    return _interview(lambda: job_alert.subscribe(conn, settings, account_id, body.phone, body.code,
+                                                  body.consent_text_version, body.marketing,
+                                                  get_sender(settings)))
+
+
+@router.delete("/me/job-alert")
+def job_alert_withdraw(conn: Conn, settings: AppSettings, account_id: Account):
+    return job_alert.withdraw(conn, settings, account_id, get_sender(settings))
 
 
 class IntentRequest(BaseModel):

@@ -158,6 +158,11 @@ export type InterviewStatus = {
   status: "NONE" | "APPLIED" | "WITHDRAWN"; phone_masked: string | null; verified: boolean;
   verification_required: boolean; consent_text_version: string; reward_text: string | null;
 };
+export type JobAlertStatus = {
+  enabled: boolean;
+  status: "NONE" | "SUBSCRIBED" | "WITHDRAWN"; phone_masked: string | null; verified: boolean;
+  verification_required: boolean; consent_text_version: string; marketing: boolean;
+};
 export type EmploymentType = "FULL_TIME" | "PART_TIME" | "CONTRACT" | "INTERN";
 export type ImportStatus = { enabled: boolean; consent_text_version: string;
   stats_consent_text_version: string; max_files: number; remaining_today: number };
@@ -248,6 +253,17 @@ export const acq = {
       body: JSON.stringify({ phone, code, consent: true, consent_text_version: consentTextVersion }),
     }),
   interviewWithdraw: () => call<InterviewStatus>("/acq/me/interview", { method: "DELETE" }),
+  jobAlert: () => call<JobAlertStatus>("/acq/me/job-alert"),
+  jobAlertCode: (phone: string) =>
+    call<{ sent: boolean; expires_in: number; phone_masked: string }>("/acq/me/job-alert/code", {
+      method: "POST", body: JSON.stringify({ phone }),
+    }),
+  jobAlertSubscribe: (phone: string, code: string | null, consentTextVersion: string, marketing: boolean) =>
+    call<JobAlertStatus>("/acq/me/job-alert", {
+      method: "POST",
+      body: JSON.stringify({ phone, code, consent: true, consent_text_version: consentTextVersion, marketing }),
+    }),
+  jobAlertWithdraw: () => call<JobAlertStatus>("/acq/me/job-alert", { method: "DELETE" }),
   importStatus: () => call<ImportStatus>("/acq/import"),
   /** Reads the person's own files (never stored). Before login the rows only prefill the form. */
   importParse: (files: { media_type: string; data: string }[], consentTextVersion: string,

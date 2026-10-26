@@ -12,7 +12,8 @@ export type FunnelEvent =
   | "interview_step_viewed" | "interview_skipped" | "interview_code_sent" | "interview_submitted"
   | "interview_withdrawn" | "import_viewed" | "import_uploaded" | "import_parsed" | "import_confirmed"
   | "payment_started" | "payment_failed" | "credit_purchased"
-  | "checkout_viewed" | "checkout_completed" | "checkout_cancelled" | "login_consent_missing";
+  | "checkout_viewed" | "checkout_completed" | "checkout_cancelled" | "login_consent_missing"
+  | "alert_step_viewed" | "alert_code_sent" | "alert_subscribed" | "alert_skipped" | "alert_withdrawn";
 
 const TOUCH = "hellomyme.touch";
 

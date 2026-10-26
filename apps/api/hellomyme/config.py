@@ -95,6 +95,9 @@ class Settings(BaseSettings):
     interview_consent_version: str = "interview_contact_v1"
     # Shown under the invitation only when set (the reward is a business decision).
     interview_reward_text: str | None = None
+    # Job-alert opt-in (/alert): same phone check as the interview, its own consent (migration 0043).
+    job_alert_enabled: bool = True
+    job_alert_consent_version: str = "job_alert_contact_v1"
 
     # Search ingest (docs/12): public-profile snippets from search APIs, received for review as
     # SEED statistics input. Either key alone works; with both the run alternates per query.
