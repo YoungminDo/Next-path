@@ -12,7 +12,8 @@ events from `web/lib/track.ts`, migration 0024, `scripts/funnel.sql`; one 방문
 interview phone opt-in 0027; resume/capture import 0030: `domain/career_import.py`, web `components/ImportFlow.tsx`,
 `/upload`; job-alert test landing `/alert` + alert phone opt-in 0043: `domain/job_alert.py`; first-pass fit
 analysis + coaching requests 0044: `domain/fit_analysis.py`, `domain/coaching.py`; members' own reviews 0045:
-`domain/review.py`, web `components/ReviewBox.tsx`, `/admin` approves or hides, `/alert` shows 5+ as written), `11_META_ADS.md` (per-audience Meta campaigns, utm_campaign `np_<date>_<audience>`, pixel `web/lib/pixel.ts`,
+`domain/review.py`, web `components/ReviewBox.tsx`, `/admin` approves or hides, `/alert` shows 5+ as written;
+manufacturing roles added to the active ROLE taxonomy 0046, codes `ROLE_M..`), `11_META_ADS.md` (per-audience Meta campaigns, utm_campaign `np_<date>_<audience>`, pixel `web/lib/pixel.ts`,
 dataset NEXTPATH웹 in `lib/pixel-id.ts`, `NEXT_PUBLIC_META_PIXEL_ID=off` turns it off: PageView/Lead/CompleteRegistration, no properties), `12_SEARCH_INGEST.md` (design: SerpAPI + Brave public-profile snippets → `receive()` as SEED, Render cron, human review, statistics only; yield check `scripts/linkedin_snippet_yield.py`). Team dashboard `/admin` (`api/admin.py`, `domain/admin_stats.py`, web `components/admin/`) is for
 accounts in `HELLOMYME_ADMIN_ACCOUNT_IDS`, counts only (plus the review queue: members' own texts, no name or account). Migration 0025 closes the Supabase Data API: every new table enables RLS
 (`tests/test_data_api_lock.py`).
