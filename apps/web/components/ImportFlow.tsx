@@ -22,7 +22,8 @@ import { prepareUpload, UploadError } from "@/lib/upload";
 
 // Versions of the two notices below; the server refuses any other (change both together).
 // v2 (2026-10-26): the same notice in shorter words, the details one tap away (components/Consent).
-export const IMPORT_CONSENT_VERSION = "career_import_v2";
+// v3: the retention line names the recipient's retention only (owner decision 2026-10-26).
+export const IMPORT_CONSENT_VERSION = "career_import_v3";
 export const IMPORT_STATS_CONSENT_VERSION = "career_import_stats_v2";
 const isPdf = (f: File) => f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf");
 
@@ -95,7 +96,7 @@ export function ImportUpload({ member, onRead, onManual }: {
       <p className="sub">기존 만들어둔 이력서, 링*드인 캡처 등을 올리시면 됩니다.</p>
       <ul className="import-points">
         <li>{member ? "경력만 읽어서 보여드려요. 더할 것만 고르면 돼요" : "경력·학력만 읽어서 입력칸을 채워요. 확인하고 고칠 수 있어요"}</li>
-        <li>이름·연락처·사진은 읽지 않고, 파일은 저장하지 않아요</li>
+        <li>이름·연락처·사진은 읽지 않아요</li>
       </ul>
       {unavailable || usedUp ? (
         <>
@@ -122,14 +123,14 @@ export function ImportUpload({ member, onRead, onManual }: {
             </ul>
           )}
           <ConsentBox>
-            <ConsentAll checked={agree && stats} note="파일은 읽고 바로 지워요"
+            <ConsentAll checked={agree && stats}
                         onChange={(v) => { setAgree(v); setStats(v); }} />
             <ConsentItem required title="AI가 이력서 읽기 (국외 이전)" checked={agree} onChange={setAgree}>
               <ul>
                 <li>받는 곳: Anthropic, PBC (미국, AI 서비스) · privacy@anthropic.com</li>
                 <li>보내는 것: 올린 파일 내용 (이력서·캡처) · 올릴 때 암호화해서 보내요</li>
                 <li>목적: 경력·학력을 읽어 입력칸 채우기</li>
-                <li>보관: nextpath는 파일을 저장하지 않아요. Anthropic은 AI 학습에 쓰지 않고 정해진 기간 뒤 지워요.</li>
+                <li>보관: Anthropic은 AI 학습에 쓰지 않고 정해진 기간 뒤 지워요.</li>
                 <li>동의하지 않으면 직접 입력으로 같은 결과를 볼 수 있어요.</li>
                 <li><a href="/privacy" target="_blank" rel="noreferrer">개인정보처리방침</a></li>
               </ul>

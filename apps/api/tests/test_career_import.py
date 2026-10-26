@@ -61,7 +61,7 @@ def app_with(extractor, **overrides) -> TestClient:
 
 def body(files=None, **extra):
     return {"files": files or [{"media_type": "image/png", "data": PNG}], "consent": True,
-            "consent_text_version": "career_import_v2", **extra}
+            "consent_text_version": "career_import_v3", **extra}
 
 
 def test_off_without_a_key_and_consent_comes_first(ids):  # noqa: F811
