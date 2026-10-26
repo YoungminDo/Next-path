@@ -94,7 +94,7 @@ export default function AlertLanding() {
               <details><summary>올린 이력서 파일은 저장되나요?</summary><p>아니요. 파일은 경력과 학력을 읽는 데만 쓰고 바로 지워요. 이름, 연락처, 사진은 읽지 않아요. 읽은 내용도 직접 확인한 것만 남아요.</p></details>
               <details><summary>어떤 공고를 알려주나요?</summary><p>회사 채용 페이지와 채용 사이트에 공개된 공고 중 회사가 확인되는 공고만 알려드려요. 마감된 공고는 보내지 않아요.</p></details>
               <details><summary>알림은 언제, 어떻게 오나요?</summary><p>맞는 공고가 올라오면 오전 8시~밤 9시 사이에 문자로 보내요. 알림은 언제든 끌 수 있어요.</p></details>
-              <details><summary>분석은 무엇으로 하나요?</summary><p>올린 이력서와 공개된 공고를 비교해요. 비슷한 경력의 사람들이 간 길은 실제 기록이 충분히 모이기 전까지 예시 데이터로 계산한 결과를 보여드려요.</p></details>
+              <details><summary>분석은 무엇으로 하나요?</summary><p>이력서에서 읽고 직접 확인한 학력·경력으로 AI가 잘 맞는 직군과 회사 유형, 보완하면 좋은 점을 알려드려요. 비슷한 경력의 사람들이 간 길은 실제 기록이 충분히 모이기 전까지 예시 데이터로 계산한 결과를 보여드려요.</p></details>
               <details><summary>코칭은 꼭 받아야 하나요?</summary><p>아니요. 분석과 공고 알림은 무료예요. 코칭은 원할 때만 따로 신청해요.</p></details>
             </div>
           </section>

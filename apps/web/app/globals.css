@@ -495,3 +495,15 @@ body { word-break: keep-all; overflow-wrap: break-word; }
 .checkout-done .gift { font-size: 48px; }
 .checkout-done .cta { align-self: stretch; text-align: center; text-decoration: none; }
 .rcards .gcard footer { gap: 8px; line-height: 1.5; }
+
+/* --- first-pass analysis and coaching (/alert, migration 0044) --------------------------------- */
+.fit-h { font-size: 16px; font-weight: 800; margin: 8px 0 0; }
+.fit-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.fit-item { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+.fit-item b { font-size: 15px; }
+.fit-item p { margin: 6px 0 0; color: var(--sub); font-size: 14px; line-height: 1.55; }
+.fit-level { margin-left: 8px; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px;
+  background: var(--mint-soft); color: var(--mint-ink); }
+.fit-level.mid { background: var(--line); color: var(--sub); }
+.fit-gaps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; font-size: 14px; line-height: 1.55; }
+.coach { display: flex; flex-direction: column; gap: 10px; border: 1px solid var(--line); }

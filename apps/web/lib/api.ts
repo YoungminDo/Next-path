@@ -163,6 +163,18 @@ export type JobAlertStatus = {
   status: "NONE" | "SUBSCRIBED" | "WITHDRAWN"; phone_masked: string | null; verified: boolean;
   verification_required: boolean; consent_text_version: string; marketing: boolean;
 };
+export type FitAnalysis = {
+  analysis_id: string; created_at: string; summary: string;
+  fits: { role_code: string | null; role_name: string; level: "HIGH" | "MEDIUM"; reason: string }[];
+  company_types: string[];
+  gaps: string[];
+};
+export type FitStatus = { enabled: boolean; consent_text_version: string; latest: FitAnalysis | null };
+export type CoachingStatus = {
+  enabled: boolean; consent_text_version: string;
+  products: { sku: string; name: string; amount_krw: number }[];
+  request: { sku: string; name: string; amount_krw: number; requested_at: string; phone_masked: string | null } | null;
+};
 export type EmploymentType = "FULL_TIME" | "PART_TIME" | "CONTRACT" | "INTERN";
 export type ImportStatus = { enabled: boolean; consent_text_version: string;
   stats_consent_text_version: string; max_files: number; remaining_today: number };
@@ -264,6 +276,19 @@ export const acq = {
       body: JSON.stringify({ phone, code, consent: true, consent_text_version: consentTextVersion, marketing }),
     }),
   jobAlertWithdraw: () => call<JobAlertStatus>("/acq/me/job-alert", { method: "DELETE" }),
+  fit: () => call<FitStatus>("/acq/me/fit"),
+  /** The model answers in 10-30 s; a rerun with the same records returns the stored answer. */
+  fitRun: (consentTextVersion: string) =>
+    call<FitAnalysis>("/acq/me/fit", {
+      method: "POST", body: JSON.stringify({ consent: true, consent_text_version: consentTextVersion }),
+    }),
+  coaching: () => call<CoachingStatus>("/acq/me/coaching"),
+  coachingRequest: (sku: string, phone: string, consentTextVersion: string) =>
+    call<CoachingStatus>("/acq/me/coaching", {
+      method: "POST",
+      body: JSON.stringify({ sku, phone, consent: true, consent_text_version: consentTextVersion }),
+    }),
+  coachingCancel: () => call<CoachingStatus>("/acq/me/coaching", { method: "DELETE" }),
   importStatus: () => call<ImportStatus>("/acq/import"),
   /** Reads the person's own files (never stored). Before login the rows only prefill the form. */
   importParse: (files: { media_type: string; data: string }[], consentTextVersion: string,

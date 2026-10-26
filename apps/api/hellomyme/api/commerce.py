@@ -186,6 +186,8 @@ EventName = Literal[
     "login_consent_missing",
     # Job-alert opt-in after login (/alert, migration 0043)
     "alert_step_viewed", "alert_code_sent", "alert_subscribed", "alert_skipped", "alert_withdrawn",
+    # First-pass fit analysis and coaching requests (/alert, migration 0044)
+    "fit_step_viewed", "fit_requested", "coaching_requested", "coaching_cancelled",
 ]
 
 

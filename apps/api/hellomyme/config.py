@@ -98,6 +98,14 @@ class Settings(BaseSettings):
     # Job-alert opt-in (/alert): same phone check as the interview, its own consent (migration 0043).
     job_alert_enabled: bool = True
     job_alert_consent_version: str = "job_alert_contact_v1"
+    # First-pass fit analysis (/alert, migration 0044): confirmed records to Claude, its own
+    # overseas-transfer consent wording; runs per account per day.
+    fit_analysis_enabled: bool = True
+    fit_analysis_consent_version: str = "fit_analysis_v1"
+    fit_analysis_daily_limit: int = 3
+    # Coaching requests: product prices live in coaching_product; the phone has its own consent.
+    coaching_enabled: bool = True
+    coaching_consent_version: str = "coaching_contact_v1"
 
     # Search ingest (docs/12): public-profile snippets from search APIs, received for review as
     # SEED statistics input. Either key alone works; with both the run alternates per query.

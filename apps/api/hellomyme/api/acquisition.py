@@ -2,7 +2,7 @@
 from datetime import UTC, datetime
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -18,7 +18,17 @@ from hellomyme.api.deps import (
 )
 from hellomyme.db import get_engine
 from hellomyme.domain import acquisition as acq
-from hellomyme.domain import career_import, drafts, interview, job_alert, ledger, payments
+from hellomyme.domain import (
+    career_import,
+    coaching,
+    drafts,
+    fit_analysis,
+    interview,
+    job_alert,
+    ledger,
+    payments,
+    signup_alert,
+)
 from hellomyme.domain.career_input import member_person_id
 from hellomyme.domain.career_query import QueryInvalid
 from hellomyme.domain.policies import PolicyMissing, active_unlock_policy
@@ -569,6 +579,69 @@ def job_alert_subscribe(body: JobAlertRequest, conn: Conn, settings: AppSettings
 @router.delete("/me/job-alert")
 def job_alert_withdraw(conn: Conn, settings: AppSettings, account_id: Account):
     return job_alert.withdraw(conn, settings, account_id, get_sender(settings))
+
+
+# --- first-pass fit analysis and coaching requests (/alert; migration 0044) ----------------------
+
+def fit_analyzer(settings: AppSettings) -> fit_analysis.Analyzer | None:
+    return fit_analysis.get_analyzer(settings)
+
+
+Analyzer = Annotated[fit_analysis.Analyzer | None, Depends(fit_analyzer)]
+
+
+@router.get("/me/fit")
+def fit_status(conn: Conn, settings: AppSettings, account_id: Account, analyzer: Analyzer):
+    return fit_analysis.status(conn, settings, account_id, analyzer)
+
+
+class FitRequest(BaseModel):
+    consent: Literal[True]  # the overseas-transfer consent for the analysis, ticked by the member
+    consent_text_version: str = Field(min_length=1, max_length=64)
+
+
+@router.post("/me/fit")
+def fit_run(body: FitRequest, settings: AppSettings, analyzer: Analyzer,
+            authorization: Annotated[str | None, Header()] = None):
+    """No request-wide connection: the model answers in 10-30 s, only short transactions inside."""
+    engine = get_engine()
+    with engine.begin() as conn:
+        account_id = optional_account(conn, authorization)
+        if not account_id:
+            raise HTTPException(401, "login required")
+        person_id = member_person_id(conn, account_id)
+    try:
+        return fit_analysis.run(engine, settings, account_id, person_id, body.consent_text_version,
+                                analyzer)
+    except fit_analysis.FitAnalysisFailed as exc:
+        raise HTTPException(exc.status, {"message": exc.message}) from exc
+
+
+@router.get("/me/coaching")
+def coaching_status(conn: Conn, settings: AppSettings, account_id: Account):
+    return coaching.status(conn, settings, account_id)
+
+
+class CoachingRequest(PhoneRequest):
+    sku: str = Field(min_length=1, max_length=40)
+    consent: Literal[True]  # the coaching-contact consent, ticked by the member
+    consent_text_version: str = Field(min_length=1, max_length=64)
+
+
+@router.post("/me/coaching")
+def coaching_request(body: CoachingRequest, conn: Conn, settings: AppSettings, account_id: Account,
+                     background: BackgroundTasks):
+    out, product = _interview(lambda: coaching.request(conn, settings, account_id, body.sku, body.phone,
+                                                       body.consent_text_version))
+    # The team hears of it with the product only: no name, number or account id leaves.
+    if (notifier := signup_alert.get_notifier(settings)) is not None:
+        background.add_task(notifier.post, f":coffee: 코칭 신청 1건 · {product}")
+    return out
+
+
+@router.delete("/me/coaching")
+def coaching_cancel(conn: Conn, settings: AppSettings, account_id: Account):
+    return coaching.cancel(conn, settings, account_id)
 
 
 class IntentRequest(BaseModel):

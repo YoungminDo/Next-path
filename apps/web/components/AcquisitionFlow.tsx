@@ -18,6 +18,9 @@ import {
   type Institution,
   type InterviewStatus,
   type JobAlertStatus,
+  type FitAnalysis,
+  type FitStatus,
+  type CoachingStatus,
   type MyResult,
   type Node,
   type PastJob,
@@ -43,7 +46,7 @@ import { YEARS } from "@/lib/years";
    every distribution, intent and path. The server enforces the same gate: before login it only
    answers the teaser. Tone: "people who stood where I stand", never "seniors". */
 type Screen =
-  | "start" | "upload" | "s_edu" | "p_now" | "finding" | "gate" | "interview" | "alert"
+  | "start" | "upload" | "s_edu" | "p_now" | "finding" | "gate" | "interview" | "alert" | "fit"
   | "s_result" | "s_intent" | "p_next" | "p_first" | "p_similar" | "me" | "m_upload" | "m_review"
   | "m_changes";
 type UserType = "STUDENT" | "PROFESSIONAL";
@@ -62,6 +65,10 @@ const ALERT_ENTRY = "hellomyme.entry";
 const ALERT_SKIPPED = "hellomyme.alert_skipped";
 // The version of the job-alert consent wording shown in AlertStep; change both together.
 const JOB_ALERT_CONSENT_VERSION = "job_alert_contact_v1";
+// The wording versions of the analysis transfer consent (FitScreen) and the coaching contact consent
+// (CoachingOffer); change each together with its text.
+const FIT_CONSENT_VERSION = "fit_analysis_v1";
+const COACHING_CONSENT_VERSION = "coaching_contact_v1";
 const SIZES: Record<string, string> = {
   ENTERPRISE: "대기업", LARGE: "대형", MID: "중견", SMALL: "소형", MICRO: "초소형",
   OTHER: "기타",
@@ -259,6 +266,9 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
   // Interview invitation (optional, after login), then the result they were waiting for.
   const [interview, setInterview] = useState<InterviewStatus>();
   const [jobAlert, setJobAlert] = useState<JobAlertStatus>();
+  // First-pass analysis (/alert): what to show, and where to go after it.
+  const [fit, setFit] = useState<FitStatus>();
+  const afterFit = useRef<(() => Promise<void>) | null>(null);
   // A returning member's new answers that differ from their profile: they choose at login.
   const [changes, setChanges] = useState<{ draftId: string; items: ProfileChange[] }>();
   const afterInterview = useRef<(() => Promise<void>) | null>(null);
@@ -624,23 +634,27 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
       }
       throw e;
     }
-    // Came from the job-alert landing: the optional alert opt-in first, then the result.
+    // Came from the job-alert landing: the optional alert opt-in, then the first-pass analysis,
+    // then the result.
     let fromAlert = false;
     let alertSkipped = false;
     try {
       fromAlert = localStorage.getItem(ALERT_ENTRY) === "alert";
       alertSkipped = localStorage.getItem(ALERT_SKIPPED) === "1";
     } catch { /* private mode */ }
-    if (fromAlert && !alertSkipped) {
-      const al = await acq.jobAlert().catch(() => null);
+    if (fromAlert) {
+      pending.member("1");
+      const toFit = () => showFit("after_login", () => resumeMember(m));
+      const al = alertSkipped ? null : await acq.jobAlert().catch(() => null);
       if (al && al.enabled && al.status === "NONE") {
         setJobAlert(al);
-        afterInterview.current = () => resumeMember(m);
-        pending.member("1");
+        afterInterview.current = toFit;
         track("alert_step_viewed", { surface: "after_login", user_type: m.profile.user_type });
         setScreen("alert");
         return;
       }
+      await toFit();
+      return;
     }
     // Right after login, once: the optional interview invitation, then the result.
     const iv = await acq.interview().catch(() => null);
@@ -663,6 +677,21 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
     track("interview_step_viewed", { surface: "result", user_type: userType });
     setScreen("interview");
   });
+  /** The first-pass analysis screen, then `next` (the result). Off or unreachable: straight to `next`. */
+  async function showFit(surface: string, next: () => Promise<void>) {
+    const s = await acq.fit().catch(() => null);
+    if (!s || !s.enabled) { await next(); return; }
+    setFit(s);
+    afterFit.current = next;
+    track("fit_step_viewed", { surface, user_type: userType, has_result: !!s.latest });
+    setScreen("fit");
+  }
+  const openFit = run(() => showFit("result", async () => { setMe(await acq.me()); setScreen("me"); }));
+  const leaveFit = () => {
+    const next = afterFit.current;
+    afterFit.current = null;
+    run(async () => { if (next) await next(); else setScreen("me"); })();
+  };
   const openAlert = run(async () => {
     setJobAlert(await acq.jobAlert());
     afterInterview.current = async () => { setMe(await acq.me()); setScreen("me"); };
@@ -1057,6 +1086,10 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
         <AlertStep status={jobAlert} userType={userType} onDone={leaveAlert} onSkip={() => leaveAlert()} />
       )}
 
+      {screen === "fit" && fit && (
+        <FitScreen status={fit} userType={userType} onDone={leaveFit} onAlert={openAlert} />
+      )}
+
       {screen === "interview" && interview && (
         <InterviewStep status={interview} userType={userType} onDone={leaveInterview} onSkip={() => leaveInterview()} />
       )}
@@ -1122,7 +1155,8 @@ export default function AcquisitionFlow({ initial, startOn }: { initial?: Option
       {screen === "me" && me && <MyScreen me={me} busy={busy} onUnlock={unlock} onUnlockCompare={unlockCompare} onUnlockCard={unlockCard}
                                           onBuy={buy}
                                           names={meNames} onChangeIntent={changeIntent}
-                                          onInterview={openInterview} onAlert={openAlert} onImport={openImport} />}
+                                          onInterview={openInterview} onAlert={openAlert} onFit={openFit}
+                                          onImport={openImport} />}
       <BusinessInfo />
     </main>
   );
@@ -1275,12 +1309,12 @@ function months(m: number) {
 }
 
 function MyScreen({ me, busy, onUnlock, onUnlockCompare, onUnlockCard, onBuy, names, onChangeIntent, onInterview,
-  onAlert, onImport }: {
+  onAlert, onFit, onImport }: {
   me: MyResult; busy: boolean; onUnlock: () => void; onUnlockCompare: () => void;
   onUnlockCard: (card: CardType) => void;
   onBuy: (insight: PayableInsight) => void;
   names: { school: string | null; major: string | null }; onChangeIntent: () => void; onInterview: () => void;
-  onAlert: () => void; onImport: () => void;
+  onAlert: () => void; onFit: () => void; onImport: () => void;
 }) {
   const p = me.intent_paths.paths;
   const professional = me.profile.user_type === "PROFESSIONAL";
@@ -1349,6 +1383,7 @@ function MyScreen({ me, busy, onUnlock, onUnlockCompare, onUnlockCard, onBuy, na
         </>
       )}
       <ImportEntry onOpen={onImport} />
+      <button className="link share" onClick={onFit}>이력서 1차 분석 보기 (AI)</button>
       <AlertEntry onOpen={onAlert} />
       <InterviewEntry onOpen={onInterview} />
     </section>
@@ -1594,6 +1629,175 @@ function AlertEntry({ onOpen }: { onOpen: () => void }) {
   }
   if (!s.enabled) return null;
   return <button className="link share" onClick={onOpen}>맞는 공고 알림 받기 (문자)</button>;
+}
+
+/** First-pass analysis (/alert): the member's confirmed records go to Claude once they agree to the
+ *  transfer (PIPA §28-8); the answer is stored, so coming back shows it again without a new run. */
+function FitScreen({ status, userType, onDone, onAlert }: {
+  status: FitStatus; userType: UserType; onDone: () => void; onAlert: () => void;
+}) {
+  const [result, setResult] = useState<FitAnalysis | null>(status.latest);
+  const [agree, setAgree] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string>();
+  const runIt = async () => {
+    setErr(undefined);
+    setBusy(true);
+    track("fit_requested", { user_type: userType });
+    try {
+      setResult(await acq.fitRun(FIT_CONSENT_VERSION));
+    } catch (e) {
+      setErr(errorMessage(e) ?? "분석하지 못했어요. 잠시 후 다시 시도해 주세요.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (!result) {
+    return (
+      <section className="screen">
+        <span className="badge">AI 1차 분석</span>
+        <h2>어디랑 잘 맞는지 분석해 볼게요</h2>
+        <p className="sub">확인한 학력과 경력으로 잘 맞는 직군 3개와 보완하면 좋은 점을 알려드려요. 20초쯤 걸려요.</p>
+        <label className="check consent-detail">
+          <input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} />
+          <span>
+            <b>[필수] 분석을 위한 개인정보 국외 이전 동의</b><br />
+            확인한 학력·경력(학교, 전공, 회사, 직무, 기간)과 희망 직무를 분석하려고 미국의 Anthropic(AI 서비스)에 보내요.
+            이름·연락처는 보내지 않아요.
+          </span>
+        </label>
+        <details className="consent-more">
+          <summary>자세히 보기</summary>
+          <ul>
+            <li>이전받는 자: Anthropic, PBC (미국) · privacy@anthropic.com</li>
+            <li>이전 일시·방법: 분석 보기를 누를 때, 암호화된 통신으로 전송</li>
+            <li>이전 항목: 학교·전공·입학·졸업 연도, 회사·직무·고용 형태·기간, 희망 직무</li>
+            <li>이용 목적: 잘 맞는 직군과 보완하면 좋은 점 분석</li>
+            <li>보유 기간: nextpath는 분석 결과만 회원 탈퇴 때까지 보관해요. Anthropic은 이 내용을 AI 학습에 쓰지 않고, 정해진 보관 기간이 지나면 지워요.</li>
+            <li>동의하지 않아도 돼요. 동의하지 않으면 분석 없이 결과 화면으로 가요.</li>
+            <li><a href="/privacy" target="_blank" rel="noreferrer">개인정보처리방침 전문</a></li>
+          </ul>
+        </details>
+        {err && <p className="error" role="alert">{err}</p>}
+        <button className="cta" disabled={busy || !agree} onClick={() => void runIt()}>
+          {busy ? "분석하는 중이에요… (20초쯤 걸려요)" : "1차 분석 보기"}
+        </button>
+        <button className="cta ghost" disabled={busy} onClick={onDone}>건너뛰고 결과 보기</button>
+      </section>
+    );
+  }
+  return (
+    <section className="screen">
+      <span className="badge">AI 1차 분석</span>
+      <h2>{result.summary}</h2>
+      <p className="sub">확인한 학력·경력으로 본 대략적인 방향이에요.</p>
+      <h3 className="fit-h">잘 어울리는 직군</h3>
+      <ul className="fit-list">
+        {result.fits.map((f, i) => (
+          <li key={`${i}-${f.role_name}`} className="fit-item">
+            <b>{f.role_name}</b>
+            <span className={f.level === "HIGH" ? "fit-level" : "fit-level mid"}>
+              {f.level === "HIGH" ? "잘 맞아요" : "도전해 볼 만해요"}
+            </span>
+            <p>{f.reason}</p>
+          </li>
+        ))}
+      </ul>
+      {result.company_types.length > 0 && (
+        <>
+          <h3 className="fit-h">어울리는 회사</h3>
+          <div className="chips">{result.company_types.map((c, i) => <span key={`${i}-${c}`} className="tag">{c}</span>)}</div>
+        </>
+      )}
+      {result.gaps.length > 0 && (
+        <>
+          <h3 className="fit-h">보완하면 좋은 점</h3>
+          <ol className="fit-gaps">{result.gaps.map((g, i) => <li key={`${i}-${g}`}>{g}</li>)}</ol>
+        </>
+      )}
+      <CoachingOffer userType={userType} />
+      <AlertEntry onOpen={onAlert} />
+      <button className="cta" onClick={onDone}>비슷한 경력의 사람들이 간 길 보기</button>
+    </section>
+  );
+}
+
+/** Coaching after the analysis: pick a product, leave a number (its own consent); the team calls,
+ *  and payment is arranged then. Nothing is charged here. */
+function CoachingOffer({ userType }: { userType: UserType }) {
+  const [s, setS] = useState<CoachingStatus | null>(null);
+  const [sku, setSku] = useState<string>();
+  const [phone, setPhone] = useState("");
+  const [agree, setAgree] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string>();
+  useEffect(() => { acq.coaching().then(setS).catch(() => setS(null)); }, []);
+  if (!s || !s.enabled || !s.products.length) return null;
+  const won = (n: number) => `${n.toLocaleString("ko-KR")}원`;
+  const picked = s.products.find((p) => p.sku === sku);
+  const phoneOk = /^01[016789][0-9]{7,8}$/.test(phoneDigits(phone));
+  const act = (fn: () => Promise<void>) => async () => {
+    setErr(undefined);
+    setBusy(true);
+    try {
+      await fn();
+    } catch (e) {
+      setErr(errorMessage(e) ?? "잠시 후 다시 시도해 주세요.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (s.request) {
+    const cancel = act(async () => {
+      setS(await acq.coachingCancel());
+      track("coaching_cancelled", { user_type: userType });
+    });
+    return (
+      <div className="card coach">
+        <b>{s.request.name} 신청했어요 · {won(s.request.amount_krw)}</b>
+        <p className="hint">코치가 {s.request.phone_masked}로 연락드려요. 결제는 통화 뒤에 해요. · {" "}
+          <button className="link" disabled={busy} onClick={cancel}>신청 취소하고 번호 지우기</button></p>
+        {err && <p className="error" role="alert">{err}</p>}
+      </div>
+    );
+  }
+  const submit = act(async () => {
+    if (!picked) return;
+    setS(await acq.coachingRequest(picked.sku, phone, COACHING_CONSENT_VERSION));
+    track("coaching_requested", { user_type: userType, sku: picked.sku });
+  });
+  return (
+    <div className="card coach">
+      <b>서류에서 더 잘 보이고 싶다면, 코치에게 이력서 첨삭 받기</b>
+      <p className="hint">위 보완점부터 코치가 직접 고쳐 드려요. 신청하면 코치가 연락드리고, 결제는 통화 뒤에 해요.</p>
+      <div className="chips">
+        {s.products.map((p) => (
+          <button key={p.sku} className="chip" aria-pressed={p.sku === sku} onClick={() => setSku(p.sku)}>
+            {p.name} · {won(p.amount_krw)}
+          </button>
+        ))}
+      </div>
+      {s.products.some((p) => p.sku === "COACHING_UNTIL_DEADLINE") && (
+        <p className="hint">마감까지 무제한 첨삭은 지원하는 공고 마감 전까지 횟수 제한 없이 고쳐 드려요. 마감일이 있는 공고만 돼요.</p>
+      )}
+      <Field label="연락받을 휴대전화번호">
+        <input type="tel" inputMode="numeric" autoComplete="tel" placeholder="010-1234-5678" value={phone}
+               onChange={(e) => setPhone(e.target.value)} />
+      </Field>
+      <label className="check consent-detail">
+        <input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} />
+        <span>
+          <b>[필수] 코칭 연락을 위한 개인정보 수집·이용 동의</b><br />
+          목적: 코칭 안내와 일정 연락 · 항목: 휴대전화번호 · 보유 기간: 신청한 날부터 1년 (그 전에 취소하면 바로 삭제)<br />
+          동의하지 않아도 되고, 동의하지 않으면 코칭을 신청할 수 없어요.
+        </span>
+      </label>
+      {err && <p className="error" role="alert">{err}</p>}
+      <button className="cta" disabled={busy || !picked || !phoneOk || !agree} onClick={submit}>
+        {picked ? `${picked.name} 신청하기 · ${won(picked.amount_krw)}` : "상품을 골라 주세요"}
+      </button>
+    </div>
+  );
 }
 
 /** On the result: invite again later (if skipped), or show the request and let them withdraw. */
